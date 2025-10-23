@@ -91,6 +91,12 @@ export function deleteCluster(clusterId: number): Promise<void> {
   });
 }
 
+export function testClusterConnection(clusterId: number): Promise<ClusterConfig> {
+  return request<ClusterConfig>(`/clusters/${clusterId}/test-connection`, {
+    method: "POST",
+  });
+}
+
 export function deleteInspectionRun(runId: number): Promise<void> {
   return request<void>(`/inspection-runs/${runId}`, {
     method: "DELETE",

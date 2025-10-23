@@ -256,6 +256,32 @@ async def register_cluster(
     return cluster
 
 
+@app.post(
+    "/clusters/{cluster_id}/test-connection",
+    response_model=schemas.ClusterConfigOut,
+)
+def test_cluster_connection(cluster_id: int, db: Session = Depends(get_db)):
+    cluster = crud.get_cluster(db, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="指定的集群不存在。")
+
+    kubeconfig_path = Path(cluster.kubeconfig_path)
+    if not kubeconfig_path.exists():
+        raise HTTPException(status_code=500, detail="集群 kubeconfig 文件不存在。")
+
+    status, message = _test_cluster_connection(cluster.kubeconfig_path)
+    sanitized_message = _sanitize_message(message)
+    _log_connection_status(cluster.name, status, message)
+    cluster = crud.update_cluster(
+        db,
+        cluster,
+        connection_status=status,
+        connection_message=sanitized_message,
+        last_checked_at=datetime.utcnow(),
+    )
+    return cluster
+
+
 @app.put("/clusters/{cluster_id}", response_model=schemas.ClusterConfigOut)
 async def update_cluster(
     cluster_id: int,

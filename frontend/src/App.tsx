@@ -31,6 +31,7 @@ import {
   getReportDownloadUrl,
   registerCluster,
   updateCluster,
+  testClusterConnection,
 } from "./api";
 import { appConfig } from "./config";
 import {
@@ -383,6 +384,8 @@ interface OverviewProps {
   onEditCluster: (cluster: ClusterConfig) => void;
   onDeleteCluster: (cluster: ClusterConfig) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
+  onTestClusterConnection: (clusterId: number) => Promise<void>;
+  testingClusterIds: Record<number, boolean>;
 }
 
 const OverviewView = ({
@@ -402,6 +405,8 @@ const OverviewView = ({
   onEditCluster,
   onDeleteCluster,
   clusterDisplayIds,
+  onTestClusterConnection,
+  testingClusterIds,
 }: OverviewProps) => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -580,6 +585,7 @@ const OverviewView = ({
                   cluster.id,
                   cluster
                 );
+                const isTesting = Boolean(testingClusterIds[cluster.id]);
                 return (
                   <button
                     key={cluster.id}
@@ -613,6 +619,16 @@ const OverviewView = ({
                       </div>
                     </div>
                     <div className="cluster-status-line">
+                      <button
+                        className="link-button small"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void onTestClusterConnection(cluster.id);
+                        }}
+                        disabled={isTesting}
+                      >
+                        {isTesting ? "测试中..." : "测试连接"}
+                      </button>
                       <span className={`status-chip ${statusMeta.className}`}>
                         {statusMeta.label}
                       </span>
@@ -939,6 +955,8 @@ interface ClusterDetailProps {
   onDeleteCluster: (cluster: ClusterConfig) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
+  onTestClusterConnection: (clusterId: number) => Promise<void>;
+  testingClusterIds: Record<number, boolean>;
 }
 
 const ClusterDetailView = ({
@@ -961,6 +979,8 @@ const ClusterDetailView = ({
   onDeleteCluster,
   clusterDisplayIds,
   runDisplayIds,
+  onTestClusterConnection,
+  testingClusterIds,
 }: ClusterDetailProps) => {
   const { clusterKey } = useParams<{ clusterKey?: string }>();
   const navigate = useNavigate();
@@ -1031,6 +1051,7 @@ const ClusterDetailView = ({
   }
 
   const statusMeta = getClusterStatusMeta(cluster.connection_status);
+  const isTesting = Boolean(testingClusterIds[cluster.id]);
 
   const resolvedClusterSlug =
     clusterSlug ??
@@ -1055,6 +1076,13 @@ const ClusterDetailView = ({
           返回上一页
         </button>
         <div className="detail-header-actions">
+          <button
+            className="secondary"
+            onClick={() => void onTestClusterConnection(cluster.id)}
+            disabled={isTesting}
+          >
+            {isTesting ? "测试中..." : "测试连接"}
+          </button>
           <button className="secondary" onClick={() => onEditCluster(cluster)}>
             编辑集群
           </button>
@@ -1850,6 +1878,9 @@ const App = () => {
   const [clusterDisplayIds, setClusterDisplayIds] = useState<
     Record<number, string>
   >(() => loadStoredClusterDisplayIds());
+  const [testingClusterIds, setTestingClusterIds] = useState<
+    Record<number, boolean>
+  >({});
 
   const [clusterEditState, setClusterEditState] =
     useState<ClusterConfig | null>(null);
@@ -1863,6 +1894,22 @@ const App = () => {
     () => createRunDisplayIdMap(runs, clusters),
     [runs, clusters]
   );
+
+  const setClusterTesting = useCallback((clusterId: number, value: boolean) => {
+    setTestingClusterIds((prev) => {
+      const isActive = Boolean(prev[clusterId]);
+      if (isActive === value) {
+        return prev;
+      }
+      const next = { ...prev };
+      if (value) {
+        next[clusterId] = true;
+      } else {
+        delete next[clusterId];
+      }
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     persistClusterDisplayIds(clusterDisplayIds);
@@ -1901,6 +1948,51 @@ const App = () => {
       window.clearTimeout(timeout);
     };
   }, [inspectionNotice]);
+
+  const handleTestClusterConnection = useCallback(
+    async (clusterId: number) => {
+      setClusterNotice(null);
+      setClusterNoticeType(null);
+      setClusterError(null);
+      setClusterTesting(clusterId, true);
+      try {
+        logWithTimestamp("info", "开始测试集群连接: %s", clusterId);
+        const updated = await testClusterConnection(clusterId);
+        setClusters((prev) =>
+          prev.map((item) => (item.id === updated.id ? updated : item))
+        );
+        const statusMeta = getClusterStatusMeta(updated.connection_status);
+        let noticeType: NoticeType = "success";
+        if (updated.connection_status === "warning") {
+          noticeType = "warning";
+        } else if (updated.connection_status === "failed") {
+          noticeType = "error";
+        }
+        const detailMessage = updated.connection_message
+          ? `，详情: ${updated.connection_message}`
+          : "";
+        setClusterNotice(
+          `集群(${updated.name}) ${statusMeta.label}${detailMessage}`
+        );
+        setClusterNoticeType(noticeType);
+        logWithTimestamp(
+          "info",
+          "集群连接测试完成: %s -> %s",
+          clusterId,
+          updated.connection_status
+        );
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "测试集群连接失败";
+        logWithTimestamp("error", "测试集群连接失败: %s", message);
+        setClusterNotice(message);
+        setClusterNoticeType("error");
+      } finally {
+        setClusterTesting(clusterId, false);
+      }
+    },
+    [setClusterTesting]
+  );
 
   const refreshClusters = useCallback(async () => {
     try {
@@ -2350,6 +2442,8 @@ const App = () => {
                 onEditCluster={handleEditCluster}
                 onDeleteCluster={handleDeleteCluster}
                 clusterDisplayIds={clusterDisplayIds}
+                onTestClusterConnection={handleTestClusterConnection}
+                testingClusterIds={testingClusterIds}
               />
             }
           />
@@ -2388,6 +2482,8 @@ const App = () => {
                 onDeleteCluster={handleDeleteCluster}
                 clusterDisplayIds={clusterDisplayIds}
                 runDisplayIds={runDisplayIds}
+                onTestClusterConnection={handleTestClusterConnection}
+                testingClusterIds={testingClusterIds}
               />
             }
           />
