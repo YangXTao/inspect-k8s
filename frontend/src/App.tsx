@@ -1868,6 +1868,40 @@ const App = () => {
     persistClusterDisplayIds(clusterDisplayIds);
   }, [clusterDisplayIds]);
 
+  useEffect(() => {
+    if (
+      !clusterNotice ||
+      !clusterNoticeType ||
+      clusterNoticeType === "error" ||
+      typeof window === "undefined"
+    ) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setClusterNotice(null);
+      setClusterNoticeType(null);
+    }, 5000);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [clusterNotice, clusterNoticeType]);
+
+  useEffect(() => {
+    if (!inspectionNotice || typeof window === "undefined") {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setInspectionNotice(null);
+    }, 5000);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [inspectionNotice]);
+
   const refreshClusters = useCallback(async () => {
     try {
       logWithTimestamp("info", "开始获取集群信息");
