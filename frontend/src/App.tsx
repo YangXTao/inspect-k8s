@@ -5,6 +5,7 @@ import {
   type CSSProperties,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -109,8 +110,61 @@ const getClusterStatusMeta = (status: string) =>
   clusterStatusMeta[status as keyof typeof clusterStatusMeta] ||
   clusterStatusMeta.unknown;
 
-const generateClusterDisplayId = () =>
-  `C-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+const CLUSTER_SLUG_PREFIX = "C-";
+
+const hashString = (value: string) => {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 33 + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash).toString(36).toUpperCase();
+};
+
+const createDeterministicClusterSlug = (
+  cluster: ClusterConfig,
+  current?: string | null
+) => {
+  if (current && typeof current === "string") {
+    return current;
+  }
+  const idSegment = cluster.id.toString(36).toUpperCase();
+  const hashSegment = hashString(cluster.name || `cluster-${cluster.id}`)
+    .slice(-4)
+    .padStart(4, "0");
+  return `${CLUSTER_SLUG_PREFIX}${idSegment}-${hashSegment}`;
+};
+
+const decodeClusterKeyToId = (
+  clusterKey: string,
+  displayMap: Record<number, string>,
+  clusters: ClusterConfig[]
+): number | null => {
+  const mappedEntry = Object.entries(displayMap).find(
+    ([, value]) => value === clusterKey
+  );
+  if (mappedEntry) {
+    return Number(mappedEntry[0]);
+  }
+
+  const match = /^C-([A-Z0-9]+)(?:-[A-Z0-9]+)?$/i.exec(clusterKey);
+  if (!match) {
+    return null;
+  }
+
+  const candidate = parseInt(match[1], 36);
+  if (Number.isNaN(candidate)) {
+    return null;
+  }
+
+  if (
+    displayMap[candidate] ||
+    clusters.some((cluster) => cluster.id === candidate)
+  ) {
+    return candidate;
+  }
+
+  return candidate;
+};
 
 const loadStoredClusterDisplayIds = (): Record<number, string> => {
   if (typeof window === "undefined") {
@@ -151,8 +205,11 @@ const persistClusterDisplayIds = (map: Record<number, string>) => {
 
 const getClusterDisplayId = (
   map: Record<number, string>,
-  clusterId: number
-) => map[clusterId] ?? `cluster-${clusterId}`;
+  clusterId: number,
+  cluster?: ClusterConfig
+) =>
+  map[clusterId] ??
+  (cluster ? createDeterministicClusterSlug(cluster) : `cluster-${clusterId}`);
 
 const normaliseClusterName = (name: string) =>
   name.trim().replace(/\s+/g, "-").toLowerCase() || "cluster";
@@ -210,10 +267,22 @@ const assignClusterDisplayIds = (
   const assigned: Record<number, string> = {};
 
   clusters.forEach((cluster) => {
-    let displayId = current[cluster.id];
-    if (!displayId) {
+    let displayId = createDeterministicClusterSlug(
+      cluster,
+      current[cluster.id]
+    );
+    if (used.has(displayId)) {
+      let counter = 1;
       do {
-        displayId = generateClusterDisplayId();
+        const saltedName = `${cluster.name}-${counter}`;
+        displayId = createDeterministicClusterSlug(
+          {
+            ...cluster,
+            name: saltedName,
+          },
+          null
+        );
+        counter += 1;
       } while (used.has(displayId));
     }
     assigned[cluster.id] = displayId;
@@ -451,16 +520,16 @@ const OverviewView = ({
         </div>
         <div className="header-actions">
           <div className="cluster-upload">
-            <label>上传 kubeconfig</label>
+            <label>添加集群</label>
             <input
               type="text"
-              placeholder="自定义集群名称(可选)"
+              placeholder="自定义集群名称"
               value={clusterNameInput}
               onChange={(event) => setClusterNameInput(event.target.value)}
             />
             <input
               type="text"
-              placeholder="Prometheus 地址(可选)"
+              placeholder="Prometheus 地址"
               value={clusterPromInput}
               onChange={(event) => setClusterPromInput(event.target.value)}
             />
@@ -508,7 +577,8 @@ const OverviewView = ({
                 );
                 const displayId = getClusterDisplayId(
                   clusterDisplayIds,
-                  cluster.id
+                  cluster.id,
+                  cluster
                 );
                 return (
                   <button
@@ -620,6 +690,11 @@ interface KubeconfigModalProps {
   text: string;
   fileName: string | null;
   hasManualContent: boolean;
+  title?: string;
+  description?: string;
+  confirmLabel?: string;
+  fileButtonLabel?: string;
+  fileInputId?: string;
   onClose: () => void;
   onFileSelected: (file: File) => void;
   onTextChange: (value: string) => void;
@@ -631,13 +706,25 @@ const KubeconfigModal = ({
   text,
   fileName,
   hasManualContent,
+  title,
+  description,
+  confirmLabel,
+  fileButtonLabel,
+  fileInputId,
   onClose,
   onFileSelected,
   onTextChange,
   onClear,
 }: KubeconfigModalProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const fileInputId = "kubeconfig-file-input";
+  const generatedId = useId();
+  const resolvedFileInputId = fileInputId ?? `${generatedId}-file`;
+
+  const modalTitle = title ?? "导入 kubeconfig";
+  const modalDescription =
+    description ?? "上传文件或粘贴 YAML 内容，提交集群时将一并上传。";
+  const modalConfirmLabel = confirmLabel ?? "完成";
+  const modalFileButtonLabel = fileButtonLabel ?? "上传文件";
 
   if (!open) {
     return null;
@@ -669,15 +756,18 @@ const KubeconfigModal = ({
     <div className="modal-backdrop" role="dialog" aria-modal="true">
       <div className="modal kubeconfig-modal">
         <div className="kubeconfig-modal-header">
-          <h3>导入 kubeconfig</h3>
-          <p>上传文件或粘贴 YAML 内容，提交集群时将一并上传。</p>
+          <h3>{modalTitle}</h3>
+          <p>{modalDescription}</p>
         </div>
         <div className="kubeconfig-modal-upload">
-          <label htmlFor={fileInputId} className="kubeconfig-file-trigger">
-            上传文件
+          <label
+            htmlFor={resolvedFileInputId}
+            className="kubeconfig-file-trigger"
+          >
+            {modalFileButtonLabel}
           </label>
           <input
-            id={fileInputId}
+            id={resolvedFileInputId}
             ref={fileInputRef}
             type="file"
             accept=".yaml,.yml,.json"
@@ -722,7 +812,7 @@ const KubeconfigModal = ({
             取消
           </button>
           <button type="button" className="primary" onClick={onClose}>
-            完成
+            {modalConfirmLabel}
           </button>
         </div>
       </div>
@@ -876,35 +966,52 @@ const ClusterDetailView = ({
   const navigate = useNavigate();
 
   const numericId = useMemo(() => {
-    if (!clusterKey) return Number.NaN;
-    const direct = Number(clusterKey);
-    if (!Number.isNaN(direct) && clusters.some((item) => item.id === direct)) {
-      return direct;
+    if (!clusterKey) {
+      return Number.NaN;
     }
-    const match = Object.entries(clusterDisplayIds).find(
-      ([, display]) => display === clusterKey
+    const decoded = decodeClusterKeyToId(
+      clusterKey,
+      clusterDisplayIds,
+      clusters
     );
-    return match ? Number(match[0]) : Number.NaN;
-  }, [clusterKey, clusters, clusterDisplayIds]);
+    return decoded ?? Number.NaN;
+  }, [clusterKey, clusterDisplayIds, clusters]);
 
   useEffect(() => {
     setSelectedIds(() => []);
   }, [numericId, setSelectedIds]);
 
-  if (Number.isNaN(numericId)) {
-    if (clusters.length === 0 && Object.keys(clusterDisplayIds).length === 0) {
-      return (
-        <div className="detail-empty">
-          <p>集群信息加载中...</p>
-          <button className="secondary" onClick={() => navigate("/")}>
-            返回集群列表
-          </button>
-        </div>
-      );
+  const isNumericInvalid = Number.isNaN(numericId);
+
+  const cluster = useMemo(() => {
+    if (Number.isNaN(numericId)) {
+      return null;
     }
+    return clusters.find((item) => item.id === numericId) ?? null;
+  }, [clusters, numericId]);
+
+  const clusterSlug = useMemo(() => {
+    if (Number.isNaN(numericId)) {
+      return null;
+    }
+    return getClusterDisplayId(
+      clusterDisplayIds,
+      numericId,
+      cluster ?? undefined
+    );
+  }, [clusterDisplayIds, cluster, numericId]);
+
+  const clusterRuns = useMemo(() => {
+    if (!cluster) {
+      return [];
+    }
+    return runs.filter((run) => run.cluster_id === cluster.id);
+  }, [runs, cluster]);
+
+  if (isNumericInvalid) {
     return (
       <div className="detail-empty">
-        <p>集群编号无效。</p>
+        <p>集群信息加载中...</p>
         <button className="secondary" onClick={() => navigate("/")}>
           返回集群列表
         </button>
@@ -912,7 +1019,6 @@ const ClusterDetailView = ({
     );
   }
 
-  const cluster = clusters.find((item) => item.id === numericId);
   if (!cluster) {
     return (
       <div className="detail-empty">
@@ -924,12 +1030,11 @@ const ClusterDetailView = ({
     );
   }
 
-  const clusterSlug = getClusterDisplayId(clusterDisplayIds, cluster.id);
   const statusMeta = getClusterStatusMeta(cluster.connection_status);
-  const clusterRuns = useMemo(
-    () => runs.filter((run) => run.cluster_id === cluster.id),
-    [runs, cluster.id]
-  );
+
+  const resolvedClusterSlug =
+    clusterSlug ??
+    getClusterDisplayId(clusterDisplayIds, cluster.id, cluster);
 
   const handleToggleItem = (id: number) => {
     setSelectedIds((prev) =>
@@ -979,7 +1084,7 @@ const ClusterDetailView = ({
             </div>
             <div>
               <strong>集群编号: </strong>
-              {clusterSlug}
+              {resolvedClusterSlug}
             </div>
             <div>
               <strong>连接状态: </strong>
@@ -1101,7 +1206,9 @@ const ClusterDetailView = ({
                       <button
                         className="link-button"
                         onClick={() =>
-                          navigate(`/clusters/${clusterSlug}/runs/${runSlug}`)
+                          navigate(
+                            `/clusters/${resolvedClusterSlug}/runs/${runSlug}`
+                          )
                         }
                       >
                         查看详情
@@ -1154,16 +1261,16 @@ const RunDetailView = ({
   const navigate = useNavigate();
 
   const numericClusterId = useMemo(() => {
-    if (!clusterKey) return Number.NaN;
-    const direct = Number(clusterKey);
-    if (!Number.isNaN(direct) && clusters.some((item) => item.id === direct)) {
-      return direct;
+    if (!clusterKey) {
+      return Number.NaN;
     }
-    const match = Object.entries(clusterDisplayIds).find(
-      ([, display]) => display === clusterKey
+    const decoded = decodeClusterKeyToId(
+      clusterKey,
+      clusterDisplayIds,
+      clusters
     );
-    return match ? Number(match[0]) : Number.NaN;
-  }, [clusterKey, clusters, clusterDisplayIds]);
+    return decoded ?? Number.NaN;
+  }, [clusterKey, clusterDisplayIds, clusters]);
 
   const numericRunId = useMemo(() => {
     if (!runKey) return Number.NaN;
@@ -1181,64 +1288,35 @@ const RunDetailView = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const cluster = useMemo(
-    () =>
+  const cluster = useMemo(() => {
+    if (Number.isNaN(numericClusterId)) {
+      return null;
+    }
+    return (
       clusters.find(
         (item) => item.id === (run?.cluster_id ?? numericClusterId)
-      ),
-    [clusters, run, numericClusterId]
-  );
-
-  const clusterPath = cluster
-    ? `/clusters/${getClusterDisplayId(clusterDisplayIds, cluster.id)}`
-    : "/";
-
-  if (Number.isNaN(numericClusterId)) {
-    if (clusters.length === 0 && Object.keys(clusterDisplayIds).length === 0) {
-      return (
-        <div className="detail-empty">
-          <p>集群信息加载中...</p>
-          <button className="secondary" onClick={() => navigate("/")}>
-            返回集群列表
-          </button>
-        </div>
-      );
-    }
-    return (
-      <div className="detail-empty">
-        <p>集群编号无效。</p>
-        <button className="secondary" onClick={() => navigate("/")}>
-          返回集群列表
-        </button>
-      </div>
+      ) ?? null
     );
-  }
+  }, [clusters, run, numericClusterId]);
 
-  if (Number.isNaN(numericRunId)) {
-    if (Object.keys(runDisplayIds).length === 0) {
-      return (
-        <div className="detail-empty">
-          <p>巡检信息加载中...</p>
-          <button className="secondary" onClick={() => navigate(clusterPath)}>
-            返回上一页
-          </button>
-        </div>
-      );
+  const clusterSlug = useMemo(() => {
+    if (Number.isNaN(numericClusterId) || !cluster) {
+      return null;
     }
-    return (
-      <div className="detail-empty">
-        <p>巡检编号无效。</p>
-        <button className="secondary" onClick={() => navigate(clusterPath)}>
-          返回上一页
-        </button>
-      </div>
-    );
-  }
+    return getClusterDisplayId(clusterDisplayIds, numericClusterId, cluster);
+  }, [clusterDisplayIds, cluster, numericClusterId]);
+  const clusterPath =
+    clusterSlug ?? (clusterKey ? `/clusters/${clusterKey}` : "/");
+
+  const isClusterIdInvalid = Number.isNaN(numericClusterId);
+  const isRunIdInvalid = Number.isNaN(numericRunId);
 
   useEffect(() => {
-    if (Number.isNaN(numericRunId)) {
+    if (isRunIdInvalid) {
+      setRun(null);
+      setLoading(false);
       setError("巡检编号无效");
-      logWithTimestamp("error", "巡检编号无效: %s", runKey);
+      logWithTimestamp("error", "巡检编号无效: %s", runKey ?? "");
       return;
     }
     setLoading(true);
@@ -1264,7 +1342,11 @@ const RunDetailView = ({
         setError(message);
       })
       .finally(() => setLoading(false));
-  }, [numericRunId, runDisplayIds, runKey]);
+  }, [numericRunId, runDisplayIds, runKey, isRunIdInvalid]);
+
+  const resolvedClusterSlug =
+    clusterSlug ??
+    (cluster ? getClusterDisplayId(clusterDisplayIds, cluster.id, cluster) : "");
 
   const fallbackRunDisplayId = run
     ? `${normaliseClusterName(run.cluster_name || cluster?.name || "run")}-${String(
@@ -1284,6 +1366,49 @@ const RunDetailView = ({
       window.open(url, "_blank", "noopener,noreferrer");
     }
   }, [run]);
+
+  if (isClusterIdInvalid) {
+    return (
+      <div className="detail-empty">
+        <p>集群信息加载中...</p>
+        <button className="secondary" onClick={() => navigate("/")}>
+          返回集群列表
+        </button>
+      </div>
+    );
+  }
+
+  if (isRunIdInvalid) {
+    return (
+      <div className="detail-empty">
+        <p>巡检信息加载中...</p>
+        <button className="secondary" onClick={() => navigate(clusterPath)}>
+          返回上一页
+        </button>
+      </div>
+    );
+  }
+
+  if (!cluster) {
+    if (clusters.length === 0) {
+      return (
+        <div className="detail-empty">
+          <p>集群信息加载中...</p>
+          <button className="secondary" onClick={() => navigate("/")}>
+            返回集群列表
+          </button>
+        </div>
+      );
+    }
+    return (
+      <div className="detail-empty">
+        <p>未找到集群。</p>
+        <button className="secondary" onClick={() => navigate("/")}>
+          返回集群列表
+        </button>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -1329,12 +1454,7 @@ const RunDetailView = ({
                 </div>
                 <div>
                   <strong>所属集群: </strong>
-                  {cluster
-                    ? `${cluster.name}(${getClusterDisplayId(
-                        clusterDisplayIds,
-                        cluster.id
-                      )})`
-                    : "-"}
+                  {`${cluster.name}(${resolvedClusterSlug})`}
                 </div>
                 <div>
                   <strong>巡检人: </strong>
@@ -1490,30 +1610,134 @@ const ClusterEditModal = ({
   const [prometheusUrl, setPrometheusUrl] = useState(
     cluster.prometheus_url ?? ""
   );
-  const [file, setFile] = useState<File | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [kubeconfigModalOpen, setKubeconfigModalOpen] = useState(false);
+  const [kubeconfigText, setKubeconfigText] = useState("");
+  const [kubeconfigFile, setKubeconfigFile] = useState<File | null>(null);
+  const [kubeconfigFileName, setKubeconfigFileName] = useState<string | null>(
+    null
+  );
+  const [kubeconfigEdited, setKubeconfigEdited] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
 
   useEffect(() => {
     setName(cluster.name);
     setPrometheusUrl(cluster.prometheus_url ?? "");
-    setFile(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
+    setKubeconfigModalOpen(false);
+    setKubeconfigText("");
+    setKubeconfigFile(null);
+    setKubeconfigFileName(null);
+    setKubeconfigEdited(false);
+    setFileError(null);
   }, [cluster]);
 
   const nameInputId = `cluster-edit-name-${cluster.id}`;
   const promInputId = `cluster-edit-prom-${cluster.id}`;
-  const fileInputId = `cluster-edit-file-${cluster.id}`;
+  const modalFileInputId = `cluster-edit-file-${cluster.id}`;
 
-  const handleFileChange = (event: FormEvent<HTMLInputElement>) => {
-    const target = event.currentTarget;
-    setFile(target.files?.[0] ?? null);
+  const hasManualKubeconfig = useMemo(
+    () => kubeconfigEdited && kubeconfigText.trim().length > 0,
+    [kubeconfigEdited, kubeconfigText]
+  );
+
+  const kubeconfigReady = useMemo(
+    () =>
+      hasManualKubeconfig ||
+      (!!kubeconfigFile && !kubeconfigEdited),
+    [hasManualKubeconfig, kubeconfigEdited, kubeconfigFile]
+  );
+
+  const kubeconfigSummary = useMemo(() => {
+    if (!kubeconfigReady) {
+      return null;
+    }
+    if (hasManualKubeconfig) {
+      return kubeconfigFileName
+        ? `已基于 ${kubeconfigFileName} 进行编辑`
+        : "已粘贴 kubeconfig 内容";
+    }
+    if (kubeconfigFile) {
+      return `已选择文件: ${kubeconfigFile.name}`;
+    }
+    return "已导入 kubeconfig 内容";
+  }, [
+    hasManualKubeconfig,
+    kubeconfigReady,
+    kubeconfigFileName,
+    kubeconfigFile,
+  ]);
+
+  const handleOpenModal = () => {
+    setKubeconfigModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setKubeconfigModalOpen(false);
+  };
+
+  const handleFileSelected = (file: File) => {
+    setKubeconfigFile(file);
+    setKubeconfigFileName(file.name);
+    setKubeconfigEdited(false);
+    setFileError(null);
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setKubeconfigText(reader.result);
+      } else {
+        setKubeconfigText("");
+      }
+    };
+    reader.onerror = () => {
+      setFileError("读取 kubeconfig 文件失败，请重试");
+      setKubeconfigFile(null);
+      setKubeconfigFileName(null);
+      setKubeconfigText("");
+      setKubeconfigEdited(false);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleTextChange = (value: string) => {
+    setKubeconfigText(value);
+    setFileError(null);
+    if (value.trim().length === 0) {
+      setKubeconfigEdited(false);
+      setKubeconfigFile(null);
+      setKubeconfigFileName(null);
+    } else {
+      setKubeconfigEdited(true);
+    }
+  };
+
+  const handleClear = () => {
+    setKubeconfigText("");
+    setKubeconfigFile(null);
+    setKubeconfigFileName(null);
+    setKubeconfigEdited(false);
+    setFileError(null);
+  };
+
+  const resolveFileToUpload = () => {
+    const hasText = kubeconfigText.trim().length > 0;
+    if (!kubeconfigEdited && kubeconfigFile) {
+      return kubeconfigFile;
+    }
+    if (hasText) {
+      const filename =
+        (kubeconfigFileName && kubeconfigFileName.trim()) ||
+        "kubeconfig.yaml";
+      return new File([kubeconfigText], filename, {
+        type: "application/x-yaml",
+      });
+    }
+    return null;
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await onSubmit({ name, prometheusUrl, file });
+    const fileForSubmit = resolveFileToUpload();
+    await onSubmit({ name, prometheusUrl, file: fileForSubmit });
   };
 
   return (
@@ -1532,7 +1756,7 @@ const ClusterEditModal = ({
           />
         </div>
         <div className="modal-field">
-          <label htmlFor={promInputId}>Prometheus 地址(可选)</label>
+          <label htmlFor={promInputId}>Prometheus 地址</label>
           <input
             id={promInputId}
             type="text"
@@ -1542,21 +1766,22 @@ const ClusterEditModal = ({
           />
         </div>
         <div className="modal-field">
-          <label htmlFor={fileInputId}>重新上传 kubeconfig(可选)</label>
-          <input
-            id={fileInputId}
-            ref={fileInputRef}
-            type="file"
-            accept=".yaml,.yml,.json"
-            onChange={handleFileChange}
+          <span className="modal-field-label">重新上传 kubeconfig(可选)</span>
+          <button
+            type="button"
+            className={`cluster-upload-trigger${
+              kubeconfigReady ? " ready" : ""
+            }`}
+            onClick={handleOpenModal}
             disabled={submitting}
-          />
-        </div>
-        {file && (
-          <div className="modal-file-name">
-            将上传: <strong>{file.name}</strong>
+          >
+            {kubeconfigReady ? "查看 / 更新 kubeconfig" : "导入 kubeconfig"}
+          </button>
+          <div className="modal-kubeconfig-summary">
+            {kubeconfigSummary ?? "支持上传文件或粘贴 YAML 内容"}
           </div>
-        )}
+        </div>
+        {fileError && <div className="feedback error">{fileError}</div>}
         {error && <div className="feedback error">{error}</div>}
         <div className="modal-actions">
           <button
@@ -1572,6 +1797,21 @@ const ClusterEditModal = ({
           </button>
         </div>
       </form>
+      <KubeconfigModal
+        open={kubeconfigModalOpen}
+        text={kubeconfigText}
+        fileName={kubeconfigFileName}
+        hasManualContent={hasManualKubeconfig}
+        title="更新 kubeconfig"
+        description="重新上传文件或粘贴最新的 kubeconfig 内容。"
+        confirmLabel="完成"
+        fileButtonLabel="选择文件"
+        fileInputId={modalFileInputId}
+        onClose={handleCloseModal}
+        onFileSelected={handleFileSelected}
+        onTextChange={handleTextChange}
+        onClear={handleClear}
+      />
     </div>
   );
 };
