@@ -1,4 +1,5 @@
 import {
+  ChangeEvent,
   FormEvent,
   type RefObject,
   type CSSProperties,
@@ -306,7 +307,9 @@ interface OverviewProps {
   clusterPromInput: string;
   setClusterNameInput: (value: string) => void;
   setClusterPromInput: (value: string) => void;
-  clusterFileRef: RefObject<HTMLInputElement>;
+  openKubeconfigModal: () => void;
+  kubeconfigSummary: string | null;
+  kubeconfigReady: boolean;
   onUpload: () => Promise<void>;
   onEditCluster: (cluster: ClusterConfig) => void;
   onDeleteCluster: (cluster: ClusterConfig) => Promise<void>;
@@ -323,7 +326,9 @@ const OverviewView = ({
   clusterPromInput,
   setClusterNameInput,
   setClusterPromInput,
-  clusterFileRef,
+  openKubeconfigModal,
+  kubeconfigSummary,
+  kubeconfigReady,
   onUpload,
   onEditCluster,
   onDeleteCluster,
@@ -459,7 +464,18 @@ const OverviewView = ({
               value={clusterPromInput}
               onChange={(event) => setClusterPromInput(event.target.value)}
             />
-            <input ref={clusterFileRef} type="file" accept=".yaml,.yml,.json" />
+            <button
+              type="button"
+              className={`cluster-upload-trigger${
+                kubeconfigReady ? " ready" : ""
+              }`}
+              onClick={openKubeconfigModal}
+            >
+              {kubeconfigReady ? "查看 / 更新 kubeconfig" : "导入 kubeconfig"}
+            </button>
+            <div className="cluster-upload-hint">
+              {kubeconfigSummary ?? "支持上传文件或粘贴 YAML 内容"}
+            </div>
             <button
               className="secondary"
               onClick={() => void onUpload()}
@@ -596,6 +612,121 @@ const OverviewView = ({
         )}
       </section>
     </>
+  );
+};
+
+interface KubeconfigModalProps {
+  open: boolean;
+  text: string;
+  fileName: string | null;
+  hasManualContent: boolean;
+  onClose: () => void;
+  onFileSelected: (file: File) => void;
+  onTextChange: (value: string) => void;
+  onClear: () => void;
+}
+
+const KubeconfigModal = ({
+  open,
+  text,
+  fileName,
+  hasManualContent,
+  onClose,
+  onFileSelected,
+  onTextChange,
+  onClear,
+}: KubeconfigModalProps) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputId = "kubeconfig-file-input";
+
+  if (!open) {
+    return null;
+  }
+
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    if (!file) {
+      return;
+    }
+    onFileSelected(file);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const handleTextareaChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    onTextChange(event.currentTarget.value);
+  };
+
+  const handleClear = () => {
+    onClear();
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <div className="modal kubeconfig-modal">
+        <div className="kubeconfig-modal-header">
+          <h3>导入 kubeconfig</h3>
+          <p>上传文件或粘贴 YAML 内容，提交集群时将一并上传。</p>
+        </div>
+        <div className="kubeconfig-modal-upload">
+          <label htmlFor={fileInputId} className="kubeconfig-file-trigger">
+            上传文件
+          </label>
+          <input
+            id={fileInputId}
+            ref={fileInputRef}
+            type="file"
+            accept=".yaml,.yml,.json"
+            onChange={handleFileChange}
+            hidden
+          />
+          <div className="kubeconfig-file-summary">
+            {fileName ? (
+              hasManualContent ? (
+                <>
+                  已基于 <strong>{fileName}</strong> 进行编辑
+                </>
+              ) : (
+                <>
+                  已选择文件: <strong>{fileName}</strong>
+                </>
+              )
+            ) : (
+              "支持 .yaml/.yml/.json 文件"
+            )}
+          </div>
+          <button
+            type="button"
+            className="link-button small"
+            onClick={handleClear}
+          >
+            清空内容
+          </button>
+        </div>
+        <label className="kubeconfig-textarea-label">
+          kubeconfig 内容
+          <textarea
+            className="kubeconfig-textarea"
+            value={text}
+            onChange={handleTextareaChange}
+            placeholder="在此粘贴或编辑 kubeconfig YAML 内容"
+            rows={14}
+          />
+        </label>
+        <div className="modal-actions">
+          <button type="button" className="secondary" onClick={onClose}>
+            取消
+          </button>
+          <button type="button" className="primary" onClick={onClose}>
+            完成
+          </button>
+        </div>
+      </div>
+    </div>
   );
 };
 
@@ -1457,7 +1588,13 @@ const App = () => {
   const [clusterUploading, setClusterUploading] = useState(false);
   const [clusterNameInput, setClusterNameInput] = useState("");
   const [clusterPromInput, setClusterPromInput] = useState("");
-  const clusterFileRef = useRef<HTMLInputElement>(null);
+  const [kubeconfigModalOpen, setKubeconfigModalOpen] = useState(false);
+  const [kubeconfigText, setKubeconfigText] = useState("");
+  const [kubeconfigFile, setKubeconfigFile] = useState<File | null>(null);
+  const [kubeconfigFileName, setKubeconfigFileName] = useState<string | null>(
+    null
+  );
+  const [kubeconfigEdited, setKubeconfigEdited] = useState(false);
 
   const [inspectionNotice, setInspectionNotice] = useState<string | null>(null);
   const [inspectionError, setInspectionError] = useState<string | null>(null);
@@ -1549,21 +1686,87 @@ const App = () => {
   const resetClusterUploadForm = () => {
     setClusterNameInput("");
     setClusterPromInput("");
-    if (clusterFileRef.current) {
-      clusterFileRef.current.value = "";
-    }
+    setKubeconfigText("");
+    setKubeconfigFile(null);
+    setKubeconfigFileName(null);
+    setKubeconfigEdited(false);
+    setKubeconfigModalOpen(false);
   };
 
+  const handleOpenKubeconfigModal = useCallback(() => {
+    setKubeconfigModalOpen(true);
+  }, []);
+
+  const handleCloseKubeconfigModal = useCallback(() => {
+    setKubeconfigModalOpen(false);
+  }, []);
+
+  const handleKubeconfigFileSelected = useCallback((file: File) => {
+    setKubeconfigFile(file);
+    setKubeconfigFileName(file.name);
+    setKubeconfigEdited(false);
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setKubeconfigText(reader.result);
+        setClusterError(null);
+      } else {
+        setKubeconfigText("");
+      }
+    };
+    reader.onerror = () => {
+      setClusterError("读取 kubeconfig 文件失败，请重试");
+      setKubeconfigFile(null);
+      setKubeconfigFileName(null);
+      setKubeconfigText("");
+      setKubeconfigEdited(false);
+    };
+    reader.readAsText(file);
+  }, []);
+
+  const handleKubeconfigTextChange = useCallback((value: string) => {
+    setKubeconfigText(value);
+    if (value.trim().length === 0) {
+      setKubeconfigEdited(false);
+      setKubeconfigFile(null);
+      setKubeconfigFileName(null);
+    } else {
+      setKubeconfigEdited(true);
+    }
+    setClusterError(null);
+  }, []);
+
+  const handleKubeconfigClear = useCallback(() => {
+    setKubeconfigText("");
+    setKubeconfigFile(null);
+    setKubeconfigFileName(null);
+    setKubeconfigEdited(false);
+  }, []);
+
   const handleUploadCluster = useCallback(async () => {
-    const file =
-      clusterFileRef.current?.files && clusterFileRef.current.files[0];
-    if (!file) {
-      setClusterError("请选择要上传的 kubeconfig 文件");
+    const hasText = kubeconfigText.trim().length > 0;
+    let fileToUpload: File | null = null;
+
+    if (!kubeconfigEdited && kubeconfigFile) {
+      fileToUpload = kubeconfigFile;
+    } else if (hasText) {
+      const filename =
+        (kubeconfigFileName && kubeconfigFileName.trim()) ||
+        "kubeconfig.yaml";
+      fileToUpload = new File([kubeconfigText], filename, {
+        type: "application/x-yaml",
+      });
+    }
+
+    if (!fileToUpload) {
+      setClusterError("请先导入或粘贴 kubeconfig 内容");
+      setKubeconfigModalOpen(true);
       return;
     }
 
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", fileToUpload);
     if (clusterNameInput.trim()) {
       formData.append("name", clusterNameInput.trim());
     }
@@ -1577,7 +1780,11 @@ const App = () => {
     setClusterNoticeType(null);
 
     try {
-      logWithTimestamp("info", "上传集群: %s", clusterNameInput || file.name);
+      logWithTimestamp(
+        "info",
+        "上传集群: %s",
+        clusterNameInput || fileToUpload.name
+      );
       await registerCluster(formData);
       resetClusterUploadForm();
       await refreshClusters();
@@ -1593,7 +1800,48 @@ const App = () => {
     } finally {
       setClusterUploading(false);
     }
-  }, [clusterNameInput, clusterPromInput, refreshClusters, refreshRuns]);
+  }, [
+    clusterNameInput,
+    clusterPromInput,
+    kubeconfigEdited,
+    kubeconfigFile,
+    kubeconfigFileName,
+    kubeconfigText,
+    refreshClusters,
+    refreshRuns,
+  ]);
+
+  const hasManualKubeconfig = useMemo(
+    () => kubeconfigEdited && kubeconfigText.trim().length > 0,
+    [kubeconfigEdited, kubeconfigText]
+  );
+
+  const kubeconfigReady = useMemo(
+    () =>
+      hasManualKubeconfig ||
+      (!!kubeconfigFile && !kubeconfigEdited),
+    [hasManualKubeconfig, kubeconfigEdited, kubeconfigFile]
+  );
+
+  const kubeconfigSummary = useMemo(() => {
+    if (!kubeconfigReady) {
+      return null;
+    }
+    if (hasManualKubeconfig) {
+      return kubeconfigFileName
+        ? `已基于 ${kubeconfigFileName} 进行编辑`
+        : "已粘贴 kubeconfig 内容";
+    }
+    if (kubeconfigFile) {
+      return `已选择文件: ${kubeconfigFile.name}`;
+    }
+    return "已导入 kubeconfig 内容";
+  }, [
+    hasManualKubeconfig,
+    kubeconfigReady,
+    kubeconfigFileName,
+    kubeconfigFile,
+  ]);
 
   const setSelectedItemIds = useCallback(
     (updater: (prev: number[]) => number[]) => {
@@ -1821,7 +2069,9 @@ const App = () => {
                 clusterPromInput={clusterPromInput}
                 setClusterNameInput={setClusterNameInput}
                 setClusterPromInput={setClusterPromInput}
-                clusterFileRef={clusterFileRef}
+                openKubeconfigModal={handleOpenKubeconfigModal}
+                kubeconfigSummary={kubeconfigSummary}
+                kubeconfigReady={kubeconfigReady}
                 onUpload={handleUploadCluster}
                 onEditCluster={handleEditCluster}
                 onDeleteCluster={handleDeleteCluster}
@@ -1881,6 +2131,17 @@ const App = () => {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
+
+      <KubeconfigModal
+        open={kubeconfigModalOpen}
+        text={kubeconfigText}
+        fileName={kubeconfigFileName}
+        hasManualContent={hasManualKubeconfig}
+        onClose={handleCloseKubeconfigModal}
+        onFileSelected={handleKubeconfigFileSelected}
+        onTextChange={handleKubeconfigTextChange}
+        onClear={handleKubeconfigClear}
+      />
 
       <ConfirmationModal
         state={confirmState}

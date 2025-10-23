@@ -212,12 +212,40 @@ body {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
 }
 
-.cluster-upload input[type="file"] {
-  font-size: 13px;
-  color: #0f172a;
-  background: rgba(255, 255, 255, 0.85);
+.cluster-upload-trigger {
   border-radius: 10px;
-  padding: 6px 8px;
+  border: none;
+  padding: 10px 14px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.1);
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.cluster-upload-trigger:hover {
+  background: rgba(37, 99, 235, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.4);
+}
+
+.cluster-upload-trigger.ready {
+  background: #2563eb;
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2),
+    0 10px 24px rgba(37, 99, 235, 0.35);
+}
+
+.cluster-upload-trigger.ready:hover {
+  background: #1d4ed8;
+}
+
+.cluster-upload-hint {
+  font-size: 12px;
+  color: #475569;
+  padding-left: 2px;
 }
 
 .main-content {
@@ -727,6 +755,93 @@ th {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+}
+
+.kubeconfig-modal {
+  max-width: 640px;
+}
+
+.kubeconfig-modal-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kubeconfig-modal-header p {
+  margin: 0;
+  font-size: 13px;
+  color: #475569;
+}
+
+.kubeconfig-modal-upload {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.kubeconfig-file-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.35);
+  transition: background 0.2s ease;
+  user-select: none;
+}
+
+.kubeconfig-file-trigger:hover {
+  background: #1d4ed8;
+}
+
+.kubeconfig-file-summary {
+  font-size: 13px;
+  color: #1e293b;
+  flex: 1 1 220px;
+}
+
+.kubeconfig-file-summary strong {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.kubeconfig-modal-upload .link-button {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.kubeconfig-textarea-label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.kubeconfig-textarea {
+  border-radius: 12px;
+  border: 1px solid #cbd5f5;
+  padding: 12px;
+  font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+  font-size: 13px;
+  min-height: 240px;
+  resize: vertical;
+  line-height: 1.5;
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+.kubeconfig-textarea:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+  background: #fff;
 }
 
 
