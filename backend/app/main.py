@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import logging
@@ -7,12 +7,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 from uuid import uuid4
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 import yaml
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+import urllib3
 
 try:
     from kubernetes import client as k8s_client
@@ -32,6 +34,10 @@ from .prometheus import PrometheusClient
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="K8s Inspection Service", version="0.3.0")
+
+CONNECTION_TEST_TIMEOUT_SECONDS = 8.0
+CONNECTION_TEST_CONNECT_TIMEOUT = 3.0
+CONNECTION_TEST_READ_TIMEOUT = 5.0
 
 app.add_middleware(
     CORSMiddleware,
@@ -139,25 +145,53 @@ def _test_cluster_connection(kubeconfig_path: str) -> tuple[str, str]:
     if not k8s_config or not k8s_client:
         return (
             "warning",
-            "后端未安装 kubernetes Python 客户端，跳过连通性校验。",
+            "\u540e\u7aef\u672a\u5b89\u88c5 kubernetes Python \u5ba2\u6237\u7aef\uff0c\u8df3\u8f6c\u8fde\u901a\u6027\u6821\u9a8c\u3002",
         )
 
-    try:
+    def _perform_check() -> tuple[str, str]:
         api_client = k8s_config.new_client_from_config(config_file=kubeconfig_path)
+        rest_client = getattr(api_client, "rest_client", None)
+        pool_manager = getattr(rest_client, "pool_manager", None)
+        if pool_manager and hasattr(pool_manager, "connection_pool_kw"):
+            pool_manager.connection_pool_kw["timeout"] = urllib3.Timeout(
+                connect=CONNECTION_TEST_CONNECT_TIMEOUT,
+                read=CONNECTION_TEST_READ_TIMEOUT,
+            )
+
         version_api = k8s_client.VersionApi(api_client)
-        version_info = version_api.get_code()
+        version_info = version_api.get_code(
+            _request_timeout=CONNECTION_TEST_READ_TIMEOUT
+        )
         git_version = (version_info.git_version or "").strip()
         if not git_version:
             git_version = f"{version_info.major}.{version_info.minor}".strip()
 
         core_api = k8s_client.CoreV1Api(api_client)
-        nodes = core_api.list_node(_request_timeout=5)
+        nodes = core_api.list_node(
+            _request_timeout=CONNECTION_TEST_READ_TIMEOUT,
+            _preload_content=True,
+        )
         node_count = len(nodes.items)
         detail = f"Server version {git_version}; nodes {node_count}."
         return "connected", detail
-    except ApiException as exc:
-        reason = exc.reason or exc.body or str(exc)
-        return "failed", f"Kubernetes API error: {reason}"
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_perform_check)
+        try:
+            return future.result(timeout=CONNECTION_TEST_TIMEOUT_SECONDS)
+        except FuturesTimeoutError:
+            return (
+                "failed",
+                f"\u8fde\u63a5\u6821\u9a8c\u8d85\u65f6(>{CONNECTION_TEST_TIMEOUT_SECONDS}\u79d2)\uff0c\u8bf7\u68c0\u67e5\u7f51\u7edc\u8fde\u901a\u6027\u6216\u76ee\u6807\u5730\u5740\u3002",
+            )
+        except ApiException as exc:
+            reason = exc.reason or exc.body or str(exc)
+            return "failed", f"Kubernetes API error: {reason}"
+        except Exception as exc:  # pragma: no cover
+            return "failed", f"Cluster validation error: {exc}"
+
+    try:
+        return _perform_check()
     except Exception as exc:  # pragma: no cover
         return "failed", f"Cluster validation error: {exc}"
 
@@ -603,3 +637,6 @@ def download_report(run_id: int, db: Session = Depends(get_db)):
         media_type="application/pdf",
         filename=path.name,
     )
+
+
+

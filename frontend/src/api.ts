@@ -8,7 +8,15 @@ import {
 
 const API_BASE = appConfig.apiBaseUrl.replace(/\/$/, "");
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+interface RequestOptions {
+  timeoutMs?: number;
+}
+
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  options?: RequestOptions
+): Promise<T> {
   const isFormData = init?.body instanceof FormData;
   const headers: HeadersInit = {
     Accept: "application/json",
@@ -17,13 +25,38 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers["Content-Type"] = "application/json";
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      ...headers,
-      ...(init?.headers || {}),
-    },
-  });
+  const supportsAbort = typeof AbortController !== "undefined";
+  const controller =
+    supportsAbort && options?.timeoutMs ? new AbortController() : null;
+  const timeoutId =
+    controller && options?.timeoutMs
+      ? globalThis.setTimeout(() => controller.abort(), options.timeoutMs)
+      : null;
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      signal: controller?.signal ?? init?.signal,
+      headers: {
+        ...headers,
+        ...(init?.headers || {}),
+      },
+    });
+  } catch (err) {
+    if (
+      controller &&
+      err instanceof DOMException &&
+      err.name === "AbortError"
+    ) {
+      throw new Error("请求超时，请稍后重试");
+    }
+    throw err;
+  } finally {
+    if (timeoutId !== null) {
+      globalThis.clearTimeout(timeoutId);
+    }
+  }
 
   if (!response.ok) {
     const message = await response.text();
@@ -92,9 +125,13 @@ export function deleteCluster(clusterId: number): Promise<void> {
 }
 
 export function testClusterConnection(clusterId: number): Promise<ClusterConfig> {
-  return request<ClusterConfig>(`/clusters/${clusterId}/test-connection`, {
-    method: "POST",
-  });
+  return request<ClusterConfig>(
+    `/clusters/${clusterId}/test-connection`,
+    {
+      method: "POST",
+    },
+    { timeoutMs: 10000 }
+  );
 }
 
 export function deleteInspectionRun(runId: number): Promise<void> {
