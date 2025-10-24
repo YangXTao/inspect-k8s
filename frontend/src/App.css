@@ -838,6 +838,111 @@ th {
   justify-content: center;
 }
 
+.settings-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+  max-width: 960px;
+}
+
+.settings-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-modal-shell {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.settings-modal-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 168px;
+}
+
+.settings-nav-button {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: #f8fafc;
+  color: #1e293b;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.settings-nav-button:hover {
+  border-color: #cbd5f5;
+}
+
+.settings-nav-button.active {
+  background: #1d4ed8;
+  color: #ffffff;
+  border-color: #1d4ed8;
+  font-weight: 600;
+}
+
+.settings-modal-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.inspection-settings-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-overview h4 {
+  margin: 0;
+  color: #1e293b;
+}
+
+.settings-overview-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.settings-overview-hint {
+  margin: 0;
+  font-size: 13px;
+  color: #475569;
+}
+
+.settings-modal-main .modal-actions {
+  justify-content: flex-start;
+}
+
+@media (max-width: 920px) {
+  .settings-modal-shell {
+    flex-direction: column;
+  }
+
+  .settings-modal-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .settings-nav-button {
+    flex: 1 1 140px;
+    text-align: center;
+  }
+}
+
 .kubeconfig-modal {
   max-width: 640px;
 }

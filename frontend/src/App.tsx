@@ -3,6 +3,7 @@ import {
   FormEvent,
   type RefObject,
   type CSSProperties,
+  type ReactNode,
   useCallback,
   useEffect,
   useId,
@@ -1703,8 +1704,125 @@ const ConfirmationModal = ({ state, onClose }: ConfirmationModalProps) => {
 };
 
 
-interface InspectionSettingsModalProps {
+interface SettingsModalTab {
+  id: string;
+  label: string;
+  render: (context: {
+    close: () => void;
+    selectTab: (tabId: string) => void;
+    activeTabId: string;
+  }) => ReactNode;
+}
+
+interface SettingsModalProps {
   open: boolean;
+  tabs: SettingsModalTab[];
+  initialTabId?: string;
+  onClose: () => void;
+}
+
+const SettingsModal = ({
+  open,
+  tabs,
+  initialTabId,
+  onClose,
+}: SettingsModalProps) => {
+  const [activeTab, setActiveTab] = useState(() => {
+    if (initialTabId && tabs.some((tab) => tab.id === initialTabId)) {
+      return initialTabId;
+    }
+    return tabs[0]?.id ?? "";
+  });
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    if (initialTabId && tabs.some((tab) => tab.id === initialTabId)) {
+      setActiveTab(initialTabId);
+      return;
+    }
+
+    setActiveTab((current) => {
+      if (tabs.some((tab) => tab.id === current)) {
+        return current;
+      }
+      return tabs[0]?.id ?? "";
+    });
+  }, [open, tabs, initialTabId]);
+
+  if (!open || tabs.length === 0) {
+    return null;
+  }
+
+  const activeTabConfig =
+    tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <div className="modal large settings-modal">
+        <div className="settings-modal-header">
+          <h3>系统设置</h3>
+          <button
+            type="button"
+            className="link-button small"
+            onClick={onClose}
+            aria-label="关闭设置"
+          >
+            关闭
+          </button>
+        </div>
+        <div className="settings-modal-shell">
+          <nav className="settings-modal-nav" aria-label="设置类别">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={`settings-nav-button${
+                  tab.id === activeTabConfig.id ? " active" : ""
+                }`}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+          <section className="settings-modal-main">
+            {activeTabConfig.render({
+              close: onClose,
+              selectTab: setActiveTab,
+              activeTabId: activeTabConfig.id,
+            })}
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const SettingsOverviewPanel = ({
+  onOpenInspection,
+}: {
+  onOpenInspection: () => void;
+}) => (
+  <div className="settings-overview">
+    <h4>快速开始</h4>
+    <p>
+      根据业务需求组合不同的巡检策略。请选择左侧的类别进入对应的配置页。
+    </p>
+    <div className="settings-overview-actions">
+      <button type="button" className="primary" onClick={onOpenInspection}>
+        管理巡检项
+      </button>
+    </div>
+    <p className="settings-overview-hint">
+      更多设置选项（通知策略、巡检计划等）即将开放，敬请期待。
+    </p>
+  </div>
+);
+
+interface InspectionSettingsPanelProps {
   items: InspectionItem[];
   submitting: boolean;
   notice: string | null;
@@ -1786,8 +1904,7 @@ const deriveFormFromItem = (item: InspectionItem) => {
   };
 };
 
-const InspectionSettingsModal = ({
-  open,
+const InspectionSettingsPanel = ({
   items,
   submitting,
   notice,
@@ -1795,20 +1912,12 @@ const InspectionSettingsModal = ({
   onClose,
   onSave,
   onDelete,
-}: InspectionSettingsModalProps) => {
+}: InspectionSettingsPanelProps) => {
   const [formState, setFormState] = useState(defaultInspectionForm);
   const [formError, setFormError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<InspectionItem | null>(
     null
   );
-
-  useEffect(() => {
-    if (!open) {
-      setFormState(defaultInspectionForm);
-      setFormError(null);
-      setPendingDelete(null);
-    }
-  }, [open]);
 
   const handleResetForm = () => {
     setFormState(defaultInspectionForm);
@@ -1901,14 +2010,9 @@ const InspectionSettingsModal = ({
 
   const activeItems = items.slice().sort((a, b) => a.id - b.id);
 
-  if (!open) {
-    return null;
-  }
-
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
-      <div className="modal large">
-        <div className="settings-header">
+    <div className="inspection-settings-panel">
+      <div className="settings-header">
           <h3>巡检项设置</h3>
           <button className="link-button" onClick={() => handleResetForm()}>
             新建巡检项
@@ -2164,7 +2268,6 @@ const InspectionSettingsModal = ({
             </div>
           </div>
         )}
-      </div>
     </div>
   );
 };
@@ -3003,6 +3106,43 @@ const App = () => {
     [refreshItems]
   );
 
+  const settingsTabs = useMemo<SettingsModalTab[]>(
+    () => [
+      {
+        id: "overview",
+        label: "设置总览",
+        render: ({ selectTab }) => (
+          <SettingsOverviewPanel
+            onOpenInspection={() => selectTab("inspection")}
+          />
+        ),
+      },
+      {
+        id: "inspection",
+        label: "巡检项设置",
+        render: ({ close }) => (
+          <InspectionSettingsPanel
+            items={items}
+            submitting={settingsSubmitting}
+            notice={settingsNotice}
+            error={settingsError}
+            onClose={close}
+            onSave={handleSaveInspectionItem}
+            onDelete={handleDeleteInspectionItem}
+          />
+        ),
+      },
+    ],
+    [
+      items,
+      settingsSubmitting,
+      settingsNotice,
+      settingsError,
+      handleSaveInspectionItem,
+      handleDeleteInspectionItem,
+    ]
+  );
+
   const handleSubmitClusterEdit = useCallback(
     async ({
       name,
@@ -3159,15 +3299,11 @@ const App = () => {
         onClose={() => setConfirmState(null)}
       />
 
-      <InspectionSettingsModal
+      <SettingsModal
         open={settingsOpen}
-        items={items}
-        submitting={settingsSubmitting}
-        notice={settingsNotice}
-        error={settingsError}
+        tabs={settingsTabs}
+        initialTabId="overview"
         onClose={handleCloseSettings}
-        onSave={handleSaveInspectionItem}
-        onDelete={handleDeleteInspectionItem}
       />
 
       {clusterEditState && (
