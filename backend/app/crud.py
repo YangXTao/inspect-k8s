@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime
 from typing import Iterable, List, Optional
@@ -136,7 +136,12 @@ def log_action(
 
 
 def get_inspection_items(db: Session) -> List[models.InspectionItem]:
-    return db.query(models.InspectionItem).order_by(models.InspectionItem.id).all()
+    return (
+        db.query(models.InspectionItem)
+        .filter(models.InspectionItem.is_archived.is_(False))
+        .order_by(models.InspectionItem.id)
+        .all()
+    )
 
 
 def get_inspection_item(db: Session, item_id: int) -> Optional[models.InspectionItem]:
@@ -171,8 +176,14 @@ def update_inspection_item(
     db: Session, item: models.InspectionItem, item_in: schemas.InspectionItemUpdate
 ) -> models.InspectionItem:
     data = item_in.model_dump(exclude_unset=True)
+    config = data.pop("config", None)
+
     for key, value in data.items():
         setattr(item, key, value)
+
+    if config is not None:
+        item.set_config(config if isinstance(config, dict) else None)
+
     item.updated_at = datetime.utcnow()
     db.add(item)
     db.commit()
@@ -188,14 +199,16 @@ def update_inspection_item(
 
 
 def delete_inspection_item(db: Session, item: models.InspectionItem) -> None:
-    db.delete(item)
+    item.is_archived = True
+    item.updated_at = datetime.utcnow()
+    db.add(item)
     db.commit()
     log_action(
         db,
         action="delete",
         entity_type="inspection_item",
         entity_id=item.id,
-        description=f"Deleted inspection item '{item.name}'",
+        description=f"Archived inspection item '{item.name}'",
     )
 
 
@@ -331,3 +344,4 @@ def list_audit_logs(db: Session, limit: int = 100) -> List[models.AuditLog]:
         .limit(limit)
         .all()
     )
+

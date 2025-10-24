@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, Boolean
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -50,6 +50,7 @@ class InspectionItem(Base):
     description = Column(Text, nullable=True)
     check_type = Column(String(50), nullable=False, default="custom")
     config_json = Column(Text, nullable=True)
+    is_archived = Column(Boolean, nullable=False, default=False)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
@@ -121,3 +122,4 @@ class AuditLog(Base):
     entity_id = Column(Integer, nullable=True)
     description = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+

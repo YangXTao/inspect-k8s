@@ -20,7 +20,7 @@ if all([MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE]):
     encoded_password = quote_plus(MYSQL_PASSWORD)
     DATABASE_URL = (
         f"mysql+pymysql://{MYSQL_USER}:{encoded_password}"
-        f"@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}"
+        f"@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}?charset=utf8mb4"
     )
 else:
     DATABASE_URL = DEFAULT_DATABASE_URL
@@ -49,6 +49,7 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_cluster_schema()
     _ensure_inspection_schema()
+    _ensure_audit_log_schema()
 
 
 @contextmanager
@@ -108,6 +109,11 @@ def _ensure_cluster_schema() -> None:
                 "ALTER TABLE cluster_configs ADD COLUMN last_checked_at DATETIME NULL"
             )
 
+    if dialect != "sqlite":
+        statements.append(
+            "ALTER TABLE cluster_configs CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci"
+        )
+
     if not statements:
         return
 
@@ -122,12 +128,66 @@ def _ensure_inspection_schema() -> None:
         return
 
     existing_columns = {column["name"] for column in inspector.get_columns("inspection_items")}
+    dialect = engine.dialect.name
+    statements: list[str] = []
 
-    if "config_json" in existing_columns:
+    if "config_json" not in existing_columns:
+        column_type = "TEXT"
+        statements.append(
+            f"ALTER TABLE inspection_items ADD COLUMN config_json {column_type} NULL"
+        )
+
+    if "is_archived" not in existing_columns:
+        if dialect == "sqlite":
+            statements.append(
+                "ALTER TABLE inspection_items ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0"
+            )
+        else:
+            statements.append(
+                "ALTER TABLE inspection_items ADD COLUMN is_archived TINYINT(1) NOT NULL DEFAULT 0"
+            )
+
+    if dialect != "sqlite":
+        statements.extend(
+            [
+                "ALTER TABLE inspection_items CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci",
+                "ALTER TABLE inspection_items MODIFY name VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL",
+                "ALTER TABLE inspection_items MODIFY description TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL",
+                "ALTER TABLE inspection_items MODIFY check_type VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL",
+            ]
+        )
+        if "config_json" in existing_columns:
+            statements.append(
+                "ALTER TABLE inspection_items MODIFY config_json TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL"
+            )
+        statements.append(
+            "ALTER TABLE inspection_items MODIFY is_archived TINYINT(1) NOT NULL DEFAULT 0"
+        )
+
+    if not statements:
+        return
+
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+
+
+def _ensure_audit_log_schema() -> None:
+    inspector = inspect(engine)
+    if "audit_logs" not in inspector.get_table_names():
         return
 
     dialect = engine.dialect.name
-    column_type = "TEXT" if dialect == "sqlite" else "TEXT"
-    statement = f"ALTER TABLE inspection_items ADD COLUMN config_json {column_type} NULL"
+    if dialect == "sqlite":
+        return
+
+    statements = [
+        "ALTER TABLE audit_logs CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci",
+        "ALTER TABLE audit_logs MODIFY action VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL",
+        "ALTER TABLE audit_logs MODIFY entity_type VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL",
+        "ALTER TABLE audit_logs MODIFY description TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL",
+    ]
+
     with engine.begin() as connection:
-        connection.execute(text(statement))
+        for statement in statements:
+            connection.execute(text(statement))

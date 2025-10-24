@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
   color: #0f172a;
@@ -108,6 +108,9 @@ body {
     box-shadow 0.2s ease;
   display: inline-flex;
   align-items: center;
+  background: none;
+  border: none;
+  cursor: pointer;
 }
 
 .top-navigation-link:hover {
@@ -525,7 +528,7 @@ body {
 .item-list {
   list-style: none;
   padding: 0;
-  margin: 0;
+  margin: 12px 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -547,6 +550,21 @@ body {
   display: flex;
   gap: 10px;
   cursor: pointer;
+}
+
+.item-pagination {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: flex-end;
+  color: #475569;
+  font-size: 14px;
+}
+
+.item-pagination-status {
+  min-width: 120px;
+  text-align: center;
 }
 
 .item-name {
@@ -742,6 +760,17 @@ th {
   box-shadow: 0 24px 48px rgba(15, 23, 42, 0.22);
 }
 
+.modal.large {
+  max-width: 920px;
+  width: 92%;
+  max-height: 90vh;
+  overflow: auto;
+}
+
+.modal.confirm {
+  max-width: 420px;
+}
+
 .modal h3 {
   margin: 0;
   color: #1e293b;
@@ -760,6 +789,14 @@ th {
   border: 1px solid #cbd5f5;
   padding: 10px 14px;
   font-size: 15px;
+}
+
+.modal select {
+  border-radius: 12px;
+  border: 1px solid #cbd5f5;
+  padding: 10px 14px;
+  font-size: 15px;
+  background: #fff;
 }
 
 .modal-field {
@@ -788,6 +825,19 @@ th {
   gap: 12px;
 }
 
+.modal.large .modal-actions {
+  justify-content: flex-start;
+}
+
+.modal-backdrop.nested {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .kubeconfig-modal {
   max-width: 640px;
 }
@@ -802,6 +852,80 @@ th {
   margin: 0;
   font-size: 13px;
   color: #475569;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settings-content {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.settings-list {
+  flex: 1 1 360px;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.settings-list table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.settings-list th,
+.settings-list td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 8px 6px;
+  text-align: left;
+}
+
+.settings-list th {
+  background: #f8fafc;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.table-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-form {
+  flex: 1 1 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-form textarea {
+  border-radius: 12px;
+  border: 1px solid #cbd5f5;
+  padding: 10px 14px;
+  font-size: 14px;
+  resize: vertical;
+}
+
+.settings-form h4 {
+  margin: 0;
+  color: #1e293b;
+}
+
+.field-row {
+  display: flex;
+  gap: 12px;
+}
+
+.field-row label {
+  flex: 1;
 }
 
 .kubeconfig-modal-upload {
@@ -986,3 +1110,5 @@ th {
     align-items: stretch;
   }
 }
+
+

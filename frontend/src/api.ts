@@ -134,6 +134,39 @@ export function testClusterConnection(clusterId: number): Promise<ClusterConfig>
   );
 }
 
+export function createInspectionItem(payload: {
+  name: string;
+  description?: string;
+  check_type: string;
+  config?: Record<string, unknown>;
+}): Promise<InspectionItem> {
+  return request<InspectionItem>("/inspection-items", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateInspectionItem(
+  itemId: number,
+  payload: {
+    name?: string;
+    description?: string;
+    check_type?: string;
+    config?: Record<string, unknown> | null;
+  }
+): Promise<InspectionItem> {
+  return request<InspectionItem>(`/inspection-items/${itemId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteInspectionItem(itemId: number): Promise<void> {
+  return request<void>(`/inspection-items/${itemId}`, {
+    method: "DELETE",
+  });
+}
+
 export function deleteInspectionRun(runId: number): Promise<void> {
   return request<void>(`/inspection-runs/${runId}`, {
     method: "DELETE",

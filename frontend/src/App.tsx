@@ -32,6 +32,9 @@ import {
   registerCluster,
   updateCluster,
   testClusterConnection,
+  createInspectionItem as apiCreateInspectionItem,
+  updateInspectionItem as apiUpdateInspectionItem,
+  deleteInspectionItem as apiDeleteInspectionItem,
 } from "./api";
 import { appConfig } from "./config";
 import {
@@ -318,7 +321,7 @@ const logWithTimestamp = (
   logger(`[${timestamp}] ${message}`, ...details);
 };
 
-const TopNavigation = () => {
+const TopNavigation = ({ onOpenSettings }: { onOpenSettings: () => void }) => {
   const navigate = useNavigate();
 
   return (
@@ -362,6 +365,23 @@ const TopNavigation = () => {
             <span>历史巡检</span>
           </span>
         </NavLink>
+        <button
+          type="button"
+          className="top-navigation-link"
+          onClick={onOpenSettings}
+        >
+          <span className="top-navigation-link-inner">
+            <span className="top-navigation-link-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path
+                  d="M12 7.5a4.5 4.5 0 1 0 4.5 4.5A4.51 4.51 0 0 0 12 7.5Zm8.94 3.15-1.81-.26a7 7 0 0 0-.66-1.6l1.06-1.49a1 1 0 0 0-.12-1.29l-1.41-1.41a1 1 0 0 0-1.29-.12l-1.49 1.06a7 7 0 0 0-1.6-.66l-.26-1.81A1 1 0 0 0 12.06 3h-2.12a1 1 0 0 0-1 .87l-.26 1.81a7 7 0 0 0-1.6.66L5.59 5.28a1 1 0 0 0-1.29.12L2.89 6.81a1 1 0 0 0-.12 1.29l1.06 1.49a7 7 0 0 0-.66 1.6l-1.81.26a1 1 0 0 0-.87 1v2.12a1 1 0 0 0 .87 1l1.81.26a7 7 0 0 0 .66 1.6l-1.06 1.49a1 1 0 0 0 .12 1.29l1.41 1.41a1 1 0 0 0 1.29.12l1.49-1.06a7 7 0 0 0 1.6.66l.26 1.81a1 1 0 0 0 1 .87h2.12a1 1 0 0 0 1-.87l.26-1.81a7 7 0 0 0 1.6-.66l1.49 1.06a1 1 0 0 0 1.29-.12l1.41-1.41a1 1 0 0 0 .12-1.29l-1.06-1.49a7 7 0 0 0 .66-1.6l1.81-.26a1 1 0 0 0 .87-1v-2.12a1 1 0 0 0-.87-1Zm-8.94 4.35a3 3 0 1 1 3-3 3 3 0 0 1-3 3Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </span>
+            <span>设置</span>
+          </span>
+        </button>
       </nav>
     </header>
   );
@@ -1028,6 +1048,37 @@ const ClusterDetailView = ({
     return runs.filter((run) => run.cluster_id === cluster.id);
   }, [runs, cluster]);
 
+  const PAGE_SIZE = 10;
+  const [itemPage, setItemPage] = useState(0);
+
+  useEffect(() => {
+    setItemPage(0);
+  }, [numericId]);
+
+  const totalItemPages = useMemo(
+    () => Math.max(1, Math.ceil(items.length / PAGE_SIZE)),
+    [items.length]
+  );
+
+  useEffect(() => {
+    setItemPage(0);
+  }, [items.length]);
+
+  useEffect(() => {
+    if (itemPage >= totalItemPages) {
+      setItemPage(totalItemPages - 1);
+    }
+  }, [itemPage, totalItemPages]);
+
+  const pagedItems = useMemo(
+    () =>
+      items.slice(
+        itemPage * PAGE_SIZE,
+        Math.min(items.length, (itemPage + 1) * PAGE_SIZE)
+      ),
+    [items, itemPage]
+  );
+
   if (isNumericInvalid) {
     return (
       <div className="detail-empty">
@@ -1067,6 +1118,19 @@ const ClusterDetailView = ({
     setSelectedIds((prev) =>
       prev.length === items.length ? [] : items.map((item) => item.id)
     );
+  };
+
+  const handleChangePage = (offset: number) => {
+    setItemPage((prev) => {
+      const next = prev + offset;
+      if (next < 0) {
+        return 0;
+      }
+      if (next >= totalItemPages) {
+        return totalItemPages - 1;
+      }
+      return next;
+    });
   };
 
   return (
@@ -1169,7 +1233,7 @@ const ClusterDetailView = ({
             已选择 {selectedIds.length} / {items.length} 个巡检项
           </p>
           <ul className="item-list">
-            {items.map((item) => (
+            {pagedItems.map((item) => (
               <li key={item.id}>
                 <label>
                   <input
@@ -1185,6 +1249,29 @@ const ClusterDetailView = ({
               </li>
             ))}
           </ul>
+          {items.length > PAGE_SIZE && (
+            <div className="item-pagination">
+              <button
+                type="button"
+                className="pagination-nav"
+                onClick={() => handleChangePage(-1)}
+                disabled={itemPage === 0}
+              >
+                上一页
+              </button>
+              <span className="item-pagination-status">
+                第 {itemPage + 1} / {totalItemPages} 页
+              </span>
+              <button
+                type="button"
+                className="pagination-nav"
+                onClick={() => handleChangePage(1)}
+                disabled={itemPage + 1 >= totalItemPages}
+              >
+                下一页
+              </button>
+            </div>
+          )}
           <div className="detail-actions">
             <button className="secondary" onClick={handleToggleAll}>
               {selectedIds.length === items.length ? "清除选择" : "全选"}
@@ -1615,6 +1702,473 @@ const ConfirmationModal = ({ state, onClose }: ConfirmationModalProps) => {
   );
 };
 
+
+interface InspectionSettingsModalProps {
+  open: boolean;
+  items: InspectionItem[];
+  submitting: boolean;
+  notice: string | null;
+  error: string | null;
+  onClose: () => void;
+  onSave: (payload: {
+    id?: number;
+    name: string;
+    description?: string;
+    check_type: string;
+    config: Record<string, unknown>;
+  }) => Promise<void>;
+  onDelete: (item: InspectionItem) => Promise<void>;
+}
+
+type InspectionCheckType = "command" | "promql";
+
+const comparisonOptions = [
+  { label: "大于", value: ">" },
+  { label: "小于", value: "<" },
+  { label: "等于", value: "==" },
+  { label: "大于等于", value: ">=" },
+  { label: "小于等于", value: "<=" },
+  { label: "不等于", value: "!=" },
+];
+
+const defaultInspectionForm = {
+  id: undefined as number | undefined,
+  name: "",
+  description: "",
+  checkType: "command" as InspectionCheckType,
+  command: "",
+  expression: "",
+  comparison: ">=",
+  threshold: "",
+  suggestion: "",
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const parseCommandString = (raw: unknown): string => {
+  if (Array.isArray(raw)) {
+    return raw.map((item) => String(item)).join(" ");
+  }
+  if (typeof raw === "string") {
+    return raw;
+  }
+  return "";
+};
+
+const extractThreshold = (raw: unknown): string => {
+  if (raw === null || raw === undefined) {
+    return "";
+  }
+  const value = Number(raw);
+  return Number.isNaN(value) ? "" : String(value);
+};
+
+const deriveFormFromItem = (item: InspectionItem) => {
+  const base = { ...defaultInspectionForm, id: item.id, name: item.name, description: item.description ?? "" };
+  const config = isRecord(item.config) ? item.config : {};
+  if (item.check_type === "promql") {
+    return {
+      ...base,
+      checkType: "promql" as InspectionCheckType,
+      expression: typeof config.expression === "string" ? config.expression : "",
+      comparison: typeof config.comparison === "string" ? config.comparison : ">=",
+      threshold: extractThreshold(config.fail_threshold ?? config.warn_threshold ?? config.threshold),
+      suggestion: typeof config.suggestion_on_fail === "string" ? config.suggestion_on_fail : "",
+    };
+  }
+
+  return {
+    ...base,
+    checkType: "command" as InspectionCheckType,
+    command: parseCommandString(config.command),
+    suggestion: typeof config.suggestion_on_fail === "string" ? config.suggestion_on_fail : "",
+  };
+};
+
+const InspectionSettingsModal = ({
+  open,
+  items,
+  submitting,
+  notice,
+  error,
+  onClose,
+  onSave,
+  onDelete,
+}: InspectionSettingsModalProps) => {
+  const [formState, setFormState] = useState(defaultInspectionForm);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<InspectionItem | null>(
+    null
+  );
+
+  useEffect(() => {
+    if (!open) {
+      setFormState(defaultInspectionForm);
+      setFormError(null);
+      setPendingDelete(null);
+    }
+  }, [open]);
+
+  const handleResetForm = () => {
+    setFormState(defaultInspectionForm);
+    setFormError(null);
+  };
+
+  const handleEdit = (item: InspectionItem) => {
+    setFormState(deriveFormFromItem(item));
+    setFormError(null);
+  };
+
+  const handleTypeChange = (value: InspectionCheckType) => {
+    setFormState((prev) => ({
+      ...prev,
+      checkType: value,
+      command: value === "command" ? prev.command : "",
+      expression: value === "promql" ? prev.expression : "",
+    }));
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setFormError(null);
+
+    const { id, name, description, checkType, command, expression, threshold, comparison, suggestion } =
+      formState;
+
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setFormError("巡检名称不能为空");
+      return;
+    }
+
+    let config: Record<string, unknown> = {};
+
+    if (checkType === "command") {
+      const commandText = command.trim();
+      if (!commandText) {
+        setFormError("请输入要执行的命令");
+        return;
+      }
+      config = {
+        command: commandText,
+        shell: true,
+        timeout: 30,
+        success_message: "Command executed successfully.",
+        failure_message: "Command returned non-zero exit code.",
+        suggestion_on_fail: suggestion.trim() || "",
+        suggestion_on_success: "",
+      };
+    } else {
+      const expr = expression.trim();
+      if (!expr) {
+        setFormError("请输入 Prometheus 表达式");
+        return;
+      }
+      const numericThreshold = Number(threshold);
+      if (!threshold || Number.isNaN(numericThreshold)) {
+        setFormError("请提供有效的告警阈值");
+        return;
+      }
+      config = {
+        expression: expr,
+        comparison,
+        fail_threshold: numericThreshold,
+        detail_template: "{expression} value: {value}",
+        suggestion_on_fail: suggestion.trim() || "",
+        empty_message: "Prometheus returned no samples.",
+        suggestion_if_empty: suggestion.trim() || "",
+      };
+    }
+
+    try {
+      await onSave({
+        id,
+        name: trimmedName,
+        description: description?.trim() || undefined,
+        check_type: checkType,
+        config,
+      });
+      setFormState((prev) => ({
+        ...defaultInspectionForm,
+        checkType: prev.checkType,
+      }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setFormError(message);
+    }
+  };
+
+  const activeItems = items.slice().sort((a, b) => a.id - b.id);
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <div className="modal large">
+        <div className="settings-header">
+          <h3>巡检项设置</h3>
+          <button className="link-button" onClick={() => handleResetForm()}>
+            新建巡检项
+          </button>
+        </div>
+        {notice && <div className="feedback success">{notice}</div>}
+        {(error || formError) && (
+          <div className="feedback error">{formError ?? error}</div>
+        )}
+        <div className="settings-content">
+          <div className="settings-list">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>名称</th>
+                  <th>类型</th>
+                  <th>描述</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activeItems.length === 0 ? (
+                  <tr>
+                    <td colSpan={5}>暂无巡检项</td>
+                  </tr>
+                ) : (
+                  activeItems.map((item) => (
+                    <tr key={item.id}>
+                      <td>{item.id}</td>
+                      <td>{item.name}</td>
+                      <td>{item.check_type}</td>
+                      <td>{item.description || "-"}</td>
+                      <td>
+                        <div className="table-actions">
+                          <button
+                            className="link-button small"
+                            onClick={() => handleEdit(item)}
+                          >
+                            编辑
+                          </button>
+                      <button
+                        className="link-button small danger"
+                        onClick={() => {
+                          setFormError(null);
+                          setPendingDelete(item);
+                        }}
+                        disabled={submitting}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <form className="settings-form" onSubmit={handleSubmit}>
+            <h4>{formState.id ? "编辑巡检项" : "新建巡检项"}</h4>
+            <label>
+              巡检名称
+              <input
+                type="text"
+                value={formState.name}
+                onChange={(event) =>
+                  setFormState((prev) => ({
+                    ...prev,
+                    name: event.target.value,
+                  }))
+                }
+                required
+                disabled={submitting}
+              />
+            </label>
+            <label>
+              描述
+              <textarea
+                value={formState.description}
+                onChange={(event) =>
+                  setFormState((prev) => ({
+                    ...prev,
+                    description: event.target.value,
+                  }))
+                }
+                rows={2}
+                disabled={submitting}
+              />
+            </label>
+            <label>
+              巡检类型
+              <select
+                value={formState.checkType}
+                onChange={(event) =>
+                  handleTypeChange(event.target.value as InspectionCheckType)
+                }
+                disabled={submitting}
+              >
+                <option value="command">命令行</option>
+                <option value="promql">PromQL 表达式</option>
+              </select>
+            </label>
+
+            {formState.checkType === "command" ? (
+              <label>
+                命令（可使用 {"{{kubeconfig}}"} 占位符）
+                <textarea
+                  value={formState.command}
+                  onChange={(event) =>
+                    setFormState((prev) => ({
+                      ...prev,
+                      command: event.target.value,
+                    }))
+                  }
+                  rows={4}
+                  placeholder="例如：kubectl --kubeconfig {{kubeconfig}} cluster-info"
+                  disabled={submitting}
+                />
+              </label>
+            ) : (
+              <>
+                <label>
+                  Prometheus 表达式
+                  <textarea
+                    value={formState.expression}
+                    onChange={(event) =>
+                      setFormState((prev) => ({
+                        ...prev,
+                        expression: event.target.value,
+                      }))
+                    }
+                    rows={3}
+                    placeholder="例如：max(up{job='apiserver'})"
+                    disabled={submitting}
+                  />
+                </label>
+                <div className="field-row">
+                  <label>
+                    告警阈值
+                    <input
+                      type="number"
+                      value={formState.threshold}
+                      onChange={(event) =>
+                        setFormState((prev) => ({
+                          ...prev,
+                          threshold: event.target.value,
+                        }))
+                      }
+                      placeholder="数值"
+                      disabled={submitting}
+                    />
+                  </label>
+                  <label>
+                    比较方式
+                    <select
+                      value={formState.comparison}
+                      onChange={(event) =>
+                        setFormState((prev) => ({
+                          ...prev,
+                          comparison: event.target.value,
+                        }))
+                      }
+                      disabled={submitting}
+                    >
+                      {comparisonOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </>
+            )}
+
+            <label>
+              处理建议
+              <textarea
+                value={formState.suggestion}
+                onChange={(event) =>
+                  setFormState((prev) => ({
+                    ...prev,
+                    suggestion: event.target.value,
+                  }))
+                }
+                rows={3}
+                placeholder="建议描述（可选）"
+                disabled={submitting}
+              />
+            </label>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={handleResetForm}
+                disabled={submitting}
+              >
+                清空
+              </button>
+              <button type="submit" className="primary" disabled={submitting}>
+                {submitting ? "保存中..." : formState.id ? "更新" : "保存"}
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={onClose}
+                disabled={submitting}
+              >
+                关闭
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {pendingDelete && (
+          <div className="modal-backdrop nested" role="dialog" aria-modal="true">
+            <div className="modal confirm">
+              <h3>删除巡检项</h3>
+              <p>
+                确认删除巡检项({pendingDelete.name})？该操作不可恢复。
+              </p>
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setPendingDelete(null)}
+                  disabled={submitting}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="primary danger"
+                  onClick={async () => {
+                    try {
+                      await onDelete(pendingDelete);
+                      setPendingDelete(null);
+                      setFormError(null);
+                    } catch (err) {
+                      const message =
+                        err instanceof Error ? err.message : String(err);
+                      setFormError(message);
+                    }
+                  }}
+                  disabled={submitting}
+                >
+                  删除
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 interface ClusterEditModalProps {
   cluster: ClusterConfig;
   submitting: boolean;
@@ -1887,6 +2441,11 @@ const App = () => {
   const [clusterEditSubmitting, setClusterEditSubmitting] = useState(false);
   const [clusterEditError, setClusterEditError] = useState<string | null>(null);
 
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSubmitting, setSettingsSubmitting] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [settingsNotice, setSettingsNotice] = useState<string | null>(null);
+
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -2041,6 +2600,16 @@ const App = () => {
       logWithTimestamp("error", "获取巡检项失败: %s", message);
       setInspectionError(message);
     }
+  }, []);
+
+  const handleOpenSettings = useCallback(() => {
+    setSettingsError(null);
+    setSettingsNotice(null);
+    setSettingsOpen(true);
+  }, []);
+
+  const handleCloseSettings = useCallback(() => {
+    setSettingsOpen(false);
   }, []);
 
   useEffect(() => {
@@ -2362,6 +2931,78 @@ const App = () => {
     setClusterEditError(null);
   }, []);
 
+  const handleSaveInspectionItem = useCallback(
+    async ({
+      id,
+      name,
+      description,
+      check_type,
+      config,
+    }: {
+      id?: number;
+      name: string;
+      description?: string;
+      check_type: string;
+      config: Record<string, unknown>;
+    }) => {
+      setSettingsSubmitting(true);
+      try {
+        if (id) {
+          logWithTimestamp("info", "更新巡检项: %s", id);
+          await apiUpdateInspectionItem(id, {
+            name,
+            description,
+            check_type,
+            config,
+          });
+          setSettingsNotice("巡检项已更新");
+        } else {
+          logWithTimestamp("info", "创建巡检项: %s", name);
+          await apiCreateInspectionItem({
+            name,
+            description,
+            check_type,
+            config,
+          });
+          setSettingsNotice("巡检项已创建");
+        }
+        await refreshItems();
+        setSettingsError(null);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "保存巡检项失败";
+        logWithTimestamp("error", "保存巡检项失败: %s", message);
+        setSettingsError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setSettingsSubmitting(false);
+      }
+    },
+    [refreshItems]
+  );
+
+  const handleDeleteInspectionItem = useCallback(
+    async (item: InspectionItem) => {
+      setSettingsSubmitting(true);
+      try {
+        logWithTimestamp("info", "删除巡检项: %s", item.id);
+        await apiDeleteInspectionItem(item.id);
+        await refreshItems();
+        setSettingsNotice("巡检项已删除");
+        setSettingsError(null);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "删除巡检项失败";
+        logWithTimestamp("error", "删除巡检项失败: %s", message);
+        setSettingsError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setSettingsSubmitting(false);
+      }
+    },
+    [refreshItems]
+  );
+
   const handleSubmitClusterEdit = useCallback(
     async ({
       name,
@@ -2419,7 +3060,7 @@ const App = () => {
 
   return (
     <>
-      <TopNavigation />
+      <TopNavigation onOpenSettings={handleOpenSettings} />
       <main className="app-shell">
         <Routes>
           <Route
@@ -2516,6 +3157,17 @@ const App = () => {
       <ConfirmationModal
         state={confirmState}
         onClose={() => setConfirmState(null)}
+      />
+
+      <InspectionSettingsModal
+        open={settingsOpen}
+        items={items}
+        submitting={settingsSubmitting}
+        notice={settingsNotice}
+        error={settingsError}
+        onClose={handleCloseSettings}
+        onSave={handleSaveInspectionItem}
+        onDelete={handleDeleteInspectionItem}
       />
 
       {clusterEditState && (

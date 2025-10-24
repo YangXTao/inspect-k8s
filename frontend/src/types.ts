@@ -3,6 +3,7 @@ export type InspectionItem = {
   name: string;
   description?: string;
   check_type: string;
+  config?: Record<string, unknown> | null;
 };
 
 export type ClusterConfig = {
