@@ -226,9 +226,21 @@ def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _present_cluster(
+    cluster: models.ClusterConfig,
+) -> schemas.ClusterConfigOut:
+    result = schemas.ClusterConfigOut.model_validate(cluster)
+    if result.connection_status == "failed":
+        result.connection_message = "连接异常"
+    elif not result.connection_message:
+        result.connection_message = "No additional details."
+    return result
+
+
 @app.get("/clusters", response_model=List[schemas.ClusterConfigOut])
 def list_clusters(db: Session = Depends(get_db)):
-    return crud.list_clusters(db)
+    clusters = crud.list_clusters(db)
+    return [_present_cluster(cluster) for cluster in clusters]
 
 
 @app.post("/clusters", response_model=schemas.ClusterConfigOut, status_code=201)
@@ -278,16 +290,18 @@ async def register_cluster(
 
     status, message = _test_cluster_connection(cluster.kubeconfig_path)
     sanitized_message = _sanitize_message(message)
+    stored_message = sanitized_message or "No additional details."
     _log_connection_status(cluster.name, status, message)
     cluster = crud.update_cluster(
         db,
         cluster,
         connection_status=status,
-        connection_message=sanitized_message,
+        connection_message=stored_message,
         last_checked_at=datetime.utcnow(),
     )
 
-    return cluster
+    return _present_cluster(cluster)
+
 
 
 @app.post(
@@ -305,15 +319,16 @@ def test_cluster_connection(cluster_id: int, db: Session = Depends(get_db)):
 
     status, message = _test_cluster_connection(cluster.kubeconfig_path)
     sanitized_message = _sanitize_message(message)
+    stored_message = sanitized_message or "No additional details."
     _log_connection_status(cluster.name, status, message)
     cluster = crud.update_cluster(
         db,
         cluster,
         connection_status=status,
-        connection_message=sanitized_message,
+        connection_message=stored_message,
         last_checked_at=datetime.utcnow(),
     )
-    return cluster
+    return _present_cluster(cluster)
 
 
 @app.put("/clusters/{cluster_id}", response_model=schemas.ClusterConfigOut)
@@ -370,7 +385,9 @@ async def update_cluster(
         update_kwargs["contexts_json"] = json.dumps(contexts, ensure_ascii=False)
         status, message = _test_cluster_connection(new_kubeconfig_path)
         connection_status = status
-        connection_message = _sanitize_message(message)
+        sanitized_message = _sanitize_message(message)
+        stored_message = sanitized_message or "No additional details."
+        connection_message = stored_message
         connection_checked_at = datetime.utcnow()
 
     if update_kwargs:
@@ -389,7 +406,7 @@ async def update_cluster(
     if new_kubeconfig_path:
         _remove_file_safely(original_kubeconfig_path)
 
-    return cluster
+    return _present_cluster(cluster)
 
 
 @app.delete("/clusters/{cluster_id}", status_code=204)
@@ -637,6 +654,11 @@ def download_report(run_id: int, db: Session = Depends(get_db)):
         media_type="application/pdf",
         filename=path.name,
     )
+
+
+
+
+
 
 
 
