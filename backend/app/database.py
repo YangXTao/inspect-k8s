@@ -48,6 +48,7 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     _ensure_cluster_schema()
+    _ensure_inspection_schema()
 
 
 @contextmanager
@@ -113,3 +114,20 @@ def _ensure_cluster_schema() -> None:
     with engine.begin() as connection:
         for statement in statements:
             connection.execute(text(statement))
+
+
+def _ensure_inspection_schema() -> None:
+    inspector = inspect(engine)
+    if "inspection_items" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("inspection_items")}
+
+    if "config_json" in existing_columns:
+        return
+
+    dialect = engine.dialect.name
+    column_type = "TEXT" if dialect == "sqlite" else "TEXT"
+    statement = f"ALTER TABLE inspection_items ADD COLUMN config_json {column_type} NULL"
+    with engine.begin() as connection:
+        connection.execute(text(statement))

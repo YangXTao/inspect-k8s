@@ -33,6 +33,29 @@ from .prometheus import PrometheusClient
 
 logger = logging.getLogger(__name__)
 
+
+def _normalise_cluster_name(name: str | None) -> str:
+    if not name:
+        return "cluster"
+    import re as _re
+    slug = _re.sub(r"\s+", "-", name.strip().lower())
+    return slug or "cluster"
+
+
+def _build_run_display_id(db: Session, run: models.InspectionRun) -> str:
+    cluster_name = getattr(run.cluster, "name", None) or getattr(run, "cluster_name", None) or "cluster"
+    slug = _normalise_cluster_name(cluster_name)
+    runs = (
+        db.query(models.InspectionRun)
+        .filter(models.InspectionRun.cluster_id == run.cluster_id)
+        .order_by(models.InspectionRun.created_at.asc(), models.InspectionRun.id.asc())
+        .all()
+    )
+    for index, candidate in enumerate(runs, start=1):
+        if candidate.id == run.id:
+            return f"{slug}-{index:02d}"
+    return f"{slug}-{run.id:02d}"
+
 app = FastAPI(title="K8s Inspection Service", version="0.3.0")
 
 CONNECTION_TEST_TIMEOUT_SECONDS = 8.0
@@ -60,16 +83,34 @@ def _seed_defaults(db: Session) -> None:
     existing_names = {
         name for (name,) in db.query(models.InspectionItem.name).all()
     }
-    new_items = [
-        models.InspectionItem(**payload)
-        for payload in DEFAULT_CHECKS
-        if payload["name"] not in existing_names
-    ]
+    new_items = []
+    for payload in DEFAULT_CHECKS:
+        if payload["name"] in existing_names:
+            continue
+        data = payload.copy()
+        config = data.pop("config", None)
+        item = models.InspectionItem(**data)
+        if config is not None:
+            item.set_config(config if isinstance(config, dict) else None)
+        new_items.append(item)
+
     if not new_items:
         return
     for item in new_items:
         db.add(item)
     db.commit()
+
+    # deprecated_names = {"Recent Events"}
+    # if deprecated_names:
+    #     existing = (
+    #         db.query(models.InspectionItem)
+    #         .filter(models.InspectionItem.name.in_(deprecated_names))
+    #         .all()
+    #     )
+    #     for item in existing:
+    #         db.delete(item)
+    #     if existing:
+    #         db.commit()
 
 
 def _extract_contexts(kubeconfig_text: str) -> List[str]:
@@ -561,7 +602,7 @@ def trigger_inspection(
 
     status_counter = {"passed": 0, "warning": 0, "failed": 0}
     for item in items:
-        status, detail, suggestion = dispatch_checks(item.check_type, context)
+        status, detail, suggestion = dispatch_checks(item.check_type, context, item.config)
         sanitized_detail = _sanitize_optional_text(detail)
         sanitized_suggestion = _sanitize_optional_text(suggestion)
         crud.add_inspection_result(
@@ -597,7 +638,8 @@ def trigger_inspection(
     if not run:
         raise HTTPException(status_code=500, detail="无法加载巡检结果。")
 
-    report_path = generate_pdf_report(run=run, results=run.results)
+    display_id = _build_run_display_id(db, run)
+    report_path = generate_pdf_report(run=run, results=run.results, display_id=display_id)
     run.report_path = report_path
     db.add(run)
     db.commit()
@@ -654,6 +696,7 @@ def download_report(run_id: int, db: Session = Depends(get_db)):
         media_type="application/pdf",
         filename=path.name,
     )
+
 
 
 

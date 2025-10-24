@@ -150,7 +150,10 @@ def get_inspection_item(db: Session, item_id: int) -> Optional[models.Inspection
 def create_inspection_item(
     db: Session, item_in: schemas.InspectionItemCreate
 ) -> models.InspectionItem:
-    item = models.InspectionItem(**item_in.model_dump())
+    data = item_in.model_dump()
+    config = data.pop("config", None)
+    item = models.InspectionItem(**data)
+    item.set_config(config if isinstance(config, dict) else None)
     db.add(item)
     db.commit()
     db.refresh(item)
