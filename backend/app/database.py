@@ -1,11 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from sqlalchemy import create_engine, text, inspect
+from sqlalchemy import create_engine, text, inspect, event
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
 DEFAULT_DATABASE_URL = "sqlite:///./inspection.db"
@@ -35,7 +35,22 @@ else:
         DATABASE_URL,
         pool_pre_ping=True,
         pool_recycle=1800,
+        connect_args={
+            "charset": "utf8mb4",
+            "use_unicode": True,
+            "init_command": "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci",
+        },
     )
+
+    @event.listens_for(engine, "connect")
+    def _set_mysql_charset(dbapi_connection, connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci")
+            cursor.execute("SET CHARACTER SET utf8mb4")
+            cursor.execute("SET character_set_connection=utf8mb4")
+        finally:
+            cursor.close()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
@@ -112,7 +127,7 @@ def _ensure_cluster_schema() -> None:
 
     if dialect != "sqlite":
         statements.append(
-            "ALTER TABLE cluster_configs CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci"
+            "ALTER TABLE cluster_configs CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
         )
 
     if not statements:
@@ -151,15 +166,15 @@ def _ensure_inspection_schema() -> None:
     if dialect != "sqlite":
         statements.extend(
             [
-                "ALTER TABLE inspection_items CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci",
-                "ALTER TABLE inspection_items MODIFY name VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL",
-                "ALTER TABLE inspection_items MODIFY description TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL",
-                "ALTER TABLE inspection_items MODIFY check_type VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL",
+                "ALTER TABLE inspection_items CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+                "ALTER TABLE inspection_items MODIFY name VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+                "ALTER TABLE inspection_items MODIFY description TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
+                "ALTER TABLE inspection_items MODIFY check_type VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
             ]
         )
         if "config_json" in existing_columns:
             statements.append(
-                "ALTER TABLE inspection_items MODIFY config_json TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL"
+                "ALTER TABLE inspection_items MODIFY config_json TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL"
             )
         statements.append(
             "ALTER TABLE inspection_items MODIFY is_archived TINYINT(1) NOT NULL DEFAULT 0"
@@ -212,7 +227,7 @@ def _ensure_inspection_results_schema() -> None:
         statements.append(
             "ALTER TABLE inspection_results "
             "ADD COLUMN item_name_cached VARCHAR(100) "
-            "CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci "
+            "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci "
             "NOT NULL DEFAULT ''"
         )
     statements.append(
@@ -225,7 +240,7 @@ def _ensure_inspection_results_schema() -> None:
     )
     statements.append(
         "ALTER TABLE inspection_results "
-        "CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci"
+        "CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
     )
 
     with engine.begin() as connection:
@@ -324,10 +339,10 @@ def _ensure_audit_log_schema() -> None:
         return
 
     statements = [
-        "ALTER TABLE audit_logs CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci",
-        "ALTER TABLE audit_logs MODIFY action VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL",
-        "ALTER TABLE audit_logs MODIFY entity_type VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL",
-        "ALTER TABLE audit_logs MODIFY description TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL",
+        "ALTER TABLE audit_logs CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+        "ALTER TABLE audit_logs MODIFY action VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+        "ALTER TABLE audit_logs MODIFY entity_type VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+        "ALTER TABLE audit_logs MODIFY description TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
     ]
 
     with engine.begin() as connection:
