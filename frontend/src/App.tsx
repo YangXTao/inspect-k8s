@@ -21,6 +21,7 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
+import type { Location as RouterLocation } from "history";
 import {
   createInspectionRun,
   deleteCluster as apiDeleteCluster,
@@ -2586,6 +2587,7 @@ const App = () => {
   const [settingsNotice, setSettingsNotice] = useState<string | null>(null);
   const [settingsTabId, setSettingsTabId] = useState<string>("overview");
   const previousSettingsPathRef = useRef<string>("/");
+  const backgroundLocationRef = useRef<RouterLocation | null>(null);
 
   const sortedItems = useMemo(
     () => items.slice().sort(compareInspectionItemByName),
@@ -2594,6 +2596,25 @@ const App = () => {
 
   const location = useLocation();
   const navigate = useNavigate();
+  const backgroundLocation =
+    (
+      location.state as
+        | {
+            backgroundLocation?: RouterLocation;
+          }
+        | undefined
+    )?.backgroundLocation ?? null;
+
+  useEffect(() => {
+    if (backgroundLocation) {
+      backgroundLocationRef.current = backgroundLocation;
+    }
+  }, [backgroundLocation]);
+
+  const routesLocation =
+    location.pathname.startsWith(SETTINGS_BASE_PATH) && backgroundLocation
+      ? backgroundLocation
+      : location;
 
   const runDisplayIds = useMemo(
     () => createRunDisplayIdMap(runs, clusters),
@@ -2781,28 +2802,36 @@ const App = () => {
   const handleOpenSettings = useCallback(() => {
     setSettingsError(null);
     setSettingsNotice(null);
-    const currentPath = `${location.pathname}${location.search}${location.hash}`;
-    if (!location.pathname.startsWith(SETTINGS_BASE_PATH)) {
-      previousSettingsPathRef.current =
-        currentPath.length > 0 ? currentPath : "/";
+
+    if (location.pathname.startsWith(SETTINGS_BASE_PATH)) {
+      setSettingsOpen(true);
+      return;
     }
+
+    const currentPath = `${location.pathname}${location.search}${location.hash}`;
+    previousSettingsPathRef.current =
+      currentPath.length > 0 ? currentPath : "/";
+    backgroundLocationRef.current = location;
     setSettingsTabId("overview");
     setSettingsOpen(true);
-    if (location.pathname !== SETTINGS_BASE_PATH) {
-      navigate(SETTINGS_BASE_PATH);
-    }
-  }, [location.pathname, location.search, location.hash, navigate]);
+    navigate(SETTINGS_BASE_PATH, {
+      state: { backgroundLocation: location },
+    });
+  }, [location, navigate]);
 
   const handleCloseSettings = useCallback(() => {
-    const target = previousSettingsPathRef.current || "/";
+    const background = backgroundLocationRef.current;
+    const target =
+      (background
+        ? `${background.pathname}${background.search}${background.hash}`
+        : previousSettingsPathRef.current) || "/";
     setSettingsOpen(false);
     setConfirmState((prev) =>
       prev && prev.scope === "settings" ? null : prev
     );
-    if (location.pathname.startsWith(SETTINGS_BASE_PATH)) {
-      navigate(target, { replace: true });
-    }
-  }, [navigate, location.pathname]);
+    backgroundLocationRef.current = null;
+    navigate(target, { replace: true });
+  }, [navigate]);
 
   useEffect(() => {
     void refreshClusters();
@@ -3259,12 +3288,20 @@ const App = () => {
           ? SETTINGS_BASE_PATH
           : `${SETTINGS_BASE_PATH}/${nextTab}`;
       if (location.pathname !== targetPath) {
+        const baseBackground = backgroundLocation ?? backgroundLocationRef.current;
         navigate(targetPath, {
           replace: location.pathname.startsWith(SETTINGS_BASE_PATH),
+          state: baseBackground ? { backgroundLocation: baseBackground } : undefined,
         });
       }
     },
-    [settingsTabs, settingsTabId, navigate, location.pathname]
+    [
+      settingsTabs,
+      settingsTabId,
+      navigate,
+      location.pathname,
+      backgroundLocation,
+    ]
   );
 
   useEffect(() => {
@@ -3288,13 +3325,25 @@ const App = () => {
             ? SETTINGS_BASE_PATH
             : `${SETTINGS_BASE_PATH}/${nextTab}`;
         if (location.pathname !== fallbackPath) {
-          navigate(fallbackPath, { replace: true });
+          const baseBackground =
+            backgroundLocation ?? backgroundLocationRef.current;
+          navigate(fallbackPath, {
+            replace: true,
+            state: baseBackground ? { backgroundLocation: baseBackground } : undefined,
+          });
         }
       }
     } else {
       setSettingsOpen(false);
+      backgroundLocationRef.current = null;
     }
-  }, [location.pathname, settingsTabs, settingsTabId, navigate]);
+  }, [
+    location.pathname,
+    settingsTabs,
+    settingsTabId,
+    navigate,
+    backgroundLocation,
+  ]);
 
   const handleSubmitClusterEdit = useCallback(
     async ({
@@ -3378,7 +3427,7 @@ const App = () => {
     <>
       <TopNavigation onOpenSettings={handleOpenSettings} />
       <main className="app-shell">
-        <Routes>
+        <Routes location={routesLocation}>
           <Route path="/" element={overviewRouteElement} />
           <Route path="/setting/*" element={overviewRouteElement} />
           <Route
