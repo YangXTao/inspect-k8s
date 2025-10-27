@@ -1,4 +1,4 @@
-import {
+﻿import {
   ChangeEvent,
   FormEvent,
   type RefObject,
@@ -2008,7 +2008,17 @@ const InspectionSettingsPanel = ({
     }
   };
 
-  const activeItems = items.slice().sort((a, b) => a.id - b.id);
+  const activeItems = useMemo(
+    () =>
+      items
+        .slice()
+        .sort((a, b) =>
+          (a.name ?? "").localeCompare(b.name ?? "", "zh-Hans-CN", {
+            sensitivity: "base",
+          })
+        ),
+    [items]
+  );
 
   return (
     <div className="inspection-settings-panel">
@@ -2027,7 +2037,7 @@ const InspectionSettingsPanel = ({
             <table>
               <thead>
                 <tr>
-                  <th>ID</th>
+                  <th>序号</th>
                   <th>名称</th>
                   <th>类型</th>
                   <th>描述</th>
@@ -2040,9 +2050,9 @@ const InspectionSettingsPanel = ({
                     <td colSpan={5}>暂无巡检项</td>
                   </tr>
                 ) : (
-                  activeItems.map((item) => (
+                  activeItems.map((item, index) => (
                     <tr key={item.id}>
-                      <td>{item.id}</td>
+                      <td>{index + 1}</td>
                       <td>{item.name}</td>
                       <td>{item.check_type}</td>
                       <td>{item.description || "-"}</td>
