@@ -836,6 +836,7 @@ th {
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 10;
 }
 
 .settings-modal {
@@ -844,6 +845,12 @@ th {
   gap: 20px;
   width: 100%;
   max-width: 960px;
+  position: relative;
+  overflow: hidden;
+}
+
+.settings-confirm-backdrop {
+  backdrop-filter: blur(2px);
 }
 
 .settings-modal-header {

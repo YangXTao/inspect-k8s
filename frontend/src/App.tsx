@@ -56,6 +56,7 @@ interface ConfirmDialogState {
   cancelLabel?: string;
   variant?: ConfirmVariant;
   onConfirm: () => Promise<void> | void;
+  scope?: "global" | "settings";
 }
 
 const CLUSTER_ID_STORAGE_KEY = "clusterDisplayIdMap.v1";
@@ -1646,9 +1647,14 @@ const RunDetailView = ({
 interface ConfirmationModalProps {
   state: ConfirmDialogState | null;
   onClose: () => void;
+  nested?: boolean;
 }
 
-const ConfirmationModal = ({ state, onClose }: ConfirmationModalProps) => {
+const ConfirmationModal = ({
+  state,
+  onClose,
+  nested = false,
+}: ConfirmationModalProps) => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -1674,8 +1680,12 @@ const ConfirmationModal = ({ state, onClose }: ConfirmationModalProps) => {
     }
   };
 
+  const backdropClassName = nested
+    ? "modal-backdrop nested settings-confirm-backdrop"
+    : "modal-backdrop";
+
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
+    <div className={backdropClassName} role="dialog" aria-modal="true">
       <div className="modal">
         <h3>{state.title}</h3>
         <p>{state.message}</p>
@@ -1719,6 +1729,8 @@ interface SettingsModalProps {
   tabs: SettingsModalTab[];
   initialTabId?: string;
   onClose: () => void;
+  confirmState: ConfirmDialogState | null;
+  onConfirmClose: () => void;
 }
 
 const SettingsModal = ({
@@ -1726,7 +1738,10 @@ const SettingsModal = ({
   tabs,
   initialTabId,
   onClose,
+  confirmState,
+  onConfirmClose,
 }: SettingsModalProps) => {
+  const hasAppliedInitialTab = useRef(false);
   const [activeTab, setActiveTab] = useState(() => {
     if (initialTabId && tabs.some((tab) => tab.id === initialTabId)) {
       return initialTabId;
@@ -1736,11 +1751,17 @@ const SettingsModal = ({
 
   useEffect(() => {
     if (!open) {
+      hasAppliedInitialTab.current = false;
       return;
     }
 
-    if (initialTabId && tabs.some((tab) => tab.id === initialTabId)) {
-      setActiveTab(initialTabId);
+    if (!hasAppliedInitialTab.current) {
+      if (initialTabId && tabs.some((tab) => tab.id === initialTabId)) {
+        setActiveTab(initialTabId);
+      } else {
+        setActiveTab(tabs[0]?.id ?? "");
+      }
+      hasAppliedInitialTab.current = true;
       return;
     }
 
@@ -1750,6 +1771,7 @@ const SettingsModal = ({
       }
       return tabs[0]?.id ?? "";
     });
+
   }, [open, tabs, initialTabId]);
 
   if (!open || tabs.length === 0) {
@@ -1796,6 +1818,11 @@ const SettingsModal = ({
             })}
           </section>
         </div>
+        <ConfirmationModal
+          state={confirmState}
+          onClose={onConfirmClose}
+          nested
+        />
       </div>
     </div>
   );
@@ -1835,7 +1862,7 @@ interface InspectionSettingsPanelProps {
     check_type: string;
     config: Record<string, unknown>;
   }) => Promise<void>;
-  onDelete: (item: InspectionItem) => Promise<void>;
+  onDelete: (item: InspectionItem) => void;
 }
 
 type InspectionCheckType = "command" | "promql";
@@ -1915,9 +1942,6 @@ const InspectionSettingsPanel = ({
 }: InspectionSettingsPanelProps) => {
   const [formState, setFormState] = useState(defaultInspectionForm);
   const [formError, setFormError] = useState<string | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<InspectionItem | null>(
-    null
-  );
 
   const handleResetForm = () => {
     setFormState(defaultInspectionForm);
@@ -2064,18 +2088,18 @@ const InspectionSettingsPanel = ({
                           >
                             编辑
                           </button>
-                      <button
-                        className="link-button small danger"
-                        onClick={() => {
-                          setFormError(null);
-                          setPendingDelete(item);
-                        }}
-                        disabled={submitting}
-                      >
-                        删除
-                      </button>
-                    </div>
-                  </td>
+                          <button
+                            className="link-button small danger"
+                            onClick={() => {
+                              setFormError(null);
+                              onDelete(item);
+                            }}
+                            disabled={submitting}
+                          >
+                            删除
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -2239,45 +2263,6 @@ const InspectionSettingsPanel = ({
             </div>
           </form>
         </div>
-
-        {pendingDelete && (
-          <div className="modal-backdrop nested" role="dialog" aria-modal="true">
-            <div className="modal confirm">
-              <h3>删除巡检项</h3>
-              <p>
-                确认删除巡检项({pendingDelete.name})？该操作不可恢复。
-              </p>
-              <div className="modal-actions">
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => setPendingDelete(null)}
-                  disabled={submitting}
-                >
-                  取消
-                </button>
-                <button
-                  type="button"
-                  className="primary danger"
-                  onClick={async () => {
-                    try {
-                      await onDelete(pendingDelete);
-                      setPendingDelete(null);
-                      setFormError(null);
-                    } catch (err) {
-                      const message =
-                        err instanceof Error ? err.message : String(err);
-                      setFormError(message);
-                    }
-                  }}
-                  disabled={submitting}
-                >
-                  删除
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
     </div>
   );
 };
@@ -2620,6 +2605,20 @@ const App = () => {
       window.clearTimeout(timeout);
     };
   }, [inspectionNotice]);
+
+  useEffect(() => {
+    if (!settingsNotice || typeof window === "undefined") {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setSettingsNotice(null);
+    }, 5000);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [settingsNotice]);
 
   const handleTestClusterConnection = useCallback(
     async (clusterId: number) => {
@@ -3094,7 +3093,7 @@ const App = () => {
     [refreshItems]
   );
 
-  const handleDeleteInspectionItem = useCallback(
+  const performDeleteInspectionItem = useCallback(
     async (item: InspectionItem) => {
       setSettingsSubmitting(true);
       try {
@@ -3114,6 +3113,20 @@ const App = () => {
       }
     },
     [refreshItems]
+  );
+
+  const handleDeleteInspectionItem = useCallback(
+    (item: InspectionItem) => {
+      setConfirmState({
+        title: "删除巡检项",
+        message: `确认删除巡检项(${item.name})？该操作不可恢复。`,
+        confirmLabel: "删除",
+        variant: "danger",
+        scope: "settings",
+        onConfirm: () => performDeleteInspectionItem(item),
+      });
+    },
+    [performDeleteInspectionItem]
   );
 
   const settingsTabs = useMemo<SettingsModalTab[]>(
@@ -3305,7 +3318,7 @@ const App = () => {
       />
 
       <ConfirmationModal
-        state={confirmState}
+        state={confirmState && confirmState.scope !== "settings" ? confirmState : null}
         onClose={() => setConfirmState(null)}
       />
 
@@ -3314,6 +3327,12 @@ const App = () => {
         tabs={settingsTabs}
         initialTabId="overview"
         onClose={handleCloseSettings}
+        confirmState={
+          confirmState && confirmState.scope === "settings"
+            ? confirmState
+            : null
+        }
+        onConfirmClose={() => setConfirmState(null)}
       />
 
       {clusterEditState && (

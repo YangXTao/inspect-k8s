@@ -493,6 +493,8 @@ def create_inspection_item(
         .first()
     )
     if existing:
+        if existing.is_archived:
+            return crud.restore_inspection_item(db, existing, item_in)
         raise HTTPException(
             status_code=400,
             detail=f"Inspection item with name '{item_in.name}' already exists.",

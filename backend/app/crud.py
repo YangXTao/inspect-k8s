@@ -212,6 +212,31 @@ def delete_inspection_item(db: Session, item: models.InspectionItem) -> None:
     )
 
 
+def restore_inspection_item(
+    db: Session, item: models.InspectionItem, item_in: schemas.InspectionItemCreate
+) -> models.InspectionItem:
+    data = item_in.model_dump()
+    config = data.pop("config", None)
+
+    for key, value in data.items():
+        setattr(item, key, value)
+
+    item.set_config(config if isinstance(config, dict) else None)
+    item.is_archived = False
+    item.updated_at = datetime.utcnow()
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    log_action(
+        db,
+        action="update",
+        entity_type="inspection_item",
+        entity_id=item.id,
+        description=f"Restored inspection item '{item.name}'",
+    )
+    return item
+
+
 def get_items_by_ids(
     db: Session, item_ids: Iterable[int]
 ) -> List[models.InspectionItem]:
