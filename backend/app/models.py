@@ -104,10 +104,11 @@ class InspectionResult(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     run_id = Column(Integer, ForeignKey("inspection_runs.id"), nullable=False)
-    item_id = Column(Integer, ForeignKey("inspection_items.id"), nullable=False)
+    item_id = Column(Integer, ForeignKey("inspection_items.id", ondelete="SET NULL"), nullable=True)
     status = Column(String(20), nullable=False)
     detail = Column(Text, nullable=True)
     suggestion = Column(Text, nullable=True)
+    item_name_cached = Column(String(100), nullable=False, default="")
 
     run = relationship("InspectionRun", back_populates="results")
     item = relationship("InspectionItem", back_populates="results")

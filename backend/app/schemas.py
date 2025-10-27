@@ -66,7 +66,7 @@ class InspectionItemOut(InspectionItemBase):
 
 class InspectionResultOut(BaseModel):
     id: int
-    item_id: int
+    item_id: Optional[int]
     status: str
     detail: Optional[str]
     suggestion: Optional[str]

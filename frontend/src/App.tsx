@@ -119,6 +119,33 @@ const getClusterStatusMeta = (status: string) =>
 
 const CLUSTER_SLUG_PREFIX = "C-";
 
+const hasChineseCharacter = (value: string) =>
+  /[\u3400-\u9FFF\uF900-\uFAFF]/.test(value);
+
+const compareInspectionItemByName = (
+  a: InspectionItem,
+  b: InspectionItem
+) => {
+  const nameA = (a.name ?? "").trim();
+  const nameB = (b.name ?? "").trim();
+  const aHasChinese = hasChineseCharacter(nameA);
+  const bHasChinese = hasChineseCharacter(nameB);
+
+  if (aHasChinese !== bHasChinese) {
+    return aHasChinese ? 1 : -1;
+  }
+
+  const localeResult = nameA.localeCompare(nameB, "zh-Hans-CN", {
+    sensitivity: "base",
+    numeric: true,
+  });
+  if (localeResult !== 0) {
+    return localeResult;
+  }
+
+  return (a.id ?? 0) - (b.id ?? 0);
+};
+
 const hashString = (value: string) => {
   let hash = 0;
   for (let index = 0; index < value.length; index += 1) {
@@ -1361,6 +1388,7 @@ const ClusterDetailView = ({
 
 interface RunDetailProps {
   clusters: ClusterConfig[];
+  items: InspectionItem[];
   onDeleteRun: (runId: number, redirectPath?: string) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
@@ -1368,6 +1396,7 @@ interface RunDetailProps {
 
 const RunDetailView = ({
   clusters,
+  items,
   onDeleteRun,
   clusterDisplayIds,
   runDisplayIds,
@@ -1484,6 +1513,36 @@ const RunDetailView = ({
       window.open(url, "_blank", "noopener,noreferrer");
     }
   }, [run]);
+
+  const itemOrderMap = useMemo(() => {
+    const map = new Map<number, number>();
+    items.forEach((item, index) => {
+      map.set(item.id, index);
+    });
+    return map;
+  }, [items]);
+
+  const orderedResults = useMemo(() => {
+    if (!run?.results) {
+      return [];
+    }
+    return run.results
+      .slice()
+      .sort((a, b) => {
+        const orderA =
+          a.item_id != null
+            ? itemOrderMap.get(a.item_id) ?? Number.MAX_SAFE_INTEGER
+            : Number.MAX_SAFE_INTEGER;
+        const orderB =
+          b.item_id != null
+            ? itemOrderMap.get(b.item_id) ?? Number.MAX_SAFE_INTEGER
+            : Number.MAX_SAFE_INTEGER;
+        if (orderA !== orderB) {
+          return orderA - orderB;
+        }
+        return a.id - b.id;
+      });
+  }, [run, itemOrderMap]);
 
   if (isClusterIdInvalid) {
     return (
@@ -1617,12 +1676,12 @@ const RunDetailView = ({
                   </tr>
                 </thead>
                 <tbody>
-                  {run.results.length === 0 ? (
+                  {orderedResults.length === 0 ? (
                     <tr>
                       <td colSpan={4}>暂无巡检结果</td>
                     </tr>
                   ) : (
-                    run.results.map((result: InspectionResult) => (
+                    orderedResults.map((result: InspectionResult) => (
                       <tr key={result.id}>
                         <td>{result.item_name}</td>
                         <td>
@@ -2024,17 +2083,7 @@ const InspectionSettingsPanel = ({
     }
   };
 
-  const activeItems = useMemo(
-    () =>
-      items
-        .slice()
-        .sort((a, b) =>
-          (a.name ?? "").localeCompare(b.name ?? "", "zh-Hans-CN", {
-            sensitivity: "base",
-          })
-        ),
-    [items]
-  );
+  const activeItems = useMemo(() => items.slice(), [items]);
 
   return (
     <div className="inspection-settings-panel">
@@ -2537,6 +2586,11 @@ const App = () => {
   const [settingsNotice, setSettingsNotice] = useState<string | null>(null);
   const [settingsTabId, setSettingsTabId] = useState<string>("overview");
   const previousSettingsPathRef = useRef<string>("/");
+
+  const sortedItems = useMemo(
+    () => items.slice().sort(compareInspectionItemByName),
+    [items]
+  );
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -3171,7 +3225,7 @@ const App = () => {
         label: "巡检项设置",
         render: ({ close }) => (
           <InspectionSettingsPanel
-            items={items}
+            items={sortedItems}
             submitting={settingsSubmitting}
             notice={settingsNotice}
             error={settingsError}
@@ -3183,7 +3237,7 @@ const App = () => {
       },
     ],
     [
-      items,
+      sortedItems,
       settingsSubmitting,
       settingsNotice,
       settingsError,
@@ -3344,7 +3398,7 @@ const App = () => {
             element={
               <ClusterDetailView
                 clusters={clusters}
-                items={items}
+                items={sortedItems}
                 runs={runs}
                 selectedIds={selectedItemIds}
                 setSelectedIds={setSelectedItemIds}
@@ -3372,6 +3426,7 @@ const App = () => {
             element={
               <RunDetailView
                 clusters={clusters}
+                items={sortedItems}
                 onDeleteRun={handleDeleteRunById}
                 clusterDisplayIds={clusterDisplayIds}
                 runDisplayIds={runDisplayIds}

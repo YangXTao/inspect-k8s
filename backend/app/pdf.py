@@ -215,7 +215,10 @@ def generate_pdf_report(
         status_label = status.capitalize()
         data.append(
             [
-                Paragraph(result.item.name, styles["BodyText"]),
+                Paragraph(
+                    result.item.name if result.item else (result.item_name_cached or "已删除巡检项"),
+                    styles["BodyText"],
+                ),
                 Paragraph(status_label, styles["TableStatus"]),
                 Paragraph(result.detail or "-", detail_style),
                 Paragraph(result.suggestion or "-", suggestion_style),

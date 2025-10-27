@@ -1,9 +1,11 @@
-export type InspectionItem = {
+﻿export type InspectionItem = {
   id: number;
   name: string;
   description?: string;
   check_type: string;
   config?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type ClusterConfig = {
@@ -20,7 +22,7 @@ export type ClusterConfig = {
 
 export type InspectionResult = {
   id: number;
-  item_id: number;
+  item_id: number | null;
   status: "passed" | "warning" | "failed";
   detail?: string;
   suggestion?: string;

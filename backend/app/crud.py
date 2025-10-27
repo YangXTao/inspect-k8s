@@ -199,42 +199,28 @@ def update_inspection_item(
 
 
 def delete_inspection_item(db: Session, item: models.InspectionItem) -> None:
-    item.is_archived = True
-    item.updated_at = datetime.utcnow()
-    db.add(item)
+    results = (
+        db.query(models.InspectionResult)
+        .filter(models.InspectionResult.item_id == item.id)
+        .all()
+    )
+    for result in results:
+        if not result.item_name_cached:
+            result.item_name_cached = item.name or f"巡检项({item.id})"
+        result.item_id = None
+        db.add(result)
+
+    item_id = item.id
+    item_name = item.name
+    db.delete(item)
     db.commit()
     log_action(
         db,
         action="delete",
         entity_type="inspection_item",
-        entity_id=item.id,
-        description=f"Archived inspection item '{item.name}'",
+        entity_id=item_id,
+        description=f"Deleted inspection item '{item_name}'",
     )
-
-
-def restore_inspection_item(
-    db: Session, item: models.InspectionItem, item_in: schemas.InspectionItemCreate
-) -> models.InspectionItem:
-    data = item_in.model_dump()
-    config = data.pop("config", None)
-
-    for key, value in data.items():
-        setattr(item, key, value)
-
-    item.set_config(config if isinstance(config, dict) else None)
-    item.is_archived = False
-    item.updated_at = datetime.utcnow()
-    db.add(item)
-    db.commit()
-    db.refresh(item)
-    log_action(
-        db,
-        action="update",
-        entity_type="inspection_item",
-        entity_id=item.id,
-        description=f"Restored inspection item '{item.name}'",
-    )
-    return item
 
 
 def get_items_by_ids(
@@ -312,6 +298,7 @@ def add_inspection_result(
         status=status,
         detail=detail,
         suggestion=suggestion,
+        item_name_cached=item.name or f"巡检项({item.id})",
     )
     db.add(result)
     db.commit()

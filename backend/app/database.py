@@ -49,6 +49,7 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_cluster_schema()
     _ensure_inspection_schema()
+    _ensure_inspection_results_schema()
     _ensure_audit_log_schema()
 
 
@@ -171,6 +172,147 @@ def _ensure_inspection_schema() -> None:
         for statement in statements:
             connection.execute(text(statement))
 
+
+def _ensure_inspection_results_schema() -> None:
+    inspector = inspect(engine)
+    if "inspection_results" not in inspector.get_table_names():
+        return
+
+    columns = inspector.get_columns("inspection_results")
+    column_names = {column["name"] for column in columns}
+    dialect = engine.dialect.name
+
+    # SQLite requires table rebuild when altering column nullability
+    if dialect == "sqlite":
+        needs_rebuild = (
+            "item_name_cached" not in column_names
+            or any(
+                column["name"] == "item_id" and not column["nullable"]
+                for column in columns
+            )
+        )
+        if needs_rebuild:
+            _rebuild_sqlite_inspection_results_table(column_names)
+        return
+
+    statements: list[str] = []
+    item_id_fk = next(
+        (
+            fk
+            for fk in inspector.get_foreign_keys("inspection_results")
+            if fk["referred_table"] == "inspection_items"
+        ),
+        None,
+    )
+    if item_id_fk and item_id_fk.get("name"):
+        statements.append(
+            f"ALTER TABLE inspection_results DROP FOREIGN KEY {item_id_fk['name']}"
+        )
+    if "item_name_cached" not in column_names:
+        statements.append(
+            "ALTER TABLE inspection_results "
+            "ADD COLUMN item_name_cached VARCHAR(100) "
+            "CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci "
+            "NOT NULL DEFAULT ''"
+        )
+    statements.append(
+        "ALTER TABLE inspection_results MODIFY item_id INTEGER NULL"
+    )
+    statements.append(
+        "ALTER TABLE inspection_results "
+        "ADD CONSTRAINT fk_inspection_results_item "
+        "FOREIGN KEY (item_id) REFERENCES inspection_items(id) ON DELETE SET NULL"
+    )
+    statements.append(
+        "ALTER TABLE inspection_results "
+        "CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci"
+    )
+
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+        connection.execute(
+            text(
+                "UPDATE inspection_results r "
+                "LEFT JOIN inspection_items i ON r.item_id = i.id "
+                "SET r.item_name_cached = "
+                "CASE "
+                "WHEN r.item_name_cached IS NOT NULL AND r.item_name_cached <> '' "
+                "THEN r.item_name_cached "
+                "WHEN i.name IS NOT NULL THEN i.name "
+                "ELSE r.item_name_cached "
+                "END"
+            )
+        )
+
+
+def _rebuild_sqlite_inspection_results_table(existing_columns: set[str]) -> None:
+    with engine.begin() as connection:
+        connection.execute(text("PRAGMA foreign_keys=OFF"))
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS inspection_results_tmp (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id INTEGER NOT NULL,
+                    item_id INTEGER NULL,
+                    status TEXT NOT NULL,
+                    detail TEXT NULL,
+                    suggestion TEXT NULL,
+                    item_name_cached TEXT NOT NULL DEFAULT '',
+                    FOREIGN KEY(run_id) REFERENCES inspection_runs(id) ON DELETE CASCADE,
+                    FOREIGN KEY(item_id) REFERENCES inspection_items(id) ON DELETE SET NULL
+                )
+                """
+            )
+        )
+
+        if "item_name_cached" in existing_columns:
+            name_source = (
+                "CASE WHEN r.item_name_cached IS NOT NULL AND r.item_name_cached <> '' "
+                "THEN r.item_name_cached "
+                "WHEN i.name IS NOT NULL THEN i.name "
+                "ELSE '' END"
+            )
+        else:
+            name_source = "COALESCE(i.name, '')"
+
+        connection.execute(
+            text(
+                f"""
+                INSERT INTO inspection_results_tmp (
+                    id, run_id, item_id, status, detail, suggestion, item_name_cached
+                )
+                SELECT
+                    r.id,
+                    r.run_id,
+                    r.item_id,
+                    r.status,
+                    r.detail,
+                    r.suggestion,
+                    {name_source}
+                FROM inspection_results AS r
+                LEFT JOIN inspection_items AS i ON r.item_id = i.id
+                """
+            )
+        )
+        connection.execute(text("DROP TABLE inspection_results"))
+        connection.execute(
+            text("ALTER TABLE inspection_results_tmp RENAME TO inspection_results")
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_inspection_results_run_id "
+                "ON inspection_results(run_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_inspection_results_item_id "
+                "ON inspection_results(item_id)"
+            )
+        )
+        connection.execute(text("PRAGMA foreign_keys=ON"))
 
 def _ensure_audit_log_schema() -> None:
     inspector = inspect(engine)

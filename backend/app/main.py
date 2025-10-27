@@ -493,8 +493,6 @@ def create_inspection_item(
         .first()
     )
     if existing:
-        if existing.is_archived:
-            return crud.restore_inspection_item(db, existing, item_in)
         raise HTTPException(
             status_code=400,
             detail=f"Inspection item with name '{item_in.name}' already exists.",
@@ -530,7 +528,7 @@ def _serialize_result(result: models.InspectionResult) -> schemas.InspectionResu
         status=result.status,
         detail=result.detail,
         suggestion=result.suggestion,
-        item_name=result.item.name,
+        item_name=result.item.name if result.item else (result.item_name_cached or "已删除巡检项"),
     )
 
 
