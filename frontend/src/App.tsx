@@ -61,6 +61,7 @@ interface ConfirmDialogState {
 
 const CLUSTER_ID_STORAGE_KEY = "clusterDisplayIdMap.v1";
 const CLUSTER_PAGE_SIZE = 10;
+const SETTINGS_BASE_PATH = "/setting";
 
 const BEIJING_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Shanghai",
@@ -1731,6 +1732,8 @@ interface SettingsModalProps {
   onClose: () => void;
   confirmState: ConfirmDialogState | null;
   onConfirmClose: () => void;
+  activeTabId: string;
+  onTabChange: (tabId: string) => void;
 }
 
 const SettingsModal = ({
@@ -1740,46 +1743,35 @@ const SettingsModal = ({
   onClose,
   confirmState,
   onConfirmClose,
+  activeTabId,
+  onTabChange,
 }: SettingsModalProps) => {
-  const hasAppliedInitialTab = useRef(false);
-  const [activeTab, setActiveTab] = useState(() => {
-    if (initialTabId && tabs.some((tab) => tab.id === initialTabId)) {
-      return initialTabId;
-    }
-    return tabs[0]?.id ?? "";
-  });
+  const fallbackTabId = tabs[0]?.id ?? "";
+  const resolvedActiveTab =
+    tabs.find((tab) => tab.id === activeTabId)?.id ??
+    (initialTabId && tabs.some((tab) => tab.id === initialTabId)
+      ? initialTabId
+      : fallbackTabId);
 
   useEffect(() => {
-    if (!open) {
-      hasAppliedInitialTab.current = false;
+    if (!open || tabs.length === 0 || !resolvedActiveTab) {
       return;
     }
-
-    if (!hasAppliedInitialTab.current) {
-      if (initialTabId && tabs.some((tab) => tab.id === initialTabId)) {
-        setActiveTab(initialTabId);
-      } else {
-        setActiveTab(tabs[0]?.id ?? "");
-      }
-      hasAppliedInitialTab.current = true;
-      return;
+    if (resolvedActiveTab !== activeTabId) {
+      onTabChange(resolvedActiveTab);
     }
-
-    setActiveTab((current) => {
-      if (tabs.some((tab) => tab.id === current)) {
-        return current;
-      }
-      return tabs[0]?.id ?? "";
-    });
-
-  }, [open, tabs, initialTabId]);
+  }, [open, tabs.length, resolvedActiveTab, activeTabId, onTabChange]);
 
   if (!open || tabs.length === 0) {
     return null;
   }
 
   const activeTabConfig =
-    tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
+    tabs.find((tab) => tab.id === resolvedActiveTab) ?? tabs[0];
+
+  const handleTabChange = (tabId: string) => {
+    onTabChange(tabId);
+  };
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true">
@@ -1804,7 +1796,7 @@ const SettingsModal = ({
                 className={`settings-nav-button${
                   tab.id === activeTabConfig.id ? " active" : ""
                 }`}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => handleTabChange(tab.id)}
               >
                 {tab.label}
               </button>
@@ -1813,7 +1805,7 @@ const SettingsModal = ({
           <section className="settings-modal-main">
             {activeTabConfig.render({
               close: onClose,
-              selectTab: setActiveTab,
+              selectTab: handleTabChange,
               activeTabId: activeTabConfig.id,
             })}
           </section>
@@ -2543,6 +2535,8 @@ const App = () => {
   const [settingsSubmitting, setSettingsSubmitting] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [settingsNotice, setSettingsNotice] = useState<string | null>(null);
+  const [settingsTabId, setSettingsTabId] = useState<string>("overview");
+  const previousSettingsPathRef = useRef<string>("/");
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -2551,6 +2545,22 @@ const App = () => {
     () => createRunDisplayIdMap(runs, clusters),
     [runs, clusters]
   );
+
+  useEffect(() => {
+    const pathWithSearch = `${location.pathname}${location.search}${location.hash}`;
+    if (!location.pathname.startsWith(SETTINGS_BASE_PATH)) {
+      previousSettingsPathRef.current =
+        pathWithSearch.length > 0 ? pathWithSearch : "/";
+    }
+  }, [location.pathname, location.search, location.hash]);
+
+  useEffect(() => {
+    if (!settingsOpen) {
+      setConfirmState((prev) =>
+        prev && prev.scope === "settings" ? null : prev
+      );
+    }
+  }, [settingsOpen]);
 
   const setClusterTesting = useCallback((clusterId: number, value: boolean) => {
     setTestingClusterIds((prev) => {
@@ -2717,12 +2727,28 @@ const App = () => {
   const handleOpenSettings = useCallback(() => {
     setSettingsError(null);
     setSettingsNotice(null);
+    const currentPath = `${location.pathname}${location.search}${location.hash}`;
+    if (!location.pathname.startsWith(SETTINGS_BASE_PATH)) {
+      previousSettingsPathRef.current =
+        currentPath.length > 0 ? currentPath : "/";
+    }
+    setSettingsTabId("overview");
     setSettingsOpen(true);
-  }, []);
+    if (location.pathname !== SETTINGS_BASE_PATH) {
+      navigate(SETTINGS_BASE_PATH);
+    }
+  }, [location.pathname, location.search, location.hash, navigate]);
 
   const handleCloseSettings = useCallback(() => {
+    const target = previousSettingsPathRef.current || "/";
     setSettingsOpen(false);
-  }, []);
+    setConfirmState((prev) =>
+      prev && prev.scope === "settings" ? null : prev
+    );
+    if (location.pathname.startsWith(SETTINGS_BASE_PATH)) {
+      navigate(target, { replace: true });
+    }
+  }, [navigate, location.pathname]);
 
   useEffect(() => {
     void refreshClusters();
@@ -3166,6 +3192,56 @@ const App = () => {
     ]
   );
 
+  const handleSelectSettingsTab = useCallback(
+    (tabId: string) => {
+      const normalized = tabId.toLowerCase();
+      const validTabIds = settingsTabs.map((tab) => tab.id);
+      const nextTab = validTabIds.includes(normalized) ? normalized : "overview";
+      if (nextTab !== settingsTabId) {
+        setSettingsTabId(nextTab);
+      }
+      const targetPath =
+        nextTab === "overview"
+          ? SETTINGS_BASE_PATH
+          : `${SETTINGS_BASE_PATH}/${nextTab}`;
+      if (location.pathname !== targetPath) {
+        navigate(targetPath, {
+          replace: location.pathname.startsWith(SETTINGS_BASE_PATH),
+        });
+      }
+    },
+    [settingsTabs, settingsTabId, navigate, location.pathname]
+  );
+
+  useEffect(() => {
+    if (!settingsTabs.length) {
+      return;
+    }
+    if (location.pathname.startsWith(SETTINGS_BASE_PATH)) {
+      setSettingsOpen(true);
+      const segments = location.pathname.split("/").filter(Boolean);
+      const requestedTab = (segments[1] ?? "overview").toLowerCase();
+      const validTabIds = settingsTabs.map((tab) => tab.id);
+      const nextTab = validTabIds.includes(requestedTab)
+        ? requestedTab
+        : "overview";
+      if (nextTab !== settingsTabId) {
+        setSettingsTabId(nextTab);
+      }
+      if (!validTabIds.includes(requestedTab)) {
+        const fallbackPath =
+          nextTab === "overview"
+            ? SETTINGS_BASE_PATH
+            : `${SETTINGS_BASE_PATH}/${nextTab}`;
+        if (location.pathname !== fallbackPath) {
+          navigate(fallbackPath, { replace: true });
+        }
+      }
+    } else {
+      setSettingsOpen(false);
+    }
+  }, [location.pathname, settingsTabs, settingsTabId, navigate]);
+
   const handleSubmitClusterEdit = useCallback(
     async ({
       name,
@@ -3221,36 +3297,36 @@ const App = () => {
     setClusterEditError(null);
   };
 
+  const overviewRouteElement = (
+    <OverviewView
+      clusters={clusters}
+      clusterError={clusterError}
+      clusterNotice={clusterNotice}
+      clusterNoticeType={clusterNoticeType}
+      clusterUploading={clusterUploading}
+      clusterNameInput={clusterNameInput}
+      clusterPromInput={clusterPromInput}
+      setClusterNameInput={setClusterNameInput}
+      setClusterPromInput={setClusterPromInput}
+      openKubeconfigModal={handleOpenKubeconfigModal}
+      kubeconfigSummary={kubeconfigSummary}
+      kubeconfigReady={kubeconfigReady}
+      onUpload={handleUploadCluster}
+      onEditCluster={handleEditCluster}
+      onDeleteCluster={handleDeleteCluster}
+      clusterDisplayIds={clusterDisplayIds}
+      onTestClusterConnection={handleTestClusterConnection}
+      testingClusterIds={testingClusterIds}
+    />
+  );
+
   return (
     <>
       <TopNavigation onOpenSettings={handleOpenSettings} />
       <main className="app-shell">
         <Routes>
-          <Route
-            path="/"
-            element={
-              <OverviewView
-                clusters={clusters}
-                clusterError={clusterError}
-                clusterNotice={clusterNotice}
-                clusterNoticeType={clusterNoticeType}
-                clusterUploading={clusterUploading}
-                clusterNameInput={clusterNameInput}
-                clusterPromInput={clusterPromInput}
-                setClusterNameInput={setClusterNameInput}
-                setClusterPromInput={setClusterPromInput}
-                openKubeconfigModal={handleOpenKubeconfigModal}
-                kubeconfigSummary={kubeconfigSummary}
-                kubeconfigReady={kubeconfigReady}
-                onUpload={handleUploadCluster}
-                onEditCluster={handleEditCluster}
-                onDeleteCluster={handleDeleteCluster}
-                clusterDisplayIds={clusterDisplayIds}
-                onTestClusterConnection={handleTestClusterConnection}
-                testingClusterIds={testingClusterIds}
-              />
-            }
-          />
+          <Route path="/" element={overviewRouteElement} />
+          <Route path="/setting/*" element={overviewRouteElement} />
           <Route
             path="/history"
             element={
@@ -3333,6 +3409,8 @@ const App = () => {
             : null
         }
         onConfirmClose={() => setConfirmState(null)}
+        activeTabId={settingsTabId}
+        onTabChange={handleSelectSettingsTab}
       />
 
       {clusterEditState && (
