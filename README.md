@@ -127,7 +127,57 @@ docker push your-registry/inspect-backend:latest
 docker push your-registry/inspect-frontend:latest
 ```
 
-若尚未编写 Dockerfile，可参考上文示例。
+若尚未编写 Dockerfile，可直接使用以下模板：
+
+`backend/Dockerfile`
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+
+# 安装依赖
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 拷贝源码
+COPY backend /app
+
+ENV PYTHONUNBUFFERED=1
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+`frontend/Dockerfile`
+```dockerfile
+FROM node:20-alpine AS build
+WORKDIR /frontend
+
+COPY frontend/package*.json ./
+RUN npm install
+COPY frontend /frontend
+RUN npm run build
+
+FROM nginx:1.27-alpine
+# 如果需要自定义代理，可在 frontend/nginx.conf 中编写并复制进来
+COPY --from=build /frontend/dist /usr/share/nginx/html
+```
+
+> 如需在前端容器内配置 `/api` → `inspect-backend:8000` 的反向代理，可在仓库根目录创建 `frontend/nginx.conf`，示例：
+> ```nginx
+> server {
+>     listen 80;
+>     server_name _;
+> 
+>     location /api/ {
+>         proxy_pass http://inspect-backend:8000/;
+>         proxy_set_header Host $host;
+>         proxy_set_header X-Real-IP $remote_addr;
+>     }
+> 
+>     location / {
+>         try_files $uri $uri/ /index.html;
+>     }
+> }
+> ```
+> 并在 Dockerfile 中添加 `COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf`。
 
 ### 2. 准备集群资源
 
