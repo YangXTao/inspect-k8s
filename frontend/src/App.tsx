@@ -49,6 +49,7 @@ import {
 
 type NoticeType = "success" | "warning" | "error" | null;
 type ConfirmVariant = "primary" | "danger";
+type NoticeScope = "overview" | "clusterDetail" | "history" | "runDetail";
 
 interface ConfirmDialogOption {
   id: string;
@@ -125,6 +126,16 @@ const clusterStatusMeta = {
 const getClusterStatusMeta = (status: string) =>
   clusterStatusMeta[status as keyof typeof clusterStatusMeta] ||
   clusterStatusMeta.unknown;
+
+const resolveNoticeScope = (pathname: string): NoticeScope => {
+  if (pathname.startsWith("/history")) {
+    return "history";
+  }
+  if (pathname.startsWith("/clusters/")) {
+    return pathname.includes("/runs/") ? "runDetail" : "clusterDetail";
+  }
+  return "overview";
+};
 
 const CLUSTER_SLUG_PREFIX = "C-";
 
@@ -431,6 +442,7 @@ interface OverviewProps {
   clusterError: string | null;
   clusterNotice: string | null;
   clusterNoticeType: NoticeType;
+  clusterNoticeScope: NoticeScope | null;
   clusterUploading: boolean;
   clusterNameInput: string;
   clusterPromInput: string;
@@ -452,6 +464,7 @@ const OverviewView = ({
   clusterError,
   clusterNotice,
   clusterNoticeType,
+  clusterNoticeScope,
   clusterUploading,
   clusterNameInput,
   clusterPromInput,
@@ -623,9 +636,11 @@ const OverviewView = ({
       <section className="card cluster-panel">
         <div className="card-header">
           <h2>集群列表</h2>
-        </div>
-        {clusterError && <div className="feedback error">{clusterError}</div>}
-        {clusterNotice && clusterNoticeType && (
+      </div>
+      {clusterError && <div className="feedback error">{clusterError}</div>}
+      {clusterNotice &&
+        clusterNoticeType &&
+        clusterNoticeScope === "overview" && (
           <div className={`feedback ${clusterNoticeType}`}>{clusterNotice}</div>
         )}
         {clusters.length === 0 ? (
@@ -901,6 +916,9 @@ interface HistoryViewProps {
   onDeleteRun: (run: InspectionRunListItem) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
+  notice?: string | null;
+  noticeType?: NoticeType;
+  noticeScope?: NoticeScope | null;
 }
 
 const HistoryView = ({
@@ -909,8 +927,13 @@ const HistoryView = ({
   onDeleteRun,
   clusterDisplayIds,
   runDisplayIds,
+  notice,
+  noticeType,
+  noticeScope,
 }: HistoryViewProps) => {
   const navigate = useNavigate();
+  const shouldShowNotice =
+    notice && noticeType && noticeScope === "history";
 
   return (
     <section className="card history history-page">
@@ -920,6 +943,9 @@ const HistoryView = ({
           刷新
         </button>
       </div>
+      {shouldShowNotice && (
+        <div className={`feedback ${noticeType}`}>{notice}</div>
+      )}
       {runs.length === 0 ? (
         <div className="placeholder">暂无巡检记录，请稍后再查看。</div>
       ) : (
@@ -1007,6 +1033,7 @@ interface ClusterDetailProps {
   error: string | null;
   clusterNotice: string | null;
   clusterNoticeType: NoticeType;
+  clusterNoticeScope: NoticeScope | null;
   clusterError: string | null;
   onStartInspection: (clusterId: number) => Promise<void>;
   onDeleteRun: (run: InspectionRunListItem) => Promise<void>;
@@ -1031,6 +1058,7 @@ const ClusterDetailView = ({
   error,
   clusterNotice,
   clusterNoticeType,
+  clusterNoticeScope,
   clusterError,
   onStartInspection,
   onDeleteRun,
@@ -1199,9 +1227,11 @@ const ClusterDetailView = ({
       </div>
 
       {clusterError && <div className="feedback error">{clusterError}</div>}
-      {clusterNotice && clusterNoticeType && (
-        <div className={`feedback ${clusterNoticeType}`}>{clusterNotice}</div>
-      )}
+      {clusterNotice &&
+        clusterNoticeType &&
+        clusterNoticeScope === "clusterDetail" && (
+          <div className={`feedback ${clusterNoticeType}`}>{clusterNotice}</div>
+        )}
       {error && <div className="feedback error">{error}</div>}
       {notice && <div className="feedback success">{notice}</div>}
 
@@ -1401,6 +1431,9 @@ interface RunDetailProps {
   onDeleteRun: (runId: number, redirectPath?: string) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
+  notice?: string | null;
+  noticeType?: NoticeType;
+  noticeScope?: NoticeScope | null;
 }
 
 const RunDetailView = ({
@@ -1409,12 +1442,17 @@ const RunDetailView = ({
   onDeleteRun,
   clusterDisplayIds,
   runDisplayIds,
+  notice,
+  noticeType,
+  noticeScope,
 }: RunDetailProps) => {
   const { clusterKey, runKey } = useParams<{
     clusterKey?: string;
     runKey?: string;
   }>();
   const navigate = useNavigate();
+  const shouldShowNotice =
+    notice && noticeType && noticeScope === "runDetail";
 
   const numericClusterId = useMemo(() => {
     if (!clusterKey) {
@@ -1612,10 +1650,14 @@ const RunDetailView = ({
               下载报告
             </button>
           ) : null}
-        </div>
       </div>
+    </div>
 
-      {error && <div className="feedback error">{error}</div>}
+    {shouldShowNotice && (
+      <div className={`feedback ${noticeType}`}>{notice}</div>
+    )}
+
+    {error && <div className="feedback error">{error}</div>}
 
       {loading ? (
         <div className="detail-empty">
@@ -2598,10 +2640,25 @@ const App = () => {
   const [items, setItems] = useState<InspectionItem[]>([]);
 
   const [clusterError, setClusterError] = useState<string | null>(null);
-  const [clusterNotice, setClusterNotice] = useState<string | null>(null);
-  const [clusterNoticeType, setClusterNoticeType] =
-    useState<NoticeType>(null);
-  const [clusterUploading, setClusterUploading] = useState(false);
+const [clusterNotice, setClusterNotice] = useState<string | null>(null);
+const [clusterNoticeType, setClusterNoticeType] =
+  useState<NoticeType>(null);
+const [clusterNoticeScope, setClusterNoticeScope] =
+  useState<NoticeScope | null>(null);
+const clearClusterNotice = useCallback(() => {
+  setClusterNotice(null);
+  setClusterNoticeType(null);
+  setClusterNoticeScope(null);
+}, []);
+const showClusterNotice = useCallback(
+  (scope: NoticeScope, message: string, type: Exclude<NoticeType, null>) => {
+    setClusterNotice(message);
+    setClusterNoticeType(type);
+    setClusterNoticeScope(scope);
+  },
+  []
+);
+const [clusterUploading, setClusterUploading] = useState(false);
   const [clusterNameInput, setClusterNameInput] = useState("");
   const [clusterPromInput, setClusterPromInput] = useState("");
   const [kubeconfigModalOpen, setKubeconfigModalOpen] = useState(false);
@@ -2648,9 +2705,13 @@ const App = () => {
     [items]
   );
 
-  const location = useLocation();
-  const navigate = useNavigate();
-  const backgroundLocation =
+const location = useLocation();
+const navigate = useNavigate();
+const currentNoticeScope = useMemo(
+  () => resolveNoticeScope(location.pathname),
+  [location.pathname]
+);
+const backgroundLocation =
     (
       location.state as
         | {
@@ -2722,14 +2783,13 @@ const App = () => {
     }
 
     const timeout = window.setTimeout(() => {
-      setClusterNotice(null);
-      setClusterNoticeType(null);
+      clearClusterNotice();
     }, 5000);
 
     return () => {
       window.clearTimeout(timeout);
     };
-  }, [clusterNotice, clusterNoticeType]);
+  }, [clusterNotice, clusterNoticeType, clearClusterNotice]);
 
   useEffect(() => {
     if (!inspectionNotice || typeof window === "undefined") {
@@ -2761,8 +2821,7 @@ const App = () => {
 
   const handleTestClusterConnection = useCallback(
     async (clusterId: number) => {
-      setClusterNotice(null);
-      setClusterNoticeType(null);
+      clearClusterNotice();
       setClusterError(null);
       setClusterTesting(clusterId, true);
       try {
@@ -2779,12 +2838,13 @@ const App = () => {
           noticeType = "error";
         }
         const detailMessage = updated.connection_message
-          ? `，详情: ${updated.connection_message}`
+          ? `，详情：${updated.connection_message}`
           : "";
-        setClusterNotice(
-          `集群(${updated.name}) ${statusMeta.label}${detailMessage}`
+        showClusterNotice(
+          currentNoticeScope,
+          `集群(${updated.name}) ${statusMeta.label}${detailMessage}`,
+          noticeType
         );
-        setClusterNoticeType(noticeType);
         logWithTimestamp(
           "info",
           "集群连接测试完成: %s -> %s",
@@ -2795,13 +2855,12 @@ const App = () => {
         const message =
           err instanceof Error ? err.message : "测试集群连接失败";
         logWithTimestamp("error", "测试集群连接失败: %s", message);
-        setClusterNotice(message);
-        setClusterNoticeType("error");
+        showClusterNotice(currentNoticeScope, message, "error");
       } finally {
         setClusterTesting(clusterId, false);
       }
     },
-    [setClusterTesting]
+    [clearClusterNotice, currentNoticeScope, setClusterTesting, showClusterNotice]
   );
 
   const refreshClusters = useCallback(async () => {
@@ -2833,10 +2892,9 @@ const App = () => {
       const message =
         err instanceof Error ? err.message : "获取巡检历史失败";
       logWithTimestamp("error", "获取巡检历史失败: %s", message);
-      setClusterNotice(message);
-      setClusterNoticeType("error");
+      showClusterNotice(currentNoticeScope, message, "error");
     }
-  }, []);
+  }, [currentNoticeScope, showClusterNotice]);
 
   const refreshItems = useCallback(async () => {
     try {
@@ -2986,8 +3044,7 @@ const App = () => {
 
     setClusterUploading(true);
     setClusterError(null);
-    setClusterNotice(null);
-    setClusterNoticeType(null);
+    clearClusterNotice();
 
     try {
       logWithTimestamp(
@@ -2999,8 +3056,7 @@ const App = () => {
       resetClusterUploadForm();
       await refreshClusters();
       await refreshRuns();
-      setClusterNotice("集群注册成功");
-      setClusterNoticeType("success");
+      showClusterNotice(currentNoticeScope, "集群注册成功", "success");
       logWithTimestamp("info", "集群注册成功");
     } catch (err) {
       const message =
@@ -3019,6 +3075,9 @@ const App = () => {
     kubeconfigText,
     refreshClusters,
     refreshRuns,
+    clearClusterNotice,
+    currentNoticeScope,
+    showClusterNotice,
   ]);
 
   const hasManualKubeconfig = useMemo(
@@ -3116,32 +3175,33 @@ const App = () => {
             label: "同时删除本地 kubeconfig 及关联巡检报告文件",
           },
         ],
-        onConfirm: async (optionsMap) => {
-          try {
-            logWithTimestamp("info", "删除集群: %s", cluster.id);
-            const deleteFiles = Boolean(optionsMap?.deleteLocalFiles);
-            await apiDeleteCluster(cluster.id, { deleteFiles });
-            await refreshClusters();
-            await refreshRuns();
-            setClusterNotice("集群已删除");
-            setClusterNoticeType("success");
-            if (location.pathname.includes("/clusters/")) {
-              navigate("/", { replace: true });
+          onConfirm: async (optionsMap) => {
+            try {
+              logWithTimestamp("info", "删除集群: %s", cluster.id);
+              const deleteFiles = Boolean(optionsMap?.deleteLocalFiles);
+              await apiDeleteCluster(cluster.id, { deleteFiles });
+              await refreshClusters();
+              await refreshRuns();
+              const successScope = location.pathname.includes("/clusters/")
+                ? "overview"
+                : currentNoticeScope;
+              showClusterNotice(successScope, "集群已删除", "success");
+              if (location.pathname.includes("/clusters/")) {
+                navigate("/", { replace: true });
+              }
+            } catch (err) {
+              const message =
+                err instanceof Error ? err.message : "删除集群失败";
+              logWithTimestamp("error", "删除集群失败: %s", message);
+              showClusterNotice(currentNoticeScope, message, "error");
+              throw err instanceof Error ? err : new Error(message);
             }
-          } catch (err) {
-            const message =
-              err instanceof Error ? err.message : "删除集群失败";
-            logWithTimestamp("error", "删除集群失败: %s", message);
-            setClusterNotice(message);
-            setClusterNoticeType("error");
-            throw err instanceof Error ? err : new Error(message);
-          }
-        },
-      });
-      return Promise.resolve();
-    },
-    [refreshClusters, refreshRuns, location.pathname, navigate]
-  );
+          },
+        });
+        return Promise.resolve();
+      },
+      [refreshClusters, refreshRuns, location.pathname, navigate, currentNoticeScope, showClusterNotice]
+    );
 
   const handleDeleteRun = useCallback(
     (run: InspectionRunListItem): Promise<void> => {
@@ -3164,21 +3224,19 @@ const App = () => {
             await apiDeleteInspectionRun(run.id, { deleteFiles });
             await refreshRuns();
             await refreshClusters();
-            setClusterNotice("巡检记录已删除");
-            setClusterNoticeType("success");
+            showClusterNotice(currentNoticeScope, "巡检记录已删除", "success");
           } catch (err) {
             const message =
               err instanceof Error ? err.message : "删除巡检记录失败";
             logWithTimestamp("error", "删除巡检记录失败: %s", message);
-            setClusterNotice(message);
-            setClusterNoticeType("error");
+            showClusterNotice(currentNoticeScope, message, "error");
             throw err instanceof Error ? err : new Error(message);
           }
         },
       });
       return Promise.resolve();
     },
-    [runDisplayIds, refreshRuns, refreshClusters]
+    [runDisplayIds, refreshRuns, refreshClusters, currentNoticeScope, showClusterNotice]
   );
 
   const handleDeleteRunById = useCallback(
@@ -3203,8 +3261,10 @@ const App = () => {
             await apiDeleteInspectionRun(runId, { deleteFiles });
             await refreshRuns();
             await refreshClusters();
-            setClusterNotice("巡检记录已删除");
-            setClusterNoticeType("success");
+            const targetScope = redirectPath
+              ? resolveNoticeScope(redirectPath)
+              : currentNoticeScope;
+            showClusterNotice(targetScope, "巡检记录已删除", "success");
             if (redirectPath) {
               navigate(redirectPath, { replace: true });
             }
@@ -3212,15 +3272,21 @@ const App = () => {
             const message =
               err instanceof Error ? err.message : "删除巡检记录失败";
             logWithTimestamp("error", "删除巡检记录失败: %s", message);
-            setClusterNotice(message);
-            setClusterNoticeType("error");
+            showClusterNotice(currentNoticeScope, message, "error");
             throw err instanceof Error ? err : new Error(message);
           }
         },
       });
       return Promise.resolve();
     },
-    [runDisplayIds, refreshRuns, refreshClusters, navigate]
+    [
+      runDisplayIds,
+      refreshRuns,
+      refreshClusters,
+      navigate,
+      currentNoticeScope,
+      showClusterNotice,
+    ]
   );
 
   const handleEditCluster = useCallback((cluster: ClusterConfig) => {
@@ -3456,8 +3522,7 @@ const App = () => {
         await updateCluster(clusterEditState.id, formData);
         await refreshClusters();
         await refreshRuns();
-        setClusterNotice("集群信息已更新");
-        setClusterNoticeType("success");
+        showClusterNotice(currentNoticeScope, "集群信息已更新", "success");
         setClusterEditState(null);
       } catch (err) {
         const message =
@@ -3468,7 +3533,13 @@ const App = () => {
         setClusterEditSubmitting(false);
       }
     },
-    [clusterEditState, refreshClusters, refreshRuns]
+    [
+      clusterEditState,
+      refreshClusters,
+      refreshRuns,
+      currentNoticeScope,
+      showClusterNotice,
+    ]
   );
 
   const closeClusterEditModal = () => {
@@ -3482,6 +3553,7 @@ const App = () => {
       clusterError={clusterError}
       clusterNotice={clusterNotice}
       clusterNoticeType={clusterNoticeType}
+      clusterNoticeScope={clusterNoticeScope}
       clusterUploading={clusterUploading}
       clusterNameInput={clusterNameInput}
       clusterPromInput={clusterPromInput}
@@ -3515,6 +3587,9 @@ const App = () => {
                 onDeleteRun={handleDeleteRun}
                 clusterDisplayIds={clusterDisplayIds}
                 runDisplayIds={runDisplayIds}
+                notice={clusterNotice}
+                noticeType={clusterNoticeType}
+                noticeScope={clusterNoticeScope}
               />
             }
           />
@@ -3534,6 +3609,7 @@ const App = () => {
                 error={inspectionError}
                 clusterNotice={clusterNotice}
                 clusterNoticeType={clusterNoticeType}
+                clusterNoticeScope={clusterNoticeScope}
                 clusterError={clusterError}
                 onStartInspection={handleStartInspection}
                 onDeleteRun={handleDeleteRun}
@@ -3555,6 +3631,9 @@ const App = () => {
                 onDeleteRun={handleDeleteRunById}
                 clusterDisplayIds={clusterDisplayIds}
                 runDisplayIds={runDisplayIds}
+                notice={clusterNotice}
+                noticeType={clusterNoticeType}
+                noticeScope={clusterNoticeScope}
               />
             }
           />
