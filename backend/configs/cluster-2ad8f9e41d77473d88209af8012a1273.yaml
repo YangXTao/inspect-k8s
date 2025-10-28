@@ -20,7 +20,7 @@ clusters:
 users:
 - name: "demo-inspect"
   user:
-    token: "kubeconfig-user-7hsz5wlbk9:scc2m4hmxn9745zqstvh5mfv7gcgsplb745ngvgtpzhxmgrsjwhchd"
+    token: "kubeconfig-user-7hsz5h8x45:r97mxtl94v4r48rmr2qf8trszb5d9s62jrx748dhg2kqnhgxzbzgc8"
 
 
 contexts:

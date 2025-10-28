@@ -819,6 +819,40 @@ th {
   color: #475569;
 }
 
+.confirmation-options {
+  margin-top: 4px;
+  display: grid;
+  gap: 10px;
+}
+
+.confirmation-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  color: #334155;
+}
+
+.confirmation-option input {
+  margin-top: 2px;
+}
+
+.confirmation-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.confirmation-option-label {
+  font-weight: 500;
+  color: #1e293b;
+}
+
+.confirmation-option-description {
+  font-size: 12px;
+  color: #64748b;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;

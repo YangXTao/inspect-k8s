@@ -118,8 +118,17 @@ export function updateCluster(
   });
 }
 
-export function deleteCluster(clusterId: number): Promise<void> {
-  return request<void>(`/clusters/${clusterId}`, {
+export function deleteCluster(
+  clusterId: number,
+  options?: { deleteFiles?: boolean }
+): Promise<void> {
+  const params = new URLSearchParams();
+  if (options?.deleteFiles) {
+    params.set("delete_files", "true");
+  }
+  const query = params.toString();
+  const url = query ? `/clusters/${clusterId}?${query}` : `/clusters/${clusterId}`;
+  return request<void>(url, {
     method: "DELETE",
   });
 }
@@ -167,8 +176,17 @@ export function deleteInspectionItem(itemId: number): Promise<void> {
   });
 }
 
-export function deleteInspectionRun(runId: number): Promise<void> {
-  return request<void>(`/inspection-runs/${runId}`, {
+export function deleteInspectionRun(
+  runId: number,
+  options?: { deleteFiles?: boolean }
+): Promise<void> {
+  const params = new URLSearchParams();
+  if (options?.deleteFiles) {
+    params.set("delete_files", "true");
+  }
+  const query = params.toString();
+  const url = query ? `/inspection-runs/${runId}?${query}` : `/inspection-runs/${runId}`;
+  return request<void>(url, {
     method: "DELETE",
   });
 }

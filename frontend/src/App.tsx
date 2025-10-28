@@ -50,14 +50,22 @@ import {
 type NoticeType = "success" | "warning" | "error" | null;
 type ConfirmVariant = "primary" | "danger";
 
+interface ConfirmDialogOption {
+  id: string;
+  label: string;
+  description?: string;
+  defaultChecked?: boolean;
+}
+
 interface ConfirmDialogState {
   title: string;
   message: string;
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: ConfirmVariant;
-  onConfirm: () => Promise<void> | void;
+  onConfirm: (options?: Record<string, boolean>) => Promise<void> | void;
   scope?: "global" | "settings";
+  options?: ConfirmDialogOption[];
 }
 
 const CLUSTER_ID_STORAGE_KEY = "clusterDisplayIdMap.v1";
@@ -1718,6 +1726,19 @@ const ConfirmationModal = ({
 }: ConfirmationModalProps) => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [optionValues, setOptionValues] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!state?.options?.length) {
+      setOptionValues({});
+      return;
+    }
+    const defaults: Record<string, boolean> = {};
+    for (const option of state.options) {
+      defaults[option.id] = option.defaultChecked ?? false;
+    }
+    setOptionValues(defaults);
+  }, [state]);
 
   if (!state) {
     return null;
@@ -1732,7 +1753,8 @@ const ConfirmationModal = ({
     setError(null);
     setSubmitting(true);
     try {
-      await state.onConfirm();
+      const payload = state.options?.length ? optionValues : undefined;
+      await state.onConfirm(payload);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -1750,6 +1772,38 @@ const ConfirmationModal = ({
       <div className="modal">
         <h3>{state.title}</h3>
         <p>{state.message}</p>
+        {state.options?.length ? (
+          <div className="confirmation-options">
+            {state.options.map((option) => {
+              const checked = optionValues[option.id] ?? false;
+              return (
+                <label key={option.id} className="confirmation-option">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(event) => {
+                      const { checked: nextChecked } = event.currentTarget;
+                      setOptionValues((prev) => ({
+                        ...prev,
+                        [option.id]: nextChecked,
+                      }));
+                    }}
+                  />
+                  <div className="confirmation-option-text">
+                    <span className="confirmation-option-label">
+                      {option.label}
+                    </span>
+                    {option.description && (
+                      <span className="confirmation-option-description">
+                        {option.description}
+                      </span>
+                    )}
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        ) : null}
         {error && <div className="feedback error">{error}</div>}
         <div className="modal-actions">
           <button
@@ -3056,10 +3110,17 @@ const App = () => {
         message: `确认删除集群(${cluster.name})？该操作不可恢复。`,
         confirmLabel: "删除",
         variant: "danger",
-        onConfirm: async () => {
+        options: [
+          {
+            id: "deleteLocalFiles",
+            label: "同时删除本地 kubeconfig 及关联巡检报告文件",
+          },
+        ],
+        onConfirm: async (optionsMap) => {
           try {
             logWithTimestamp("info", "删除集群: %s", cluster.id);
-            await apiDeleteCluster(cluster.id);
+            const deleteFiles = Boolean(optionsMap?.deleteLocalFiles);
+            await apiDeleteCluster(cluster.id, { deleteFiles });
             await refreshClusters();
             await refreshRuns();
             setClusterNotice("集群已删除");
@@ -3090,10 +3151,17 @@ const App = () => {
         message: `确认删除巡检记录(${displayId})？该操作不可恢复。`,
         confirmLabel: "删除",
         variant: "danger",
-        onConfirm: async () => {
+        options: [
+          {
+            id: "deleteReportFile",
+            label: "同时删除本地巡检报告文件",
+          },
+        ],
+        onConfirm: async (optionsMap) => {
           try {
             logWithTimestamp("info", "删除巡检记录: %s", run.id);
-            await apiDeleteInspectionRun(run.id);
+            const deleteFiles = Boolean(optionsMap?.deleteReportFile);
+            await apiDeleteInspectionRun(run.id, { deleteFiles });
             await refreshRuns();
             await refreshClusters();
             setClusterNotice("巡检记录已删除");
@@ -3121,10 +3189,18 @@ const App = () => {
         message: `确认删除巡检记录(${displayId})？该操作不可恢复。`,
         confirmLabel: "删除",
         variant: "danger",
-        onConfirm: async () => {
+        options: [
+          {
+            id: "deleteReportFile",
+            label: "同时删除本地巡检报告 (PDF)",
+            description: "勾选后将移除 reports/ 目录中的对应报告。",
+          },
+        ],
+        onConfirm: async (optionsMap) => {
           try {
             logWithTimestamp("info", "删除巡检记录: %s", runId);
-            await apiDeleteInspectionRun(runId);
+            const deleteFiles = Boolean(optionsMap?.deleteReportFile);
+            await apiDeleteInspectionRun(runId, { deleteFiles });
             await refreshRuns();
             await refreshClusters();
             setClusterNotice("巡检记录已删除");

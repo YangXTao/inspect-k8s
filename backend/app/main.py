@@ -10,7 +10,7 @@ from uuid import uuid4
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 import yaml
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -451,24 +451,35 @@ async def update_cluster(
 
 
 @app.delete("/clusters/{cluster_id}", status_code=204)
-def delete_cluster(cluster_id: int, db: Session = Depends(get_db)):
+def delete_cluster(
+    cluster_id: int,
+    delete_files: bool = Query(
+        False,
+        description="同时删除本地 kubeconfig 及关联巡检报告文件",
+    ),
+    db: Session = Depends(get_db),
+):
     cluster = crud.get_cluster(db, cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="指定的集群不存在。")
 
-    runs = (
-        db.query(models.InspectionRun)
-        .filter(models.InspectionRun.cluster_id == cluster_id)
-        .all()
-    )
-    report_paths = [run.report_path for run in runs if run.report_path]
-    kubeconfig_path = cluster.kubeconfig_path
+    report_paths: list[str] = []
+    kubeconfig_path: str | None = None
+    if delete_files:
+        runs = (
+            db.query(models.InspectionRun)
+            .filter(models.InspectionRun.cluster_id == cluster_id)
+            .all()
+        )
+        report_paths = [run.report_path for run in runs if run.report_path]
+        kubeconfig_path = cluster.kubeconfig_path
 
     crud.delete_cluster(db, cluster)
 
-    _remove_file_safely(kubeconfig_path)
-    for report_path in report_paths:
-        _remove_file_safely(report_path)
+    if delete_files:
+        _remove_file_safely(kubeconfig_path)
+        for report_path in report_paths:
+            _remove_file_safely(report_path)
 
     return {}
 
@@ -673,13 +684,21 @@ def get_inspection_run(run_id: int, db: Session = Depends(get_db)):
 
 
 @app.delete("/inspection-runs/{run_id}", status_code=204)
-def delete_inspection_run(run_id: int, db: Session = Depends(get_db)):
+def delete_inspection_run(
+    run_id: int,
+    delete_files: bool = Query(
+        False,
+        description="同时删除本地巡检报告文件",
+    ),
+    db: Session = Depends(get_db),
+):
     run = crud.get_inspection_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
-    report_path = run.report_path
+    report_path = run.report_path if delete_files else None
     crud.delete_inspection_run(db, run)
-    _remove_file_safely(report_path)
+    if delete_files:
+        _remove_file_safely(report_path)
     return {}
 
 
