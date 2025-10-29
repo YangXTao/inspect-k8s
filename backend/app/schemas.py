@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -42,6 +42,7 @@ class InspectionItemBase(BaseModel):
     name: str = Field(..., max_length=100)
     description: Optional[str] = None
     check_type: str = Field(..., max_length=50)
+    config: Optional[Dict[str, Any]] = None
 
 
 class InspectionItemCreate(InspectionItemBase):
@@ -52,6 +53,7 @@ class InspectionItemUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
     description: Optional[str] = None
     check_type: Optional[str] = Field(None, max_length=50)
+    config: Optional[Dict[str, Any]] = None
 
 
 class InspectionItemOut(InspectionItemBase):
@@ -64,7 +66,7 @@ class InspectionItemOut(InspectionItemBase):
 
 class InspectionResultOut(BaseModel):
     id: int
-    item_id: int
+    item_id: Optional[int]
     status: str
     detail: Optional[str]
     suggestion: Optional[str]

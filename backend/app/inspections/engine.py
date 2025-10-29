@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import shlex
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterable, Tuple
 
@@ -40,6 +41,222 @@ def _run_kubectl(args: Iterable[str], context: CheckContext) -> Tuple[bool, str]
     if result.returncode != 0:
         return False, result.stderr.strip() or "kubectl returned non-zero exit code."
     return True, result.stdout.strip()
+
+
+DEFAULT_COMMAND_TIMEOUT = 30
+MAX_OUTPUT_LENGTH = 2000
+
+
+def _truncate_output(value: str) -> str:
+    value = value.strip()
+    if len(value) <= MAX_OUTPUT_LENGTH:
+        return value
+    return value[: MAX_OUTPUT_LENGTH - 3] + "..."
+
+
+def _execute_command_check(config: Dict[str, object], context: CheckContext) -> Tuple[str, str, str]:
+    if not isinstance(config, dict):
+        return (
+            CHECK_STATUS_WARNING,
+            "Command configuration is invalid.",
+            "Update the inspection item definition.",
+        )
+    command = config.get("command")
+    if not command:
+        return (
+            CHECK_STATUS_WARNING,
+            "No command configured.",
+            "Provide a command in the inspection item definition.",
+        )
+
+    shell = bool(config.get("shell", False))
+    placeholder = str(config.get("kubeconfig_placeholder", "{{kubeconfig}}"))
+    kubeconfig = context.kubeconfig_path
+
+    def _replace_placeholder(value: str) -> str:
+        if placeholder in value:
+            return value.replace(placeholder, kubeconfig or "")
+        return value
+
+    if isinstance(command, str):
+        rendered = _replace_placeholder(command)
+        if shell:
+            cmd = rendered
+        else:
+            try:
+                cmd = shlex.split(rendered)
+            except ValueError as exc:
+                return (
+                    CHECK_STATUS_WARNING,
+                    f"Failed to parse command: {exc}",
+                    "Adjust the command definition.",
+                )
+    elif isinstance(command, (list, tuple)):
+        cmd = []
+        for part in command:
+            part = _replace_placeholder(str(part))
+            if not part:
+                continue
+            cmd.append(part)
+    else:
+        return (
+            CHECK_STATUS_WARNING,
+            "Unsupported command data type.",
+            "Provide the command as a string or list.",
+        )
+
+    timeout = int(config.get("timeout", DEFAULT_COMMAND_TIMEOUT))
+    success_codes = config.get("success_exit_codes", [0])
+    if not isinstance(success_codes, (list, tuple)):
+        success_codes = [success_codes]
+    success_codes = {int(code) for code in success_codes}
+
+    try:
+        result = subprocess.run(
+            cmd,
+            shell=shell,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        suggestion = config.get("suggestion_on_timeout") or config.get("suggestion_on_fail") or "Check command runtime or increase timeout."
+        return (
+            CHECK_STATUS_WARNING,
+            f"Command timed out after {timeout}s.",
+            suggestion,
+        )
+    except FileNotFoundError:
+        return (
+            CHECK_STATUS_FAILED,
+            "Command executable not found.",
+            config.get("suggestion_on_fail") or "Ensure the binary is installed on the server.",
+        )
+    except Exception as exc:  # pragma: no cover - defensive path
+        return (
+            CHECK_STATUS_FAILED,
+            f"Command execution error: {exc}",
+            config.get("suggestion_on_fail") or "Review command definition.",
+        )
+
+    stdout = result.stdout or ""
+    stderr = result.stderr or ""
+    exit_code = result.returncode
+
+    if exit_code in success_codes:
+        expected = config.get("expect_substrings") or []
+        if isinstance(expected, str):
+            expected = [expected]
+        missing = [pattern for pattern in expected if pattern not in stdout]
+        if missing:
+            detail = (
+                "Output missing expected text: " + ", ".join(missing)
+            )
+            suggestion = config.get("suggestion_on_fail") or "Verify the command output."
+            return CHECK_STATUS_WARNING, detail, suggestion
+
+        detail = config.get("success_message") or _truncate_output(stdout or "Command executed successfully.")
+        suggestion = config.get("suggestion_on_success") or ""
+        return CHECK_STATUS_PASSED, detail, suggestion
+
+    detail = config.get("failure_message") or _truncate_output(stderr or stdout or "Command returned non-zero exit code.")
+    suggestion = config.get("suggestion_on_fail") or "Inspect command output for details."
+    return CHECK_STATUS_FAILED, detail, suggestion
+
+
+def _compare(value: float, threshold: float, operator: str) -> bool:
+    if operator == ">=":
+        return value >= threshold
+    if operator == ">":
+        return value > threshold
+    if operator == "<=":
+        return value <= threshold
+    if operator == "<":
+        return value < threshold
+    if operator == "==":
+        return value == threshold
+    if operator == "!=":
+        return value != threshold
+    return value >= threshold
+
+
+def _aggregate_values(values: list[float], mode: str) -> float:
+    if not values:
+        return 0.0
+    mode = mode.lower()
+    if mode == "min":
+        return min(values)
+    if mode == "avg" or mode == "mean":
+        return sum(values) / len(values)
+    if mode == "sum":
+        return sum(values)
+    return max(values)
+
+
+def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> Tuple[str, str, str]:
+    if not isinstance(config, dict):
+        return (
+            CHECK_STATUS_WARNING,
+            "PromQL configuration is invalid.",
+            "Update the inspection item definition.",
+        )
+    missing = _require_prom(context)
+    if missing:
+        return missing
+    expression = config.get("expression")
+    if not expression:
+        return (
+            CHECK_STATUS_WARNING,
+            "PromQL expression is not configured.",
+            "Provide an expression in the inspection item definition.",
+        )
+    prom = context.prom
+    ok, results, message = prom.query(str(expression))
+    if not ok:
+        suggestion = config.get("suggestion_on_error") or "Check Prometheus endpoint availability."
+        return CHECK_STATUS_WARNING, message, suggestion
+
+    values = []
+    for sample in results or []:
+        value = PrometheusClient.extract_value(sample)
+        if value is not None:
+            values.append(value)
+
+    if not values:
+        empty_status = config.get("status_if_empty", CHECK_STATUS_WARNING)
+        empty_message = config.get("empty_message") or "Prometheus returned no samples."
+        suggestion = config.get("suggestion_if_empty") or "Ensure the metric is being scraped."
+        return empty_status, empty_message, suggestion
+
+    aggregate_mode = str(config.get("aggregate", "max"))
+    aggregate_value = _aggregate_values(values, aggregate_mode)
+
+    comparison = str(config.get("comparison", ">=")).strip()
+    fail_threshold = config.get("fail_threshold")
+    warn_threshold = config.get("warn_threshold")
+
+    status = CHECK_STATUS_PASSED
+    suggestion = config.get("suggestion_on_success") or ""
+
+    if fail_threshold is not None and _compare(float(aggregate_value), float(fail_threshold), comparison):
+        status = CHECK_STATUS_FAILED
+        suggestion = config.get("suggestion_on_fail") or suggestion
+    elif warn_threshold is not None and _compare(float(aggregate_value), float(warn_threshold), comparison):
+        status = CHECK_STATUS_WARNING
+        suggestion = config.get("suggestion_on_warn") or suggestion
+
+    detail_template = config.get("detail_template")
+    if isinstance(detail_template, str):
+        try:
+            detail = detail_template.format(value=aggregate_value, values=values, expression=expression)
+        except Exception:
+            detail = f"{aggregate_mode} value from {expression}: {aggregate_value}"
+    else:
+        sample_count = len(values)
+        detail = f"{aggregate_mode} value from {expression}: {aggregate_value} (samples={sample_count})"
+
+    return status, detail, suggestion
 
 
 def _require_prom(context: CheckContext) -> Tuple[str, str, str] | None:
@@ -128,25 +345,25 @@ def check_pods_status(context: CheckContext) -> Tuple[str, str, str]:
     return CHECK_STATUS_WARNING, detail, suggestion
 
 
-def check_events_recent(context: CheckContext) -> Tuple[str, str, str]:
-    ok, payload = _run_kubectl(
-        [
-            "get",
-            "events",
-            "--all-namespaces",
-            "--sort-by=.metadata.creationTimestamp",
-            "-o",
-            "wide",
-        ],
-        context,
-    )
-    if not ok:
-        return (
-            CHECK_STATUS_WARNING,
-            payload,
-            "Confirm cluster permissions for events.",
-        )
-    return CHECK_STATUS_PASSED, payload[:2000], "Use kubectl get events for full details."
+# def check_events_recent(context: CheckContext) -> Tuple[str, str, str]:
+#     ok, payload = _run_kubectl(
+#         [
+#             "get",
+#             "events",
+#             "--all-namespaces",
+#             "--sort-by=.metadata.creationTimestamp",
+#             "-o",
+#             "wide",
+#         ],
+#         context,
+#     )
+#     if not ok:
+#         return (
+#             CHECK_STATUS_WARNING,
+#             payload,
+#             "Confirm cluster permissions for events.",
+#         )
+#     return CHECK_STATUS_PASSED, payload[:2000], "Use kubectl get events for full details."
 
 
 def check_cluster_cpu_usage(context: CheckContext) -> Tuple[str, str, str]:
@@ -341,7 +558,7 @@ HANDLERS: Dict[str, Callable[[CheckContext], Tuple[str, str, str]]] = {
     "cluster_version": check_cluster_version,
     "nodes_status": check_nodes_status,
     "pods_status": check_pods_status,
-    "events_recent": check_events_recent,
+    # "events_recent": check_events_recent,
     "cluster_cpu_usage": check_cluster_cpu_usage,
     "cluster_memory_usage": check_cluster_memory_usage,
     "node_cpu_hotspots": check_node_cpu_hotspots,
@@ -364,11 +581,6 @@ DEFAULT_CHECKS = [
         "name": "Pod Status",
         "description": "Checks for non-running pods cluster-wide.",
         "check_type": "pods_status",
-    },
-    {
-        "name": "Recent Events",
-        "description": "Fetches latest cluster events ordered by timestamp.",
-        "check_type": "events_recent",
     },
     {
         "name": "Cluster CPU Usage",
@@ -395,15 +607,48 @@ DEFAULT_CHECKS = [
         "description": "Monitors node disk IO time ratio.",
         "check_type": "cluster_disk_io",
     },
+    {
+        "name": "kubectl cluster-info",
+        "description": "Runs 'kubectl cluster-info' using the cluster kubeconfig to verify connectivity.",
+        "check_type": "command",
+        "config": {
+            "command": ["kubectl", "--kubeconfig", "{{kubeconfig}}", "cluster-info"],
+            "timeout": 20,
+            "success_message": "kubectl cluster-info succeeded.",
+            "failure_message": "kubectl cluster-info reported an error.",
+            "suggestion_on_fail": "检查 kubeconfig 是否有效且 apiserver 可访问。"
+        },
+    },
+    {
+        "name": "API Server Availability",
+        "description": "Checks the apiserver 'up' metric via Prometheus.",
+        "check_type": "promql",
+        "config": {
+            "expression": "max(up{job='apiserver'})",
+            "comparison": "<=",
+            "fail_threshold": 0,
+            "empty_message": "Prometheus 未返回 apiserver up 指标。",
+            "suggestion_on_fail": "确认 Prometheus 中 apiserver target 状态正常。",
+            "suggestion_if_empty": "检查 Prometheus 抓取配置是否包含 apiserver target。"
+        },
+    },
 ]
 
 
-def dispatch_checks(check_type: str, context: CheckContext) -> Tuple[str, str, str]:
+def dispatch_checks(
+    check_type: str,
+    context: CheckContext,
+    config: Dict[str, object] | None = None,
+) -> Tuple[str, str, str]:
+    if check_type == "command":
+        return _execute_command_check(config or {}, context)
+    if check_type == "promql":
+        return _execute_promql_check(config or {}, context)
     handler = HANDLERS.get(check_type)
     if handler is None:
         return (
             CHECK_STATUS_WARNING,
             f"No handler implemented for check type '{check_type}'.",
-            "Create a handler in inspections.engine.HANDLERS.",
+            "Create a handler in inspections.engine.HANDLERS or use a command/promql definition.",
         )
     return handler(context)

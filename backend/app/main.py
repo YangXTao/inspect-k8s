@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import logging
@@ -7,12 +7,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 from uuid import uuid4
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 import yaml
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+import urllib3
 
 try:
     from kubernetes import client as k8s_client
@@ -31,7 +33,34 @@ from .prometheus import PrometheusClient
 
 logger = logging.getLogger(__name__)
 
+
+def _normalise_cluster_name(name: str | None) -> str:
+    if not name:
+        return "cluster"
+    import re as _re
+    slug = _re.sub(r"\s+", "-", name.strip().lower())
+    return slug or "cluster"
+
+
+def _build_run_display_id(db: Session, run: models.InspectionRun) -> str:
+    cluster_name = getattr(run.cluster, "name", None) or getattr(run, "cluster_name", None) or "cluster"
+    slug = _normalise_cluster_name(cluster_name)
+    runs = (
+        db.query(models.InspectionRun)
+        .filter(models.InspectionRun.cluster_id == run.cluster_id)
+        .order_by(models.InspectionRun.created_at.asc(), models.InspectionRun.id.asc())
+        .all()
+    )
+    for index, candidate in enumerate(runs, start=1):
+        if candidate.id == run.id:
+            return f"{slug}-{index:02d}"
+    return f"{slug}-{run.id:02d}"
+
 app = FastAPI(title="K8s Inspection Service", version="0.3.0")
+
+CONNECTION_TEST_TIMEOUT_SECONDS = 8.0
+CONNECTION_TEST_CONNECT_TIMEOUT = 3.0
+CONNECTION_TEST_READ_TIMEOUT = 5.0
 
 app.add_middleware(
     CORSMiddleware,
@@ -54,16 +83,34 @@ def _seed_defaults(db: Session) -> None:
     existing_names = {
         name for (name,) in db.query(models.InspectionItem.name).all()
     }
-    new_items = [
-        models.InspectionItem(**payload)
-        for payload in DEFAULT_CHECKS
-        if payload["name"] not in existing_names
-    ]
+    new_items = []
+    for payload in DEFAULT_CHECKS:
+        if payload["name"] in existing_names:
+            continue
+        data = payload.copy()
+        config = data.pop("config", None)
+        item = models.InspectionItem(**data)
+        if config is not None:
+            item.set_config(config if isinstance(config, dict) else None)
+        new_items.append(item)
+
     if not new_items:
         return
     for item in new_items:
         db.add(item)
     db.commit()
+
+    # deprecated_names = {"Recent Events"}
+    # if deprecated_names:
+    #     existing = (
+    #         db.query(models.InspectionItem)
+    #         .filter(models.InspectionItem.name.in_(deprecated_names))
+    #         .all()
+    #     )
+    #     for item in existing:
+    #         db.delete(item)
+    #     if existing:
+    #         db.commit()
 
 
 def _extract_contexts(kubeconfig_text: str) -> List[str]:
@@ -139,25 +186,53 @@ def _test_cluster_connection(kubeconfig_path: str) -> tuple[str, str]:
     if not k8s_config or not k8s_client:
         return (
             "warning",
-            "后端未安装 kubernetes Python 客户端，跳过连通性校验。",
+            "\u540e\u7aef\u672a\u5b89\u88c5 kubernetes Python \u5ba2\u6237\u7aef\uff0c\u8df3\u8f6c\u8fde\u901a\u6027\u6821\u9a8c\u3002",
         )
 
-    try:
+    def _perform_check() -> tuple[str, str]:
         api_client = k8s_config.new_client_from_config(config_file=kubeconfig_path)
+        rest_client = getattr(api_client, "rest_client", None)
+        pool_manager = getattr(rest_client, "pool_manager", None)
+        if pool_manager and hasattr(pool_manager, "connection_pool_kw"):
+            pool_manager.connection_pool_kw["timeout"] = urllib3.Timeout(
+                connect=CONNECTION_TEST_CONNECT_TIMEOUT,
+                read=CONNECTION_TEST_READ_TIMEOUT,
+            )
+
         version_api = k8s_client.VersionApi(api_client)
-        version_info = version_api.get_code()
+        version_info = version_api.get_code(
+            _request_timeout=CONNECTION_TEST_READ_TIMEOUT
+        )
         git_version = (version_info.git_version or "").strip()
         if not git_version:
             git_version = f"{version_info.major}.{version_info.minor}".strip()
 
         core_api = k8s_client.CoreV1Api(api_client)
-        nodes = core_api.list_node(_request_timeout=5)
+        nodes = core_api.list_node(
+            _request_timeout=CONNECTION_TEST_READ_TIMEOUT,
+            _preload_content=True,
+        )
         node_count = len(nodes.items)
         detail = f"Server version {git_version}; nodes {node_count}."
         return "connected", detail
-    except ApiException as exc:
-        reason = exc.reason or exc.body or str(exc)
-        return "failed", f"Kubernetes API error: {reason}"
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_perform_check)
+        try:
+            return future.result(timeout=CONNECTION_TEST_TIMEOUT_SECONDS)
+        except FuturesTimeoutError:
+            return (
+                "failed",
+                f"\u8fde\u63a5\u6821\u9a8c\u8d85\u65f6(>{CONNECTION_TEST_TIMEOUT_SECONDS}\u79d2)\uff0c\u8bf7\u68c0\u67e5\u7f51\u7edc\u8fde\u901a\u6027\u6216\u76ee\u6807\u5730\u5740\u3002",
+            )
+        except ApiException as exc:
+            reason = exc.reason or exc.body or str(exc)
+            return "failed", f"Kubernetes API error: {reason}"
+        except Exception as exc:  # pragma: no cover
+            return "failed", f"Cluster validation error: {exc}"
+
+    try:
+        return _perform_check()
     except Exception as exc:  # pragma: no cover
         return "failed", f"Cluster validation error: {exc}"
 
@@ -192,9 +267,21 @@ def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _present_cluster(
+    cluster: models.ClusterConfig,
+) -> schemas.ClusterConfigOut:
+    result = schemas.ClusterConfigOut.model_validate(cluster)
+    if result.connection_status == "failed":
+        result.connection_message = "连接异常"
+    elif not result.connection_message:
+        result.connection_message = "No additional details."
+    return result
+
+
 @app.get("/clusters", response_model=List[schemas.ClusterConfigOut])
 def list_clusters(db: Session = Depends(get_db)):
-    return crud.list_clusters(db)
+    clusters = crud.list_clusters(db)
+    return [_present_cluster(cluster) for cluster in clusters]
 
 
 @app.post("/clusters", response_model=schemas.ClusterConfigOut, status_code=201)
@@ -244,16 +331,45 @@ async def register_cluster(
 
     status, message = _test_cluster_connection(cluster.kubeconfig_path)
     sanitized_message = _sanitize_message(message)
+    stored_message = sanitized_message or "No additional details."
     _log_connection_status(cluster.name, status, message)
     cluster = crud.update_cluster(
         db,
         cluster,
         connection_status=status,
-        connection_message=sanitized_message,
+        connection_message=stored_message,
         last_checked_at=datetime.utcnow(),
     )
 
-    return cluster
+    return _present_cluster(cluster)
+
+
+
+@app.post(
+    "/clusters/{cluster_id}/test-connection",
+    response_model=schemas.ClusterConfigOut,
+)
+def test_cluster_connection(cluster_id: int, db: Session = Depends(get_db)):
+    cluster = crud.get_cluster(db, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="指定的集群不存在。")
+
+    kubeconfig_path = Path(cluster.kubeconfig_path)
+    if not kubeconfig_path.exists():
+        raise HTTPException(status_code=500, detail="集群 kubeconfig 文件不存在。")
+
+    status, message = _test_cluster_connection(cluster.kubeconfig_path)
+    sanitized_message = _sanitize_message(message)
+    stored_message = sanitized_message or "No additional details."
+    _log_connection_status(cluster.name, status, message)
+    cluster = crud.update_cluster(
+        db,
+        cluster,
+        connection_status=status,
+        connection_message=stored_message,
+        last_checked_at=datetime.utcnow(),
+    )
+    return _present_cluster(cluster)
 
 
 @app.put("/clusters/{cluster_id}", response_model=schemas.ClusterConfigOut)
@@ -310,7 +426,9 @@ async def update_cluster(
         update_kwargs["contexts_json"] = json.dumps(contexts, ensure_ascii=False)
         status, message = _test_cluster_connection(new_kubeconfig_path)
         connection_status = status
-        connection_message = _sanitize_message(message)
+        sanitized_message = _sanitize_message(message)
+        stored_message = sanitized_message or "No additional details."
+        connection_message = stored_message
         connection_checked_at = datetime.utcnow()
 
     if update_kwargs:
@@ -329,28 +447,39 @@ async def update_cluster(
     if new_kubeconfig_path:
         _remove_file_safely(original_kubeconfig_path)
 
-    return cluster
+    return _present_cluster(cluster)
 
 
 @app.delete("/clusters/{cluster_id}", status_code=204)
-def delete_cluster(cluster_id: int, db: Session = Depends(get_db)):
+def delete_cluster(
+    cluster_id: int,
+    delete_files: bool = Query(
+        False,
+        description="同时删除本地 kubeconfig 及关联巡检报告文件",
+    ),
+    db: Session = Depends(get_db),
+):
     cluster = crud.get_cluster(db, cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="指定的集群不存在。")
 
-    runs = (
-        db.query(models.InspectionRun)
-        .filter(models.InspectionRun.cluster_id == cluster_id)
-        .all()
-    )
-    report_paths = [run.report_path for run in runs if run.report_path]
-    kubeconfig_path = cluster.kubeconfig_path
+    report_paths: list[str] = []
+    kubeconfig_path: str | None = None
+    if delete_files:
+        runs = (
+            db.query(models.InspectionRun)
+            .filter(models.InspectionRun.cluster_id == cluster_id)
+            .all()
+        )
+        report_paths = [run.report_path for run in runs if run.report_path]
+        kubeconfig_path = cluster.kubeconfig_path
 
     crud.delete_cluster(db, cluster)
 
-    _remove_file_safely(kubeconfig_path)
-    for report_path in report_paths:
-        _remove_file_safely(report_path)
+    if delete_files:
+        _remove_file_safely(kubeconfig_path)
+        for report_path in report_paths:
+            _remove_file_safely(report_path)
 
     return {}
 
@@ -410,7 +539,7 @@ def _serialize_result(result: models.InspectionResult) -> schemas.InspectionResu
         status=result.status,
         detail=result.detail,
         suggestion=result.suggestion,
-        item_name=result.item.name,
+        item_name=result.item.name if result.item else (result.item_name_cached or "已删除巡检项"),
     )
 
 
@@ -484,7 +613,7 @@ def trigger_inspection(
 
     status_counter = {"passed": 0, "warning": 0, "failed": 0}
     for item in items:
-        status, detail, suggestion = dispatch_checks(item.check_type, context)
+        status, detail, suggestion = dispatch_checks(item.check_type, context, item.config)
         sanitized_detail = _sanitize_optional_text(detail)
         sanitized_suggestion = _sanitize_optional_text(suggestion)
         crud.add_inspection_result(
@@ -520,7 +649,8 @@ def trigger_inspection(
     if not run:
         raise HTTPException(status_code=500, detail="无法加载巡检结果。")
 
-    report_path = generate_pdf_report(run=run, results=run.results)
+    display_id = _build_run_display_id(db, run)
+    report_path = generate_pdf_report(run=run, results=run.results, display_id=display_id)
     run.report_path = report_path
     db.add(run)
     db.commit()
@@ -554,13 +684,21 @@ def get_inspection_run(run_id: int, db: Session = Depends(get_db)):
 
 
 @app.delete("/inspection-runs/{run_id}", status_code=204)
-def delete_inspection_run(run_id: int, db: Session = Depends(get_db)):
+def delete_inspection_run(
+    run_id: int,
+    delete_files: bool = Query(
+        False,
+        description="同时删除本地巡检报告文件",
+    ),
+    db: Session = Depends(get_db),
+):
     run = crud.get_inspection_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
-    report_path = run.report_path
+    report_path = run.report_path if delete_files else None
     crud.delete_inspection_run(db, run)
-    _remove_file_safely(report_path)
+    if delete_files:
+        _remove_file_safely(report_path)
     return {}
 
 
@@ -577,3 +715,12 @@ def download_report(run_id: int, db: Session = Depends(get_db)):
         media_type="application/pdf",
         filename=path.name,
     )
+
+
+
+
+
+
+
+
+

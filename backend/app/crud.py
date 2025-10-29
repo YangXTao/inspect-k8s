@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime
 from typing import Iterable, List, Optional
@@ -136,7 +136,12 @@ def log_action(
 
 
 def get_inspection_items(db: Session) -> List[models.InspectionItem]:
-    return db.query(models.InspectionItem).order_by(models.InspectionItem.id).all()
+    return (
+        db.query(models.InspectionItem)
+        .filter(models.InspectionItem.is_archived.is_(False))
+        .order_by(models.InspectionItem.id)
+        .all()
+    )
 
 
 def get_inspection_item(db: Session, item_id: int) -> Optional[models.InspectionItem]:
@@ -150,7 +155,10 @@ def get_inspection_item(db: Session, item_id: int) -> Optional[models.Inspection
 def create_inspection_item(
     db: Session, item_in: schemas.InspectionItemCreate
 ) -> models.InspectionItem:
-    item = models.InspectionItem(**item_in.model_dump())
+    data = item_in.model_dump()
+    config = data.pop("config", None)
+    item = models.InspectionItem(**data)
+    item.set_config(config if isinstance(config, dict) else None)
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -168,8 +176,14 @@ def update_inspection_item(
     db: Session, item: models.InspectionItem, item_in: schemas.InspectionItemUpdate
 ) -> models.InspectionItem:
     data = item_in.model_dump(exclude_unset=True)
+    config = data.pop("config", None)
+
     for key, value in data.items():
         setattr(item, key, value)
+
+    if config is not None:
+        item.set_config(config if isinstance(config, dict) else None)
+
     item.updated_at = datetime.utcnow()
     db.add(item)
     db.commit()
@@ -185,14 +199,27 @@ def update_inspection_item(
 
 
 def delete_inspection_item(db: Session, item: models.InspectionItem) -> None:
+    results = (
+        db.query(models.InspectionResult)
+        .filter(models.InspectionResult.item_id == item.id)
+        .all()
+    )
+    for result in results:
+        if not result.item_name_cached:
+            result.item_name_cached = item.name or f"巡检项({item.id})"
+        result.item_id = None
+        db.add(result)
+
+    item_id = item.id
+    item_name = item.name
     db.delete(item)
     db.commit()
     log_action(
         db,
         action="delete",
         entity_type="inspection_item",
-        entity_id=item.id,
-        description=f"Deleted inspection item '{item.name}'",
+        entity_id=item_id,
+        description=f"Deleted inspection item '{item_name}'",
     )
 
 
@@ -271,6 +298,7 @@ def add_inspection_result(
         status=status,
         detail=detail,
         suggestion=suggestion,
+        item_name_cached=item.name or f"巡检项({item.id})",
     )
     db.add(result)
     db.commit()
@@ -328,3 +356,4 @@ def list_audit_logs(db: Session, limit: int = 100) -> List[models.AuditLog]:
         .limit(limit)
         .all()
     )
+

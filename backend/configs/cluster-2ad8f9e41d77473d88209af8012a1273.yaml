@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: Config
+clusters:
+- name: "demo-inspect"
+  cluster:
+    server: "https://192.168.2.244/k8s/clusters/c-m-2zs8t5j9"
+    certificate-authority-data: "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJ2akNDQ\
+      VdPZ0F3SUJBZ0lCQURBS0JnZ3Foa2pPUFFRREFqQkdNUnd3R2dZRFZRUUtFeE5rZVc1aGJXbGoKY\
+      kdsemRHVnVaWEl0YjNKbk1TWXdKQVlEVlFRRERCMWtlVzVoYldsamJHbHpkR1Z1WlhJdFkyRkFNV\
+      GMyTVRJMwpOVFUxTnpBZUZ3MHlOVEV3TWpRd016RXlNemRhRncwek5URXdNakl3TXpFeU16ZGFNR\
+      Vl4SERBYUJnTlZCQW9UCkUyUjVibUZ0YVdOc2FYTjBaVzVsY2kxdmNtY3hKakFrQmdOVkJBTU1IV\
+      1I1Ym1GdGFXTnNhWE4wWlc1bGNpMWoKWVVBeE56WXhNamMxTlRVM01Ga3dFd1lIS29aSXpqMENBU\
+      VlJS29aSXpqMERBUWNEUWdBRUpVeVV6YlhwQmQxcQoyRk1OZmM4YURIVkV0dGJEQnltaXRjdDJxd\
+      GFiMmZIc0hhTHhneUlzQmh6OHA2eUVsaFpyR2V4TTN1THFyOTZHCkFPZEhvNGlFKzZOQ01FQXdEZ\
+      1lEVlIwUEFRSC9CQVFEQWdLa01BOEdBMVVkRXdFQi93UUZNQU1CQWY4d0hRWUQKVlIwT0JCWUVGS\
+      EpaeTFPcytreUlJU0dZdHo1NnZSTm1SRGp6TUFvR0NDcUdTTTQ5QkFNQ0Ewa0FNRVlDSVFDaQpSd\
+      GVRdHNkZ0ZjZC96d2JzZWg1Mm1Mb3h6bTBDeDNiQzVkMVZ2Y0RMMmdJaEFMamdmbkxPbmFTbVQ0N\
+      TFEeWthCk0ySnU3dlRiZFlZNXhNQStlU3JVSTQwdQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0t"
+
+users:
+- name: "demo-inspect"
+  user:
+    token: "kubeconfig-user-7hsz5h8x45:r97mxtl94v4r48rmr2qf8trszb5d9s62jrx748dhg2kqnhgxzbzgc8"
+
+
+contexts:
+- name: "demo-inspect"
+  context:
+    user: "demo-inspect"
+    cluster: "demo-inspect"
+
+current-context: "demo-inspect"

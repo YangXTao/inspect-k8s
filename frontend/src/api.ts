@@ -8,7 +8,15 @@ import {
 
 const API_BASE = appConfig.apiBaseUrl.replace(/\/$/, "");
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+interface RequestOptions {
+  timeoutMs?: number;
+}
+
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  options?: RequestOptions
+): Promise<T> {
   const isFormData = init?.body instanceof FormData;
   const headers: HeadersInit = {
     Accept: "application/json",
@@ -17,13 +25,38 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers["Content-Type"] = "application/json";
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      ...headers,
-      ...(init?.headers || {}),
-    },
-  });
+  const supportsAbort = typeof AbortController !== "undefined";
+  const controller =
+    supportsAbort && options?.timeoutMs ? new AbortController() : null;
+  const timeoutId =
+    controller && options?.timeoutMs
+      ? globalThis.setTimeout(() => controller.abort(), options.timeoutMs)
+      : null;
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      signal: controller?.signal ?? init?.signal,
+      headers: {
+        ...headers,
+        ...(init?.headers || {}),
+      },
+    });
+  } catch (err) {
+    if (
+      controller &&
+      err instanceof DOMException &&
+      err.name === "AbortError"
+    ) {
+      throw new Error("请求超时，请稍后重试");
+    }
+    throw err;
+  } finally {
+    if (timeoutId !== null) {
+      globalThis.clearTimeout(timeoutId);
+    }
+  }
 
   if (!response.ok) {
     const message = await response.text();
@@ -85,14 +118,75 @@ export function updateCluster(
   });
 }
 
-export function deleteCluster(clusterId: number): Promise<void> {
-  return request<void>(`/clusters/${clusterId}`, {
+export function deleteCluster(
+  clusterId: number,
+  options?: { deleteFiles?: boolean }
+): Promise<void> {
+  const params = new URLSearchParams();
+  if (options?.deleteFiles) {
+    params.set("delete_files", "true");
+  }
+  const query = params.toString();
+  const url = query ? `/clusters/${clusterId}?${query}` : `/clusters/${clusterId}`;
+  return request<void>(url, {
     method: "DELETE",
   });
 }
 
-export function deleteInspectionRun(runId: number): Promise<void> {
-  return request<void>(`/inspection-runs/${runId}`, {
+export function testClusterConnection(clusterId: number): Promise<ClusterConfig> {
+  return request<ClusterConfig>(
+    `/clusters/${clusterId}/test-connection`,
+    {
+      method: "POST",
+    },
+    { timeoutMs: 10000 }
+  );
+}
+
+export function createInspectionItem(payload: {
+  name: string;
+  description?: string;
+  check_type: string;
+  config?: Record<string, unknown>;
+}): Promise<InspectionItem> {
+  return request<InspectionItem>("/inspection-items", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateInspectionItem(
+  itemId: number,
+  payload: {
+    name?: string;
+    description?: string;
+    check_type?: string;
+    config?: Record<string, unknown> | null;
+  }
+): Promise<InspectionItem> {
+  return request<InspectionItem>(`/inspection-items/${itemId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteInspectionItem(itemId: number): Promise<void> {
+  return request<void>(`/inspection-items/${itemId}`, {
+    method: "DELETE",
+  });
+}
+
+export function deleteInspectionRun(
+  runId: number,
+  options?: { deleteFiles?: boolean }
+): Promise<void> {
+  const params = new URLSearchParams();
+  if (options?.deleteFiles) {
+    params.set("delete_files", "true");
+  }
+  const query = params.toString();
+  const url = query ? `/inspection-runs/${runId}?${query}` : `/inspection-runs/${runId}`;
+  return request<void>(url, {
     method: "DELETE",
   });
 }

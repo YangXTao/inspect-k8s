@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
   color: #0f172a;
@@ -108,6 +108,9 @@ body {
     box-shadow 0.2s ease;
   display: inline-flex;
   align-items: center;
+  background: none;
+  border: none;
+  cursor: pointer;
 }
 
 .top-navigation-link:hover {
@@ -212,12 +215,51 @@ body {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
 }
 
-.cluster-upload input[type="file"] {
-  font-size: 13px;
-  color: #0f172a;
-  background: rgba(255, 255, 255, 0.85);
+.cluster-upload-trigger {
   border-radius: 10px;
-  padding: 6px 8px;
+  border: none;
+  padding: 10px 14px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.1);
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.cluster-upload-trigger:hover {
+  background: rgba(37, 99, 235, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.4);
+}
+
+.cluster-upload-trigger.ready {
+  background: #2563eb;
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2),
+    0 10px 24px rgba(37, 99, 235, 0.35);
+}
+
+.cluster-upload-trigger.ready:hover {
+  background: #1d4ed8;
+}
+
+.cluster-upload-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.1);
+}
+
+.cluster-upload-trigger.ready:disabled {
+  background: #2563eb;
+  color: #fff;
+}
+
+.cluster-upload-hint {
+  font-size: 12px;
+  color: #eef0f3;
+  padding-left: 2px;
 }
 
 .main-content {
@@ -389,7 +431,7 @@ body {
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   width: 100%;
 }
 
@@ -486,7 +528,7 @@ body {
 .item-list {
   list-style: none;
   padding: 0;
-  margin: 0;
+  margin: 12px 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -508,6 +550,21 @@ body {
   display: flex;
   gap: 10px;
   cursor: pointer;
+}
+
+.item-pagination {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: flex-end;
+  color: #475569;
+  font-size: 14px;
+}
+
+.item-pagination-status {
+  min-width: 120px;
+  text-align: center;
 }
 
 .item-name {
@@ -703,6 +760,17 @@ th {
   box-shadow: 0 24px 48px rgba(15, 23, 42, 0.22);
 }
 
+.modal.large {
+  max-width: 920px;
+  width: 92%;
+  max-height: 90vh;
+  overflow: auto;
+}
+
+.modal.confirm {
+  max-width: 420px;
+}
+
 .modal h3 {
   margin: 0;
   color: #1e293b;
@@ -723,10 +791,358 @@ th {
   font-size: 15px;
 }
 
+.modal select {
+  border-radius: 12px;
+  border: 1px solid #cbd5f5;
+  padding: 10px 14px;
+  font-size: 15px;
+  background: #fff;
+}
+
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal-field-label {
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.modal-field .cluster-upload-trigger {
+  align-self: flex-start;
+}
+
+.modal-kubeconfig-summary {
+  font-size: 12px;
+  color: #475569;
+}
+
+.confirmation-options {
+  margin-top: 4px;
+  display: grid;
+  gap: 10px;
+}
+
+.confirmation-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  color: #334155;
+}
+
+.confirmation-option input {
+  margin-top: 2px;
+}
+
+.confirmation-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.confirmation-option-label {
+  font-weight: 500;
+  color: #1e293b;
+}
+
+.confirmation-option-description {
+  font-size: 12px;
+  color: #64748b;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+}
+
+.modal.large .modal-actions {
+  justify-content: flex-start;
+}
+
+.modal-backdrop.nested {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.settings-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+  max-width: 960px;
+  position: relative;
+  overflow: hidden;
+}
+
+.settings-confirm-backdrop {
+  backdrop-filter: blur(2px);
+}
+
+.settings-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-modal-shell {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.settings-modal-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 168px;
+}
+
+.settings-nav-button {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: #f8fafc;
+  color: #1e293b;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.settings-nav-button:hover {
+  border-color: #cbd5f5;
+}
+
+.settings-nav-button.active {
+  background: #1d4ed8;
+  color: #ffffff;
+  border-color: #1d4ed8;
+  font-weight: 600;
+}
+
+.settings-modal-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.inspection-settings-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-overview h4 {
+  margin: 0;
+  color: #1e293b;
+}
+
+.settings-overview-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.settings-overview-hint {
+  margin: 0;
+  font-size: 13px;
+  color: #475569;
+}
+
+.settings-modal-main .modal-actions {
+  justify-content: flex-start;
+}
+
+@media (max-width: 920px) {
+  .settings-modal-shell {
+    flex-direction: column;
+  }
+
+  .settings-modal-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .settings-nav-button {
+    flex: 1 1 140px;
+    text-align: center;
+  }
+}
+
+.kubeconfig-modal {
+  max-width: 640px;
+}
+
+.kubeconfig-modal-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kubeconfig-modal-header p {
+  margin: 0;
+  font-size: 13px;
+  color: #475569;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settings-content {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.settings-list {
+  flex: 1 1 360px;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.settings-list table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.settings-list th,
+.settings-list td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 8px 6px;
+  text-align: left;
+}
+
+.settings-list th {
+  background: #f8fafc;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.table-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-form {
+  flex: 1 1 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-form textarea {
+  border-radius: 12px;
+  border: 1px solid #cbd5f5;
+  padding: 10px 14px;
+  font-size: 14px;
+  resize: vertical;
+}
+
+.settings-form h4 {
+  margin: 0;
+  color: #1e293b;
+}
+
+.field-row {
+  display: flex;
+  gap: 12px;
+}
+
+.field-row label {
+  flex: 1;
+}
+
+.kubeconfig-modal-upload {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.kubeconfig-file-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.35);
+  transition: background 0.2s ease;
+  user-select: none;
+}
+
+.kubeconfig-file-trigger:hover {
+  background: #1d4ed8;
+}
+
+.kubeconfig-file-summary {
+  font-size: 13px;
+  color: #1e293b;
+  flex: 1 1 220px;
+}
+
+.kubeconfig-file-summary strong {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.kubeconfig-modal-upload .link-button {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.kubeconfig-textarea-label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.kubeconfig-textarea {
+  border-radius: 12px;
+  border: 1px solid #cbd5f5;
+  padding: 12px;
+  font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+  font-size: 13px;
+  min-height: 240px;
+  resize: vertical;
+  line-height: 1.5;
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+.kubeconfig-textarea:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+  background: #fff;
 }
 
 
@@ -840,3 +1256,5 @@ th {
     align-items: stretch;
   }
 }
+
+

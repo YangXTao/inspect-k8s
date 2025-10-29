@@ -1,9 +1,12 @@
-import {
+﻿import {
+  ChangeEvent,
   FormEvent,
   type RefObject,
   type CSSProperties,
+  type ReactNode,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -18,6 +21,7 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
+import type { Location as RouterLocation } from "history";
 import {
   createInspectionRun,
   deleteCluster as apiDeleteCluster,
@@ -29,6 +33,10 @@ import {
   getReportDownloadUrl,
   registerCluster,
   updateCluster,
+  testClusterConnection,
+  createInspectionItem as apiCreateInspectionItem,
+  updateInspectionItem as apiUpdateInspectionItem,
+  deleteInspectionItem as apiDeleteInspectionItem,
 } from "./api";
 import { appConfig } from "./config";
 import {
@@ -41,6 +49,14 @@ import {
 
 type NoticeType = "success" | "warning" | "error" | null;
 type ConfirmVariant = "primary" | "danger";
+type NoticeScope = "overview" | "clusterDetail" | "history" | "runDetail";
+
+interface ConfirmDialogOption {
+  id: string;
+  label: string;
+  description?: string;
+  defaultChecked?: boolean;
+}
 
 interface ConfirmDialogState {
   title: string;
@@ -48,11 +64,14 @@ interface ConfirmDialogState {
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: ConfirmVariant;
-  onConfirm: () => Promise<void> | void;
+  onConfirm: (options?: Record<string, boolean>) => Promise<void> | void;
+  scope?: "global" | "settings";
+  options?: ConfirmDialogOption[];
 }
 
 const CLUSTER_ID_STORAGE_KEY = "clusterDisplayIdMap.v1";
 const CLUSTER_PAGE_SIZE = 10;
+const SETTINGS_BASE_PATH = "/setting";
 
 const BEIJING_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Shanghai",
@@ -108,8 +127,98 @@ const getClusterStatusMeta = (status: string) =>
   clusterStatusMeta[status as keyof typeof clusterStatusMeta] ||
   clusterStatusMeta.unknown;
 
-const generateClusterDisplayId = () =>
-  `C-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+const resolveNoticeScope = (pathname: string): NoticeScope => {
+  if (pathname.startsWith("/history")) {
+    return "history";
+  }
+  if (pathname.startsWith("/clusters/")) {
+    return pathname.includes("/runs/") ? "runDetail" : "clusterDetail";
+  }
+  return "overview";
+};
+
+const CLUSTER_SLUG_PREFIX = "C-";
+
+const hasChineseCharacter = (value: string) =>
+  /[\u3400-\u9FFF\uF900-\uFAFF]/.test(value);
+
+const compareInspectionItemByName = (
+  a: InspectionItem,
+  b: InspectionItem
+) => {
+  const nameA = (a.name ?? "").trim();
+  const nameB = (b.name ?? "").trim();
+  const aHasChinese = hasChineseCharacter(nameA);
+  const bHasChinese = hasChineseCharacter(nameB);
+
+  if (aHasChinese !== bHasChinese) {
+    return aHasChinese ? 1 : -1;
+  }
+
+  const localeResult = nameA.localeCompare(nameB, "zh-Hans-CN", {
+    sensitivity: "base",
+    numeric: true,
+  });
+  if (localeResult !== 0) {
+    return localeResult;
+  }
+
+  return (a.id ?? 0) - (b.id ?? 0);
+};
+
+const hashString = (value: string) => {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 33 + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash).toString(36).toUpperCase();
+};
+
+const createDeterministicClusterSlug = (
+  cluster: ClusterConfig,
+  current?: string | null
+) => {
+  if (current && typeof current === "string") {
+    return current;
+  }
+  const idSegment = cluster.id.toString(36).toUpperCase();
+  const hashSegment = hashString(cluster.name || `cluster-${cluster.id}`)
+    .slice(-4)
+    .padStart(4, "0");
+  return `${CLUSTER_SLUG_PREFIX}${idSegment}-${hashSegment}`;
+};
+
+const decodeClusterKeyToId = (
+  clusterKey: string,
+  displayMap: Record<number, string>,
+  clusters: ClusterConfig[]
+): number | null => {
+  const mappedEntry = Object.entries(displayMap).find(
+    ([, value]) => value === clusterKey
+  );
+  if (mappedEntry) {
+    return Number(mappedEntry[0]);
+  }
+
+  const match = /^C-([A-Z0-9]+)(?:-[A-Z0-9]+)?$/i.exec(clusterKey);
+  if (!match) {
+    return null;
+  }
+
+  const candidate = parseInt(match[1], 36);
+  if (Number.isNaN(candidate)) {
+    return null;
+  }
+
+  if (
+    displayMap[candidate] ||
+    clusters.some((cluster) => cluster.id === candidate)
+  ) {
+    return candidate;
+  }
+
+  return candidate;
+};
 
 const loadStoredClusterDisplayIds = (): Record<number, string> => {
   if (typeof window === "undefined") {
@@ -150,8 +259,11 @@ const persistClusterDisplayIds = (map: Record<number, string>) => {
 
 const getClusterDisplayId = (
   map: Record<number, string>,
-  clusterId: number
-) => map[clusterId] ?? `cluster-${clusterId}`;
+  clusterId: number,
+  cluster?: ClusterConfig
+) =>
+  map[clusterId] ??
+  (cluster ? createDeterministicClusterSlug(cluster) : `cluster-${clusterId}`);
 
 const normaliseClusterName = (name: string) =>
   name.trim().replace(/\s+/g, "-").toLowerCase() || "cluster";
@@ -209,10 +321,22 @@ const assignClusterDisplayIds = (
   const assigned: Record<number, string> = {};
 
   clusters.forEach((cluster) => {
-    let displayId = current[cluster.id];
-    if (!displayId) {
+    let displayId = createDeterministicClusterSlug(
+      cluster,
+      current[cluster.id]
+    );
+    if (used.has(displayId)) {
+      let counter = 1;
       do {
-        displayId = generateClusterDisplayId();
+        const saltedName = `${cluster.name}-${counter}`;
+        displayId = createDeterministicClusterSlug(
+          {
+            ...cluster,
+            name: saltedName,
+          },
+          null
+        );
+        counter += 1;
       } while (used.has(displayId));
     }
     assigned[cluster.id] = displayId;
@@ -247,7 +371,7 @@ const logWithTimestamp = (
   logger(`[${timestamp}] ${message}`, ...details);
 };
 
-const TopNavigation = () => {
+const TopNavigation = ({ onOpenSettings }: { onOpenSettings: () => void }) => {
   const navigate = useNavigate();
 
   return (
@@ -291,6 +415,23 @@ const TopNavigation = () => {
             <span>历史巡检</span>
           </span>
         </NavLink>
+        <button
+          type="button"
+          className="top-navigation-link"
+          onClick={onOpenSettings}
+        >
+          <span className="top-navigation-link-inner">
+            <span className="top-navigation-link-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path
+                  d="M12 7.5a4.5 4.5 0 1 0 4.5 4.5A4.51 4.51 0 0 0 12 7.5Zm8.94 3.15-1.81-.26a7 7 0 0 0-.66-1.6l1.06-1.49a1 1 0 0 0-.12-1.29l-1.41-1.41a1 1 0 0 0-1.29-.12l-1.49 1.06a7 7 0 0 0-1.6-.66l-.26-1.81A1 1 0 0 0 12.06 3h-2.12a1 1 0 0 0-1 .87l-.26 1.81a7 7 0 0 0-1.6.66L5.59 5.28a1 1 0 0 0-1.29.12L2.89 6.81a1 1 0 0 0-.12 1.29l1.06 1.49a7 7 0 0 0-.66 1.6l-1.81.26a1 1 0 0 0-.87 1v2.12a1 1 0 0 0 .87 1l1.81.26a7 7 0 0 0 .66 1.6l-1.06 1.49a1 1 0 0 0 .12 1.29l1.41 1.41a1 1 0 0 0 1.29.12l1.49-1.06a7 7 0 0 0 1.6.66l.26 1.81a1 1 0 0 0 1 .87h2.12a1 1 0 0 0 1-.87l.26-1.81a7 7 0 0 0 1.6-.66l1.49 1.06a1 1 0 0 0 1.29-.12l1.41-1.41a1 1 0 0 0 .12-1.29l-1.06-1.49a7 7 0 0 0 .66-1.6l1.81-.26a1 1 0 0 0 .87-1v-2.12a1 1 0 0 0-.87-1Zm-8.94 4.35a3 3 0 1 1 3-3 3 3 0 0 1-3 3Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </span>
+            <span>设置</span>
+          </span>
+        </button>
       </nav>
     </header>
   );
@@ -301,16 +442,21 @@ interface OverviewProps {
   clusterError: string | null;
   clusterNotice: string | null;
   clusterNoticeType: NoticeType;
+  clusterNoticeScope: NoticeScope | null;
   clusterUploading: boolean;
   clusterNameInput: string;
   clusterPromInput: string;
   setClusterNameInput: (value: string) => void;
   setClusterPromInput: (value: string) => void;
-  clusterFileRef: RefObject<HTMLInputElement>;
+  openKubeconfigModal: () => void;
+  kubeconfigSummary: string | null;
+  kubeconfigReady: boolean;
   onUpload: () => Promise<void>;
   onEditCluster: (cluster: ClusterConfig) => void;
   onDeleteCluster: (cluster: ClusterConfig) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
+  onTestClusterConnection: (clusterId: number) => Promise<void>;
+  testingClusterIds: Record<number, boolean>;
 }
 
 const OverviewView = ({
@@ -318,16 +464,21 @@ const OverviewView = ({
   clusterError,
   clusterNotice,
   clusterNoticeType,
+  clusterNoticeScope,
   clusterUploading,
   clusterNameInput,
   clusterPromInput,
   setClusterNameInput,
   setClusterPromInput,
-  clusterFileRef,
+  openKubeconfigModal,
+  kubeconfigSummary,
+  kubeconfigReady,
   onUpload,
   onEditCluster,
   onDeleteCluster,
   clusterDisplayIds,
+  onTestClusterConnection,
+  testingClusterIds,
 }: OverviewProps) => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -446,20 +597,31 @@ const OverviewView = ({
         </div>
         <div className="header-actions">
           <div className="cluster-upload">
-            <label>上传 kubeconfig</label>
+            <label>添加集群</label>
             <input
               type="text"
-              placeholder="自定义集群名称(可选)"
+              placeholder="自定义集群名称"
               value={clusterNameInput}
               onChange={(event) => setClusterNameInput(event.target.value)}
             />
             <input
               type="text"
-              placeholder="Prometheus 地址(可选)"
+              placeholder="Prometheus 地址"
               value={clusterPromInput}
               onChange={(event) => setClusterPromInput(event.target.value)}
             />
-            <input ref={clusterFileRef} type="file" accept=".yaml,.yml,.json" />
+            <button
+              type="button"
+              className={`cluster-upload-trigger${
+                kubeconfigReady ? " ready" : ""
+              }`}
+              onClick={openKubeconfigModal}
+            >
+              {kubeconfigReady ? "查看 / 更新 kubeconfig" : "导入 kubeconfig"}
+            </button>
+            <div className="cluster-upload-hint">
+              {kubeconfigSummary ?? "支持上传文件或粘贴 YAML 内容"}
+            </div>
             <button
               className="secondary"
               onClick={() => void onUpload()}
@@ -474,9 +636,11 @@ const OverviewView = ({
       <section className="card cluster-panel">
         <div className="card-header">
           <h2>集群列表</h2>
-        </div>
-        {clusterError && <div className="feedback error">{clusterError}</div>}
-        {clusterNotice && clusterNoticeType && (
+      </div>
+      {clusterError && <div className="feedback error">{clusterError}</div>}
+      {clusterNotice &&
+        clusterNoticeType &&
+        clusterNoticeScope === "overview" && (
           <div className={`feedback ${clusterNoticeType}`}>{clusterNotice}</div>
         )}
         {clusters.length === 0 ? (
@@ -492,8 +656,10 @@ const OverviewView = ({
                 );
                 const displayId = getClusterDisplayId(
                   clusterDisplayIds,
-                  cluster.id
+                  cluster.id,
+                  cluster
                 );
+                const isTesting = Boolean(testingClusterIds[cluster.id]);
                 return (
                   <button
                     key={cluster.id}
@@ -527,6 +693,16 @@ const OverviewView = ({
                       </div>
                     </div>
                     <div className="cluster-status-line">
+                      <button
+                        className="link-button small"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void onTestClusterConnection(cluster.id);
+                        }}
+                        disabled={isTesting}
+                      >
+                        {isTesting ? "测试中..." : "测试连接"}
+                      </button>
                       <span className={`status-chip ${statusMeta.className}`}>
                         {statusMeta.label}
                       </span>
@@ -599,12 +775,150 @@ const OverviewView = ({
   );
 };
 
+interface KubeconfigModalProps {
+  open: boolean;
+  text: string;
+  fileName: string | null;
+  hasManualContent: boolean;
+  title?: string;
+  description?: string;
+  confirmLabel?: string;
+  fileButtonLabel?: string;
+  fileInputId?: string;
+  onClose: () => void;
+  onFileSelected: (file: File) => void;
+  onTextChange: (value: string) => void;
+  onClear: () => void;
+}
+
+const KubeconfigModal = ({
+  open,
+  text,
+  fileName,
+  hasManualContent,
+  title,
+  description,
+  confirmLabel,
+  fileButtonLabel,
+  fileInputId,
+  onClose,
+  onFileSelected,
+  onTextChange,
+  onClear,
+}: KubeconfigModalProps) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const generatedId = useId();
+  const resolvedFileInputId = fileInputId ?? `${generatedId}-file`;
+
+  const modalTitle = title ?? "导入 kubeconfig";
+  const modalDescription =
+    description ?? "上传文件或粘贴 YAML 内容，提交集群时将一并上传。";
+  const modalConfirmLabel = confirmLabel ?? "完成";
+  const modalFileButtonLabel = fileButtonLabel ?? "上传文件";
+
+  if (!open) {
+    return null;
+  }
+
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    if (!file) {
+      return;
+    }
+    onFileSelected(file);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const handleTextareaChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    onTextChange(event.currentTarget.value);
+  };
+
+  const handleClear = () => {
+    onClear();
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <div className="modal kubeconfig-modal">
+        <div className="kubeconfig-modal-header">
+          <h3>{modalTitle}</h3>
+          <p>{modalDescription}</p>
+        </div>
+        <div className="kubeconfig-modal-upload">
+          <label
+            htmlFor={resolvedFileInputId}
+            className="kubeconfig-file-trigger"
+          >
+            {modalFileButtonLabel}
+          </label>
+          <input
+            id={resolvedFileInputId}
+            ref={fileInputRef}
+            type="file"
+            accept=".yaml,.yml,.json"
+            onChange={handleFileChange}
+            hidden
+          />
+          <div className="kubeconfig-file-summary">
+            {fileName ? (
+              hasManualContent ? (
+                <>
+                  已基于 <strong>{fileName}</strong> 进行编辑
+                </>
+              ) : (
+                <>
+                  已选择文件: <strong>{fileName}</strong>
+                </>
+              )
+            ) : (
+              "支持 .yaml/.yml/.json 文件"
+            )}
+          </div>
+          <button
+            type="button"
+            className="link-button small"
+            onClick={handleClear}
+          >
+            清空内容
+          </button>
+        </div>
+        <label className="kubeconfig-textarea-label">
+          kubeconfig 内容
+          <textarea
+            className="kubeconfig-textarea"
+            value={text}
+            onChange={handleTextareaChange}
+            placeholder="在此粘贴或编辑 kubeconfig YAML 内容"
+            rows={14}
+          />
+        </label>
+        <div className="modal-actions">
+          <button type="button" className="secondary" onClick={onClose}>
+            取消
+          </button>
+          <button type="button" className="primary" onClick={onClose}>
+            {modalConfirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 interface HistoryViewProps {
   runs: InspectionRunListItem[];
   onRefreshRuns: () => Promise<void>;
   onDeleteRun: (run: InspectionRunListItem) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
+  notice?: string | null;
+  noticeType?: NoticeType;
+  noticeScope?: NoticeScope | null;
 }
 
 const HistoryView = ({
@@ -613,8 +927,13 @@ const HistoryView = ({
   onDeleteRun,
   clusterDisplayIds,
   runDisplayIds,
+  notice,
+  noticeType,
+  noticeScope,
 }: HistoryViewProps) => {
   const navigate = useNavigate();
+  const shouldShowNotice =
+    notice && noticeType && noticeScope === "history";
 
   return (
     <section className="card history history-page">
@@ -624,6 +943,9 @@ const HistoryView = ({
           刷新
         </button>
       </div>
+      {shouldShowNotice && (
+        <div className={`feedback ${noticeType}`}>{notice}</div>
+      )}
       {runs.length === 0 ? (
         <div className="placeholder">暂无巡检记录，请稍后再查看。</div>
       ) : (
@@ -711,6 +1033,7 @@ interface ClusterDetailProps {
   error: string | null;
   clusterNotice: string | null;
   clusterNoticeType: NoticeType;
+  clusterNoticeScope: NoticeScope | null;
   clusterError: string | null;
   onStartInspection: (clusterId: number) => Promise<void>;
   onDeleteRun: (run: InspectionRunListItem) => Promise<void>;
@@ -718,6 +1041,8 @@ interface ClusterDetailProps {
   onDeleteCluster: (cluster: ClusterConfig) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
+  onTestClusterConnection: (clusterId: number) => Promise<void>;
+  testingClusterIds: Record<number, boolean>;
 }
 
 const ClusterDetailView = ({
@@ -733,6 +1058,7 @@ const ClusterDetailView = ({
   error,
   clusterNotice,
   clusterNoticeType,
+  clusterNoticeScope,
   clusterError,
   onStartInspection,
   onDeleteRun,
@@ -740,40 +1066,90 @@ const ClusterDetailView = ({
   onDeleteCluster,
   clusterDisplayIds,
   runDisplayIds,
+  onTestClusterConnection,
+  testingClusterIds,
 }: ClusterDetailProps) => {
   const { clusterKey } = useParams<{ clusterKey?: string }>();
   const navigate = useNavigate();
 
   const numericId = useMemo(() => {
-    if (!clusterKey) return Number.NaN;
-    const direct = Number(clusterKey);
-    if (!Number.isNaN(direct) && clusters.some((item) => item.id === direct)) {
-      return direct;
+    if (!clusterKey) {
+      return Number.NaN;
     }
-    const match = Object.entries(clusterDisplayIds).find(
-      ([, display]) => display === clusterKey
+    const decoded = decodeClusterKeyToId(
+      clusterKey,
+      clusterDisplayIds,
+      clusters
     );
-    return match ? Number(match[0]) : Number.NaN;
-  }, [clusterKey, clusters, clusterDisplayIds]);
+    return decoded ?? Number.NaN;
+  }, [clusterKey, clusterDisplayIds, clusters]);
 
   useEffect(() => {
     setSelectedIds(() => []);
   }, [numericId, setSelectedIds]);
 
-  if (Number.isNaN(numericId)) {
-    if (clusters.length === 0 && Object.keys(clusterDisplayIds).length === 0) {
-      return (
-        <div className="detail-empty">
-          <p>集群信息加载中...</p>
-          <button className="secondary" onClick={() => navigate("/")}>
-            返回集群列表
-          </button>
-        </div>
-      );
+  const isNumericInvalid = Number.isNaN(numericId);
+
+  const cluster = useMemo(() => {
+    if (Number.isNaN(numericId)) {
+      return null;
     }
+    return clusters.find((item) => item.id === numericId) ?? null;
+  }, [clusters, numericId]);
+
+  const clusterSlug = useMemo(() => {
+    if (Number.isNaN(numericId)) {
+      return null;
+    }
+    return getClusterDisplayId(
+      clusterDisplayIds,
+      numericId,
+      cluster ?? undefined
+    );
+  }, [clusterDisplayIds, cluster, numericId]);
+
+  const clusterRuns = useMemo(() => {
+    if (!cluster) {
+      return [];
+    }
+    return runs.filter((run) => run.cluster_id === cluster.id);
+  }, [runs, cluster]);
+
+  const PAGE_SIZE = 10;
+  const [itemPage, setItemPage] = useState(0);
+
+  useEffect(() => {
+    setItemPage(0);
+  }, [numericId]);
+
+  const totalItemPages = useMemo(
+    () => Math.max(1, Math.ceil(items.length / PAGE_SIZE)),
+    [items.length]
+  );
+
+  useEffect(() => {
+    setItemPage(0);
+  }, [items.length]);
+
+  useEffect(() => {
+    if (itemPage >= totalItemPages) {
+      setItemPage(totalItemPages - 1);
+    }
+  }, [itemPage, totalItemPages]);
+
+  const pagedItems = useMemo(
+    () =>
+      items.slice(
+        itemPage * PAGE_SIZE,
+        Math.min(items.length, (itemPage + 1) * PAGE_SIZE)
+      ),
+    [items, itemPage]
+  );
+
+  if (isNumericInvalid) {
     return (
       <div className="detail-empty">
-        <p>集群编号无效。</p>
+        <p>集群信息加载中...</p>
         <button className="secondary" onClick={() => navigate("/")}>
           返回集群列表
         </button>
@@ -781,7 +1157,6 @@ const ClusterDetailView = ({
     );
   }
 
-  const cluster = clusters.find((item) => item.id === numericId);
   if (!cluster) {
     return (
       <div className="detail-empty">
@@ -793,12 +1168,12 @@ const ClusterDetailView = ({
     );
   }
 
-  const clusterSlug = getClusterDisplayId(clusterDisplayIds, cluster.id);
   const statusMeta = getClusterStatusMeta(cluster.connection_status);
-  const clusterRuns = useMemo(
-    () => runs.filter((run) => run.cluster_id === cluster.id),
-    [runs, cluster.id]
-  );
+  const isTesting = Boolean(testingClusterIds[cluster.id]);
+
+  const resolvedClusterSlug =
+    clusterSlug ??
+    getClusterDisplayId(clusterDisplayIds, cluster.id, cluster);
 
   const handleToggleItem = (id: number) => {
     setSelectedIds((prev) =>
@@ -812,6 +1187,19 @@ const ClusterDetailView = ({
     );
   };
 
+  const handleChangePage = (offset: number) => {
+    setItemPage((prev) => {
+      const next = prev + offset;
+      if (next < 0) {
+        return 0;
+      }
+      if (next >= totalItemPages) {
+        return totalItemPages - 1;
+      }
+      return next;
+    });
+  };
+
   return (
     <>
       <div className="detail-header">
@@ -819,6 +1207,13 @@ const ClusterDetailView = ({
           返回上一页
         </button>
         <div className="detail-header-actions">
+          <button
+            className="secondary"
+            onClick={() => void onTestClusterConnection(cluster.id)}
+            disabled={isTesting}
+          >
+            {isTesting ? "测试中..." : "测试连接"}
+          </button>
           <button className="secondary" onClick={() => onEditCluster(cluster)}>
             编辑集群
           </button>
@@ -832,9 +1227,11 @@ const ClusterDetailView = ({
       </div>
 
       {clusterError && <div className="feedback error">{clusterError}</div>}
-      {clusterNotice && clusterNoticeType && (
-        <div className={`feedback ${clusterNoticeType}`}>{clusterNotice}</div>
-      )}
+      {clusterNotice &&
+        clusterNoticeType &&
+        clusterNoticeScope === "clusterDetail" && (
+          <div className={`feedback ${clusterNoticeType}`}>{clusterNotice}</div>
+        )}
       {error && <div className="feedback error">{error}</div>}
       {notice && <div className="feedback success">{notice}</div>}
 
@@ -848,7 +1245,7 @@ const ClusterDetailView = ({
             </div>
             <div>
               <strong>集群编号: </strong>
-              {clusterSlug}
+              {resolvedClusterSlug}
             </div>
             <div>
               <strong>连接状态: </strong>
@@ -905,7 +1302,7 @@ const ClusterDetailView = ({
             已选择 {selectedIds.length} / {items.length} 个巡检项
           </p>
           <ul className="item-list">
-            {items.map((item) => (
+            {pagedItems.map((item) => (
               <li key={item.id}>
                 <label>
                   <input
@@ -921,6 +1318,29 @@ const ClusterDetailView = ({
               </li>
             ))}
           </ul>
+          {items.length > PAGE_SIZE && (
+            <div className="item-pagination">
+              <button
+                type="button"
+                className="pagination-nav"
+                onClick={() => handleChangePage(-1)}
+                disabled={itemPage === 0}
+              >
+                上一页
+              </button>
+              <span className="item-pagination-status">
+                第 {itemPage + 1} / {totalItemPages} 页
+              </span>
+              <button
+                type="button"
+                className="pagination-nav"
+                onClick={() => handleChangePage(1)}
+                disabled={itemPage + 1 >= totalItemPages}
+              >
+                下一页
+              </button>
+            </div>
+          )}
           <div className="detail-actions">
             <button className="secondary" onClick={handleToggleAll}>
               {selectedIds.length === items.length ? "清除选择" : "全选"}
@@ -970,7 +1390,9 @@ const ClusterDetailView = ({
                       <button
                         className="link-button"
                         onClick={() =>
-                          navigate(`/clusters/${clusterSlug}/runs/${runSlug}`)
+                          navigate(
+                            `/clusters/${resolvedClusterSlug}/runs/${runSlug}`
+                          )
                         }
                       >
                         查看详情
@@ -1005,34 +1427,44 @@ const ClusterDetailView = ({
 
 interface RunDetailProps {
   clusters: ClusterConfig[];
+  items: InspectionItem[];
   onDeleteRun: (runId: number, redirectPath?: string) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
+  notice?: string | null;
+  noticeType?: NoticeType;
+  noticeScope?: NoticeScope | null;
 }
 
 const RunDetailView = ({
   clusters,
+  items,
   onDeleteRun,
   clusterDisplayIds,
   runDisplayIds,
+  notice,
+  noticeType,
+  noticeScope,
 }: RunDetailProps) => {
   const { clusterKey, runKey } = useParams<{
     clusterKey?: string;
     runKey?: string;
   }>();
   const navigate = useNavigate();
+  const shouldShowNotice =
+    notice && noticeType && noticeScope === "runDetail";
 
   const numericClusterId = useMemo(() => {
-    if (!clusterKey) return Number.NaN;
-    const direct = Number(clusterKey);
-    if (!Number.isNaN(direct) && clusters.some((item) => item.id === direct)) {
-      return direct;
+    if (!clusterKey) {
+      return Number.NaN;
     }
-    const match = Object.entries(clusterDisplayIds).find(
-      ([, display]) => display === clusterKey
+    const decoded = decodeClusterKeyToId(
+      clusterKey,
+      clusterDisplayIds,
+      clusters
     );
-    return match ? Number(match[0]) : Number.NaN;
-  }, [clusterKey, clusters, clusterDisplayIds]);
+    return decoded ?? Number.NaN;
+  }, [clusterKey, clusterDisplayIds, clusters]);
 
   const numericRunId = useMemo(() => {
     if (!runKey) return Number.NaN;
@@ -1050,64 +1482,35 @@ const RunDetailView = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const cluster = useMemo(
-    () =>
+  const cluster = useMemo(() => {
+    if (Number.isNaN(numericClusterId)) {
+      return null;
+    }
+    return (
       clusters.find(
         (item) => item.id === (run?.cluster_id ?? numericClusterId)
-      ),
-    [clusters, run, numericClusterId]
-  );
-
-  const clusterPath = cluster
-    ? `/clusters/${getClusterDisplayId(clusterDisplayIds, cluster.id)}`
-    : "/";
-
-  if (Number.isNaN(numericClusterId)) {
-    if (clusters.length === 0 && Object.keys(clusterDisplayIds).length === 0) {
-      return (
-        <div className="detail-empty">
-          <p>集群信息加载中...</p>
-          <button className="secondary" onClick={() => navigate("/")}>
-            返回集群列表
-          </button>
-        </div>
-      );
-    }
-    return (
-      <div className="detail-empty">
-        <p>集群编号无效。</p>
-        <button className="secondary" onClick={() => navigate("/")}>
-          返回集群列表
-        </button>
-      </div>
+      ) ?? null
     );
-  }
+  }, [clusters, run, numericClusterId]);
 
-  if (Number.isNaN(numericRunId)) {
-    if (Object.keys(runDisplayIds).length === 0) {
-      return (
-        <div className="detail-empty">
-          <p>巡检信息加载中...</p>
-          <button className="secondary" onClick={() => navigate(clusterPath)}>
-            返回上一页
-          </button>
-        </div>
-      );
+  const clusterSlug = useMemo(() => {
+    if (Number.isNaN(numericClusterId) || !cluster) {
+      return null;
     }
-    return (
-      <div className="detail-empty">
-        <p>巡检编号无效。</p>
-        <button className="secondary" onClick={() => navigate(clusterPath)}>
-          返回上一页
-        </button>
-      </div>
-    );
-  }
+    return getClusterDisplayId(clusterDisplayIds, numericClusterId, cluster);
+  }, [clusterDisplayIds, cluster, numericClusterId]);
+  const clusterPath =
+    clusterSlug ?? (clusterKey ? `/clusters/${clusterKey}` : "/");
+
+  const isClusterIdInvalid = Number.isNaN(numericClusterId);
+  const isRunIdInvalid = Number.isNaN(numericRunId);
 
   useEffect(() => {
-    if (Number.isNaN(numericRunId)) {
+    if (isRunIdInvalid) {
+      setRun(null);
+      setLoading(false);
       setError("巡检编号无效");
-      logWithTimestamp("error", "巡检编号无效: %s", runKey);
+      logWithTimestamp("error", "巡检编号无效: %s", runKey ?? "");
       return;
     }
     setLoading(true);
@@ -1133,7 +1536,11 @@ const RunDetailView = ({
         setError(message);
       })
       .finally(() => setLoading(false));
-  }, [numericRunId, runDisplayIds, runKey]);
+  }, [numericRunId, runDisplayIds, runKey, isRunIdInvalid]);
+
+  const resolvedClusterSlug =
+    clusterSlug ??
+    (cluster ? getClusterDisplayId(clusterDisplayIds, cluster.id, cluster) : "");
 
   const fallbackRunDisplayId = run
     ? `${normaliseClusterName(run.cluster_name || cluster?.name || "run")}-${String(
@@ -1154,6 +1561,79 @@ const RunDetailView = ({
     }
   }, [run]);
 
+  const itemOrderMap = useMemo(() => {
+    const map = new Map<number, number>();
+    items.forEach((item, index) => {
+      map.set(item.id, index);
+    });
+    return map;
+  }, [items]);
+
+  const orderedResults = useMemo(() => {
+    if (!run?.results) {
+      return [];
+    }
+    return run.results
+      .slice()
+      .sort((a, b) => {
+        const orderA =
+          a.item_id != null
+            ? itemOrderMap.get(a.item_id) ?? Number.MAX_SAFE_INTEGER
+            : Number.MAX_SAFE_INTEGER;
+        const orderB =
+          b.item_id != null
+            ? itemOrderMap.get(b.item_id) ?? Number.MAX_SAFE_INTEGER
+            : Number.MAX_SAFE_INTEGER;
+        if (orderA !== orderB) {
+          return orderA - orderB;
+        }
+        return a.id - b.id;
+      });
+  }, [run, itemOrderMap]);
+
+  if (isClusterIdInvalid) {
+    return (
+      <div className="detail-empty">
+        <p>集群信息加载中...</p>
+        <button className="secondary" onClick={() => navigate("/")}>
+          返回集群列表
+        </button>
+      </div>
+    );
+  }
+
+  if (isRunIdInvalid) {
+    return (
+      <div className="detail-empty">
+        <p>巡检信息加载中...</p>
+        <button className="secondary" onClick={() => navigate(clusterPath)}>
+          返回上一页
+        </button>
+      </div>
+    );
+  }
+
+  if (!cluster) {
+    if (clusters.length === 0) {
+      return (
+        <div className="detail-empty">
+          <p>集群信息加载中...</p>
+          <button className="secondary" onClick={() => navigate("/")}>
+            返回集群列表
+          </button>
+        </div>
+      );
+    }
+    return (
+      <div className="detail-empty">
+        <p>未找到集群。</p>
+        <button className="secondary" onClick={() => navigate("/")}>
+          返回集群列表
+        </button>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="detail-header">
@@ -1170,10 +1650,14 @@ const RunDetailView = ({
               下载报告
             </button>
           ) : null}
-        </div>
       </div>
+    </div>
 
-      {error && <div className="feedback error">{error}</div>}
+    {shouldShowNotice && (
+      <div className={`feedback ${noticeType}`}>{notice}</div>
+    )}
+
+    {error && <div className="feedback error">{error}</div>}
 
       {loading ? (
         <div className="detail-empty">
@@ -1198,12 +1682,7 @@ const RunDetailView = ({
                 </div>
                 <div>
                   <strong>所属集群: </strong>
-                  {cluster
-                    ? `${cluster.name}(${getClusterDisplayId(
-                        clusterDisplayIds,
-                        cluster.id
-                      )})`
-                    : "-"}
+                  {`${cluster.name}(${resolvedClusterSlug})`}
                 </div>
                 <div>
                   <strong>巡检人: </strong>
@@ -1248,12 +1727,12 @@ const RunDetailView = ({
                   </tr>
                 </thead>
                 <tbody>
-                  {run.results.length === 0 ? (
+                  {orderedResults.length === 0 ? (
                     <tr>
                       <td colSpan={4}>暂无巡检结果</td>
                     </tr>
                   ) : (
-                    run.results.map((result: InspectionResult) => (
+                    orderedResults.map((result: InspectionResult) => (
                       <tr key={result.id}>
                         <td>{result.item_name}</td>
                         <td>
@@ -1279,11 +1758,29 @@ const RunDetailView = ({
 interface ConfirmationModalProps {
   state: ConfirmDialogState | null;
   onClose: () => void;
+  nested?: boolean;
 }
 
-const ConfirmationModal = ({ state, onClose }: ConfirmationModalProps) => {
+const ConfirmationModal = ({
+  state,
+  onClose,
+  nested = false,
+}: ConfirmationModalProps) => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [optionValues, setOptionValues] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!state?.options?.length) {
+      setOptionValues({});
+      return;
+    }
+    const defaults: Record<string, boolean> = {};
+    for (const option of state.options) {
+      defaults[option.id] = option.defaultChecked ?? false;
+    }
+    setOptionValues(defaults);
+  }, [state]);
 
   if (!state) {
     return null;
@@ -1298,7 +1795,8 @@ const ConfirmationModal = ({ state, onClose }: ConfirmationModalProps) => {
     setError(null);
     setSubmitting(true);
     try {
-      await state.onConfirm();
+      const payload = state.options?.length ? optionValues : undefined;
+      await state.onConfirm(payload);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -1307,11 +1805,47 @@ const ConfirmationModal = ({ state, onClose }: ConfirmationModalProps) => {
     }
   };
 
+  const backdropClassName = nested
+    ? "modal-backdrop nested settings-confirm-backdrop"
+    : "modal-backdrop";
+
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
+    <div className={backdropClassName} role="dialog" aria-modal="true">
       <div className="modal">
         <h3>{state.title}</h3>
         <p>{state.message}</p>
+        {state.options?.length ? (
+          <div className="confirmation-options">
+            {state.options.map((option) => {
+              const checked = optionValues[option.id] ?? false;
+              return (
+                <label key={option.id} className="confirmation-option">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(event) => {
+                      const { checked: nextChecked } = event.currentTarget;
+                      setOptionValues((prev) => ({
+                        ...prev,
+                        [option.id]: nextChecked,
+                      }));
+                    }}
+                  />
+                  <div className="confirmation-option-text">
+                    <span className="confirmation-option-label">
+                      {option.label}
+                    </span>
+                    {option.description && (
+                      <span className="confirmation-option-description">
+                        {option.description}
+                      </span>
+                    )}
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        ) : null}
         {error && <div className="feedback error">{error}</div>}
         <div className="modal-actions">
           <button
@@ -1332,6 +1866,541 @@ const ConfirmationModal = ({ state, onClose }: ConfirmationModalProps) => {
           </button>
         </div>
       </div>
+    </div>
+  );
+};
+
+
+interface SettingsModalTab {
+  id: string;
+  label: string;
+  render: (context: {
+    close: () => void;
+    selectTab: (tabId: string) => void;
+    activeTabId: string;
+  }) => ReactNode;
+}
+
+interface SettingsModalProps {
+  open: boolean;
+  tabs: SettingsModalTab[];
+  initialTabId?: string;
+  onClose: () => void;
+  confirmState: ConfirmDialogState | null;
+  onConfirmClose: () => void;
+  activeTabId: string;
+  onTabChange: (tabId: string) => void;
+}
+
+const SettingsModal = ({
+  open,
+  tabs,
+  initialTabId,
+  onClose,
+  confirmState,
+  onConfirmClose,
+  activeTabId,
+  onTabChange,
+}: SettingsModalProps) => {
+  const fallbackTabId = tabs[0]?.id ?? "";
+  const resolvedActiveTab =
+    tabs.find((tab) => tab.id === activeTabId)?.id ??
+    (initialTabId && tabs.some((tab) => tab.id === initialTabId)
+      ? initialTabId
+      : fallbackTabId);
+
+  useEffect(() => {
+    if (!open || tabs.length === 0 || !resolvedActiveTab) {
+      return;
+    }
+    if (resolvedActiveTab !== activeTabId) {
+      onTabChange(resolvedActiveTab);
+    }
+  }, [open, tabs.length, resolvedActiveTab, activeTabId, onTabChange]);
+
+  if (!open || tabs.length === 0) {
+    return null;
+  }
+
+  const activeTabConfig =
+    tabs.find((tab) => tab.id === resolvedActiveTab) ?? tabs[0];
+
+  const handleTabChange = (tabId: string) => {
+    onTabChange(tabId);
+  };
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <div className="modal large settings-modal">
+        <div className="settings-modal-header">
+          <h3>系统设置</h3>
+          <button
+            type="button"
+            className="link-button small"
+            onClick={onClose}
+            aria-label="关闭设置"
+          >
+            关闭
+          </button>
+        </div>
+        <div className="settings-modal-shell">
+          <nav className="settings-modal-nav" aria-label="设置类别">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={`settings-nav-button${
+                  tab.id === activeTabConfig.id ? " active" : ""
+                }`}
+                onClick={() => handleTabChange(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+          <section className="settings-modal-main">
+            {activeTabConfig.render({
+              close: onClose,
+              selectTab: handleTabChange,
+              activeTabId: activeTabConfig.id,
+            })}
+          </section>
+        </div>
+        <ConfirmationModal
+          state={confirmState}
+          onClose={onConfirmClose}
+          nested
+        />
+      </div>
+    </div>
+  );
+};
+
+const SettingsOverviewPanel = ({
+  onOpenInspection,
+}: {
+  onOpenInspection: () => void;
+}) => (
+  <div className="settings-overview">
+    <h4>快速开始</h4>
+    <p>
+      根据业务需求组合不同的巡检策略。请选择左侧的类别进入对应的配置页。
+    </p>
+    <div className="settings-overview-actions">
+      <button type="button" className="primary" onClick={onOpenInspection}>
+        管理巡检项
+      </button>
+    </div>
+    <p className="settings-overview-hint">
+      更多设置选项（通知策略、巡检计划等）即将开放，敬请期待。
+    </p>
+  </div>
+);
+
+interface InspectionSettingsPanelProps {
+  items: InspectionItem[];
+  submitting: boolean;
+  notice: string | null;
+  error: string | null;
+  onClose: () => void;
+  onSave: (payload: {
+    id?: number;
+    name: string;
+    description?: string;
+    check_type: string;
+    config: Record<string, unknown>;
+  }) => Promise<void>;
+  onDelete: (item: InspectionItem) => void;
+}
+
+type InspectionCheckType = "command" | "promql";
+
+const comparisonOptions = [
+  { label: "大于", value: ">" },
+  { label: "小于", value: "<" },
+  { label: "等于", value: "==" },
+  { label: "大于等于", value: ">=" },
+  { label: "小于等于", value: "<=" },
+  { label: "不等于", value: "!=" },
+];
+
+const defaultInspectionForm = {
+  id: undefined as number | undefined,
+  name: "",
+  description: "",
+  checkType: "command" as InspectionCheckType,
+  command: "",
+  expression: "",
+  comparison: ">=",
+  threshold: "",
+  suggestion: "",
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const parseCommandString = (raw: unknown): string => {
+  if (Array.isArray(raw)) {
+    return raw.map((item) => String(item)).join(" ");
+  }
+  if (typeof raw === "string") {
+    return raw;
+  }
+  return "";
+};
+
+const extractThreshold = (raw: unknown): string => {
+  if (raw === null || raw === undefined) {
+    return "";
+  }
+  const value = Number(raw);
+  return Number.isNaN(value) ? "" : String(value);
+};
+
+const deriveFormFromItem = (item: InspectionItem) => {
+  const base = { ...defaultInspectionForm, id: item.id, name: item.name, description: item.description ?? "" };
+  const config = isRecord(item.config) ? item.config : {};
+  if (item.check_type === "promql") {
+    return {
+      ...base,
+      checkType: "promql" as InspectionCheckType,
+      expression: typeof config.expression === "string" ? config.expression : "",
+      comparison: typeof config.comparison === "string" ? config.comparison : ">=",
+      threshold: extractThreshold(config.fail_threshold ?? config.warn_threshold ?? config.threshold),
+      suggestion: typeof config.suggestion_on_fail === "string" ? config.suggestion_on_fail : "",
+    };
+  }
+
+  return {
+    ...base,
+    checkType: "command" as InspectionCheckType,
+    command: parseCommandString(config.command),
+    suggestion: typeof config.suggestion_on_fail === "string" ? config.suggestion_on_fail : "",
+  };
+};
+
+const InspectionSettingsPanel = ({
+  items,
+  submitting,
+  notice,
+  error,
+  onClose,
+  onSave,
+  onDelete,
+}: InspectionSettingsPanelProps) => {
+  const [formState, setFormState] = useState(defaultInspectionForm);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const handleResetForm = () => {
+    setFormState(defaultInspectionForm);
+    setFormError(null);
+  };
+
+  const handleEdit = (item: InspectionItem) => {
+    setFormState(deriveFormFromItem(item));
+    setFormError(null);
+  };
+
+  const handleTypeChange = (value: InspectionCheckType) => {
+    setFormState((prev) => ({
+      ...prev,
+      checkType: value,
+      command: value === "command" ? prev.command : "",
+      expression: value === "promql" ? prev.expression : "",
+    }));
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setFormError(null);
+
+    const { id, name, description, checkType, command, expression, threshold, comparison, suggestion } =
+      formState;
+
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setFormError("巡检名称不能为空");
+      return;
+    }
+
+    let config: Record<string, unknown> = {};
+
+    if (checkType === "command") {
+      const commandText = command.trim();
+      if (!commandText) {
+        setFormError("请输入要执行的命令");
+        return;
+      }
+      config = {
+        command: commandText,
+        shell: true,
+        timeout: 30,
+        success_message: "Command executed successfully.",
+        failure_message: "Command returned non-zero exit code.",
+        suggestion_on_fail: suggestion.trim() || "",
+        suggestion_on_success: "",
+      };
+    } else {
+      const expr = expression.trim();
+      if (!expr) {
+        setFormError("请输入 Prometheus 表达式");
+        return;
+      }
+      const numericThreshold = Number(threshold);
+      if (!threshold || Number.isNaN(numericThreshold)) {
+        setFormError("请提供有效的告警阈值");
+        return;
+      }
+      config = {
+        expression: expr,
+        comparison,
+        fail_threshold: numericThreshold,
+        detail_template: "{expression} value: {value}",
+        suggestion_on_fail: suggestion.trim() || "",
+        empty_message: "Prometheus returned no samples.",
+        suggestion_if_empty: suggestion.trim() || "",
+      };
+    }
+
+    try {
+      await onSave({
+        id,
+        name: trimmedName,
+        description: description?.trim() || undefined,
+        check_type: checkType,
+        config,
+      });
+      setFormState((prev) => ({
+        ...defaultInspectionForm,
+        checkType: prev.checkType,
+      }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setFormError(message);
+    }
+  };
+
+  const activeItems = useMemo(() => items.slice(), [items]);
+
+  return (
+    <div className="inspection-settings-panel">
+      <div className="settings-header">
+          <h3>巡检项设置</h3>
+          <button className="link-button" onClick={() => handleResetForm()}>
+            新建巡检项
+          </button>
+        </div>
+        {notice && <div className="feedback success">{notice}</div>}
+        {(error || formError) && (
+          <div className="feedback error">{formError ?? error}</div>
+        )}
+        <div className="settings-content">
+          <div className="settings-list">
+            <table>
+              <thead>
+                <tr>
+                  <th>序号</th>
+                  <th>名称</th>
+                  <th>类型</th>
+                  <th>描述</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activeItems.length === 0 ? (
+                  <tr>
+                    <td colSpan={5}>暂无巡检项</td>
+                  </tr>
+                ) : (
+                  activeItems.map((item, index) => (
+                    <tr key={item.id}>
+                      <td>{index + 1}</td>
+                      <td>{item.name}</td>
+                      <td>{item.check_type}</td>
+                      <td>{item.description || "-"}</td>
+                      <td>
+                        <div className="table-actions">
+                          <button
+                            className="link-button small"
+                            onClick={() => handleEdit(item)}
+                          >
+                            编辑
+                          </button>
+                          <button
+                            className="link-button small danger"
+                            onClick={() => {
+                              setFormError(null);
+                              onDelete(item);
+                            }}
+                            disabled={submitting}
+                          >
+                            删除
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <form className="settings-form" onSubmit={handleSubmit}>
+            <h4>{formState.id ? "编辑巡检项" : "新建巡检项"}</h4>
+            <label>
+              巡检名称
+              <input
+                type="text"
+                value={formState.name}
+                onChange={(event) =>
+                  setFormState((prev) => ({
+                    ...prev,
+                    name: event.target.value,
+                  }))
+                }
+                required
+                disabled={submitting}
+              />
+            </label>
+            <label>
+              描述
+              <textarea
+                value={formState.description}
+                onChange={(event) =>
+                  setFormState((prev) => ({
+                    ...prev,
+                    description: event.target.value,
+                  }))
+                }
+                rows={2}
+                disabled={submitting}
+              />
+            </label>
+            <label>
+              巡检类型
+              <select
+                value={formState.checkType}
+                onChange={(event) =>
+                  handleTypeChange(event.target.value as InspectionCheckType)
+                }
+                disabled={submitting}
+              >
+                <option value="command">命令行</option>
+                <option value="promql">PromQL 表达式</option>
+              </select>
+            </label>
+
+            {formState.checkType === "command" ? (
+              <label>
+                命令（可使用 {"{{kubeconfig}}"} 占位符）
+                <textarea
+                  value={formState.command}
+                  onChange={(event) =>
+                    setFormState((prev) => ({
+                      ...prev,
+                      command: event.target.value,
+                    }))
+                  }
+                  rows={4}
+                  placeholder="例如：kubectl --kubeconfig {{kubeconfig}} cluster-info"
+                  disabled={submitting}
+                />
+              </label>
+            ) : (
+              <>
+                <label>
+                  Prometheus 表达式
+                  <textarea
+                    value={formState.expression}
+                    onChange={(event) =>
+                      setFormState((prev) => ({
+                        ...prev,
+                        expression: event.target.value,
+                      }))
+                    }
+                    rows={3}
+                    placeholder="例如：max(up{job='apiserver'})"
+                    disabled={submitting}
+                  />
+                </label>
+                <div className="field-row">
+                  <label>
+                    告警阈值
+                    <input
+                      type="number"
+                      value={formState.threshold}
+                      onChange={(event) =>
+                        setFormState((prev) => ({
+                          ...prev,
+                          threshold: event.target.value,
+                        }))
+                      }
+                      placeholder="数值"
+                      disabled={submitting}
+                    />
+                  </label>
+                  <label>
+                    比较方式
+                    <select
+                      value={formState.comparison}
+                      onChange={(event) =>
+                        setFormState((prev) => ({
+                          ...prev,
+                          comparison: event.target.value,
+                        }))
+                      }
+                      disabled={submitting}
+                    >
+                      {comparisonOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </>
+            )}
+
+            <label>
+              处理建议
+              <textarea
+                value={formState.suggestion}
+                onChange={(event) =>
+                  setFormState((prev) => ({
+                    ...prev,
+                    suggestion: event.target.value,
+                  }))
+                }
+                rows={3}
+                placeholder="建议描述（可选）"
+                disabled={submitting}
+              />
+            </label>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={handleResetForm}
+                disabled={submitting}
+              >
+                清空
+              </button>
+              <button type="submit" className="primary" disabled={submitting}>
+                {submitting ? "保存中..." : formState.id ? "更新" : "保存"}
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={onClose}
+                disabled={submitting}
+              >
+                关闭
+              </button>
+            </div>
+          </form>
+        </div>
     </div>
   );
 };
@@ -1359,30 +2428,134 @@ const ClusterEditModal = ({
   const [prometheusUrl, setPrometheusUrl] = useState(
     cluster.prometheus_url ?? ""
   );
-  const [file, setFile] = useState<File | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [kubeconfigModalOpen, setKubeconfigModalOpen] = useState(false);
+  const [kubeconfigText, setKubeconfigText] = useState("");
+  const [kubeconfigFile, setKubeconfigFile] = useState<File | null>(null);
+  const [kubeconfigFileName, setKubeconfigFileName] = useState<string | null>(
+    null
+  );
+  const [kubeconfigEdited, setKubeconfigEdited] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
 
   useEffect(() => {
     setName(cluster.name);
     setPrometheusUrl(cluster.prometheus_url ?? "");
-    setFile(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
+    setKubeconfigModalOpen(false);
+    setKubeconfigText("");
+    setKubeconfigFile(null);
+    setKubeconfigFileName(null);
+    setKubeconfigEdited(false);
+    setFileError(null);
   }, [cluster]);
 
   const nameInputId = `cluster-edit-name-${cluster.id}`;
   const promInputId = `cluster-edit-prom-${cluster.id}`;
-  const fileInputId = `cluster-edit-file-${cluster.id}`;
+  const modalFileInputId = `cluster-edit-file-${cluster.id}`;
 
-  const handleFileChange = (event: FormEvent<HTMLInputElement>) => {
-    const target = event.currentTarget;
-    setFile(target.files?.[0] ?? null);
+  const hasManualKubeconfig = useMemo(
+    () => kubeconfigEdited && kubeconfigText.trim().length > 0,
+    [kubeconfigEdited, kubeconfigText]
+  );
+
+  const kubeconfigReady = useMemo(
+    () =>
+      hasManualKubeconfig ||
+      (!!kubeconfigFile && !kubeconfigEdited),
+    [hasManualKubeconfig, kubeconfigEdited, kubeconfigFile]
+  );
+
+  const kubeconfigSummary = useMemo(() => {
+    if (!kubeconfigReady) {
+      return null;
+    }
+    if (hasManualKubeconfig) {
+      return kubeconfigFileName
+        ? `已基于 ${kubeconfigFileName} 进行编辑`
+        : "已粘贴 kubeconfig 内容";
+    }
+    if (kubeconfigFile) {
+      return `已选择文件: ${kubeconfigFile.name}`;
+    }
+    return "已导入 kubeconfig 内容";
+  }, [
+    hasManualKubeconfig,
+    kubeconfigReady,
+    kubeconfigFileName,
+    kubeconfigFile,
+  ]);
+
+  const handleOpenModal = () => {
+    setKubeconfigModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setKubeconfigModalOpen(false);
+  };
+
+  const handleFileSelected = (file: File) => {
+    setKubeconfigFile(file);
+    setKubeconfigFileName(file.name);
+    setKubeconfigEdited(false);
+    setFileError(null);
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setKubeconfigText(reader.result);
+      } else {
+        setKubeconfigText("");
+      }
+    };
+    reader.onerror = () => {
+      setFileError("读取 kubeconfig 文件失败，请重试");
+      setKubeconfigFile(null);
+      setKubeconfigFileName(null);
+      setKubeconfigText("");
+      setKubeconfigEdited(false);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleTextChange = (value: string) => {
+    setKubeconfigText(value);
+    setFileError(null);
+    if (value.trim().length === 0) {
+      setKubeconfigEdited(false);
+      setKubeconfigFile(null);
+      setKubeconfigFileName(null);
+    } else {
+      setKubeconfigEdited(true);
+    }
+  };
+
+  const handleClear = () => {
+    setKubeconfigText("");
+    setKubeconfigFile(null);
+    setKubeconfigFileName(null);
+    setKubeconfigEdited(false);
+    setFileError(null);
+  };
+
+  const resolveFileToUpload = () => {
+    const hasText = kubeconfigText.trim().length > 0;
+    if (!kubeconfigEdited && kubeconfigFile) {
+      return kubeconfigFile;
+    }
+    if (hasText) {
+      const filename =
+        (kubeconfigFileName && kubeconfigFileName.trim()) ||
+        "kubeconfig.yaml";
+      return new File([kubeconfigText], filename, {
+        type: "application/x-yaml",
+      });
+    }
+    return null;
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await onSubmit({ name, prometheusUrl, file });
+    const fileForSubmit = resolveFileToUpload();
+    await onSubmit({ name, prometheusUrl, file: fileForSubmit });
   };
 
   return (
@@ -1401,7 +2574,7 @@ const ClusterEditModal = ({
           />
         </div>
         <div className="modal-field">
-          <label htmlFor={promInputId}>Prometheus 地址(可选)</label>
+          <label htmlFor={promInputId}>Prometheus 地址</label>
           <input
             id={promInputId}
             type="text"
@@ -1411,21 +2584,22 @@ const ClusterEditModal = ({
           />
         </div>
         <div className="modal-field">
-          <label htmlFor={fileInputId}>重新上传 kubeconfig(可选)</label>
-          <input
-            id={fileInputId}
-            ref={fileInputRef}
-            type="file"
-            accept=".yaml,.yml,.json"
-            onChange={handleFileChange}
+          <span className="modal-field-label">重新上传 kubeconfig(可选)</span>
+          <button
+            type="button"
+            className={`cluster-upload-trigger${
+              kubeconfigReady ? " ready" : ""
+            }`}
+            onClick={handleOpenModal}
             disabled={submitting}
-          />
-        </div>
-        {file && (
-          <div className="modal-file-name">
-            将上传: <strong>{file.name}</strong>
+          >
+            {kubeconfigReady ? "查看 / 更新 kubeconfig" : "导入 kubeconfig"}
+          </button>
+          <div className="modal-kubeconfig-summary">
+            {kubeconfigSummary ?? "支持上传文件或粘贴 YAML 内容"}
           </div>
-        )}
+        </div>
+        {fileError && <div className="feedback error">{fileError}</div>}
         {error && <div className="feedback error">{error}</div>}
         <div className="modal-actions">
           <button
@@ -1441,6 +2615,21 @@ const ClusterEditModal = ({
           </button>
         </div>
       </form>
+      <KubeconfigModal
+        open={kubeconfigModalOpen}
+        text={kubeconfigText}
+        fileName={kubeconfigFileName}
+        hasManualContent={hasManualKubeconfig}
+        title="更新 kubeconfig"
+        description="重新上传文件或粘贴最新的 kubeconfig 内容。"
+        confirmLabel="完成"
+        fileButtonLabel="选择文件"
+        fileInputId={modalFileInputId}
+        onClose={handleCloseModal}
+        onFileSelected={handleFileSelected}
+        onTextChange={handleTextChange}
+        onClear={handleClear}
+      />
     </div>
   );
 };
@@ -1451,13 +2640,34 @@ const App = () => {
   const [items, setItems] = useState<InspectionItem[]>([]);
 
   const [clusterError, setClusterError] = useState<string | null>(null);
-  const [clusterNotice, setClusterNotice] = useState<string | null>(null);
-  const [clusterNoticeType, setClusterNoticeType] =
-    useState<NoticeType>(null);
-  const [clusterUploading, setClusterUploading] = useState(false);
+const [clusterNotice, setClusterNotice] = useState<string | null>(null);
+const [clusterNoticeType, setClusterNoticeType] =
+  useState<NoticeType>(null);
+const [clusterNoticeScope, setClusterNoticeScope] =
+  useState<NoticeScope | null>(null);
+const clearClusterNotice = useCallback(() => {
+  setClusterNotice(null);
+  setClusterNoticeType(null);
+  setClusterNoticeScope(null);
+}, []);
+const showClusterNotice = useCallback(
+  (scope: NoticeScope, message: string, type: Exclude<NoticeType, null>) => {
+    setClusterNotice(message);
+    setClusterNoticeType(type);
+    setClusterNoticeScope(scope);
+  },
+  []
+);
+const [clusterUploading, setClusterUploading] = useState(false);
   const [clusterNameInput, setClusterNameInput] = useState("");
   const [clusterPromInput, setClusterPromInput] = useState("");
-  const clusterFileRef = useRef<HTMLInputElement>(null);
+  const [kubeconfigModalOpen, setKubeconfigModalOpen] = useState(false);
+  const [kubeconfigText, setKubeconfigText] = useState("");
+  const [kubeconfigFile, setKubeconfigFile] = useState<File | null>(null);
+  const [kubeconfigFileName, setKubeconfigFileName] = useState<string | null>(
+    null
+  );
+  const [kubeconfigEdited, setKubeconfigEdited] = useState(false);
 
   const [inspectionNotice, setInspectionNotice] = useState<string | null>(null);
   const [inspectionError, setInspectionError] = useState<string | null>(null);
@@ -1473,14 +2683,53 @@ const App = () => {
   const [clusterDisplayIds, setClusterDisplayIds] = useState<
     Record<number, string>
   >(() => loadStoredClusterDisplayIds());
+  const [testingClusterIds, setTestingClusterIds] = useState<
+    Record<number, boolean>
+  >({});
 
   const [clusterEditState, setClusterEditState] =
     useState<ClusterConfig | null>(null);
   const [clusterEditSubmitting, setClusterEditSubmitting] = useState(false);
   const [clusterEditError, setClusterEditError] = useState<string | null>(null);
 
-  const location = useLocation();
-  const navigate = useNavigate();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSubmitting, setSettingsSubmitting] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [settingsNotice, setSettingsNotice] = useState<string | null>(null);
+  const [settingsTabId, setSettingsTabId] = useState<string>("overview");
+  const previousSettingsPathRef = useRef<string>("/");
+  const backgroundLocationRef = useRef<RouterLocation | null>(null);
+
+  const sortedItems = useMemo(
+    () => items.slice().sort(compareInspectionItemByName),
+    [items]
+  );
+
+const location = useLocation();
+const navigate = useNavigate();
+const currentNoticeScope = useMemo(
+  () => resolveNoticeScope(location.pathname),
+  [location.pathname]
+);
+const backgroundLocation =
+    (
+      location.state as
+        | {
+            backgroundLocation?: RouterLocation;
+          }
+        | undefined
+    )?.backgroundLocation ?? null;
+
+  useEffect(() => {
+    if (backgroundLocation) {
+      backgroundLocationRef.current = backgroundLocation;
+    }
+  }, [backgroundLocation]);
+
+  const routesLocation =
+    location.pathname.startsWith(SETTINGS_BASE_PATH) && backgroundLocation
+      ? backgroundLocation
+      : location;
 
   const runDisplayIds = useMemo(
     () => createRunDisplayIdMap(runs, clusters),
@@ -1488,8 +2737,131 @@ const App = () => {
   );
 
   useEffect(() => {
+    const pathWithSearch = `${location.pathname}${location.search}${location.hash}`;
+    if (!location.pathname.startsWith(SETTINGS_BASE_PATH)) {
+      previousSettingsPathRef.current =
+        pathWithSearch.length > 0 ? pathWithSearch : "/";
+    }
+  }, [location.pathname, location.search, location.hash]);
+
+  useEffect(() => {
+    if (!settingsOpen) {
+      setConfirmState((prev) =>
+        prev && prev.scope === "settings" ? null : prev
+      );
+    }
+  }, [settingsOpen]);
+
+  const setClusterTesting = useCallback((clusterId: number, value: boolean) => {
+    setTestingClusterIds((prev) => {
+      const isActive = Boolean(prev[clusterId]);
+      if (isActive === value) {
+        return prev;
+      }
+      const next = { ...prev };
+      if (value) {
+        next[clusterId] = true;
+      } else {
+        delete next[clusterId];
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
     persistClusterDisplayIds(clusterDisplayIds);
   }, [clusterDisplayIds]);
+
+  useEffect(() => {
+    if (
+      !clusterNotice ||
+      !clusterNoticeType ||
+      clusterNoticeType === "error" ||
+      typeof window === "undefined"
+    ) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      clearClusterNotice();
+    }, 5000);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [clusterNotice, clusterNoticeType, clearClusterNotice]);
+
+  useEffect(() => {
+    if (!inspectionNotice || typeof window === "undefined") {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setInspectionNotice(null);
+    }, 5000);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [inspectionNotice]);
+
+  useEffect(() => {
+    if (!settingsNotice || typeof window === "undefined") {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setSettingsNotice(null);
+    }, 5000);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [settingsNotice]);
+
+  const handleTestClusterConnection = useCallback(
+    async (clusterId: number) => {
+      clearClusterNotice();
+      setClusterError(null);
+      setClusterTesting(clusterId, true);
+      try {
+        logWithTimestamp("info", "开始测试集群连接: %s", clusterId);
+        const updated = await testClusterConnection(clusterId);
+        setClusters((prev) =>
+          prev.map((item) => (item.id === updated.id ? updated : item))
+        );
+        const statusMeta = getClusterStatusMeta(updated.connection_status);
+        let noticeType: NoticeType = "success";
+        if (updated.connection_status === "warning") {
+          noticeType = "warning";
+        } else if (updated.connection_status === "failed") {
+          noticeType = "error";
+        }
+        const detailMessage = updated.connection_message
+          ? `，详情：${updated.connection_message}`
+          : "";
+        showClusterNotice(
+          currentNoticeScope,
+          `集群(${updated.name}) ${statusMeta.label}${detailMessage}`,
+          noticeType
+        );
+        logWithTimestamp(
+          "info",
+          "集群连接测试完成: %s -> %s",
+          clusterId,
+          updated.connection_status
+        );
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "测试集群连接失败";
+        logWithTimestamp("error", "测试集群连接失败: %s", message);
+        showClusterNotice(currentNoticeScope, message, "error");
+      } finally {
+        setClusterTesting(clusterId, false);
+      }
+    },
+    [clearClusterNotice, currentNoticeScope, setClusterTesting, showClusterNotice]
+  );
 
   const refreshClusters = useCallback(async () => {
     try {
@@ -1520,10 +2892,9 @@ const App = () => {
       const message =
         err instanceof Error ? err.message : "获取巡检历史失败";
       logWithTimestamp("error", "获取巡检历史失败: %s", message);
-      setClusterNotice(message);
-      setClusterNoticeType("error");
+      showClusterNotice(currentNoticeScope, message, "error");
     }
-  }, []);
+  }, [currentNoticeScope, showClusterNotice]);
 
   const refreshItems = useCallback(async () => {
     try {
@@ -1540,6 +2911,40 @@ const App = () => {
     }
   }, []);
 
+  const handleOpenSettings = useCallback(() => {
+    setSettingsError(null);
+    setSettingsNotice(null);
+
+    if (location.pathname.startsWith(SETTINGS_BASE_PATH)) {
+      setSettingsOpen(true);
+      return;
+    }
+
+    const currentPath = `${location.pathname}${location.search}${location.hash}`;
+    previousSettingsPathRef.current =
+      currentPath.length > 0 ? currentPath : "/";
+    backgroundLocationRef.current = location;
+    setSettingsTabId("overview");
+    setSettingsOpen(true);
+    navigate(SETTINGS_BASE_PATH, {
+      state: { backgroundLocation: location },
+    });
+  }, [location, navigate]);
+
+  const handleCloseSettings = useCallback(() => {
+    const background = backgroundLocationRef.current;
+    const target =
+      (background
+        ? `${background.pathname}${background.search}${background.hash}`
+        : previousSettingsPathRef.current) || "/";
+    setSettingsOpen(false);
+    setConfirmState((prev) =>
+      prev && prev.scope === "settings" ? null : prev
+    );
+    backgroundLocationRef.current = null;
+    navigate(target, { replace: true });
+  }, [navigate]);
+
   useEffect(() => {
     void refreshClusters();
     void refreshRuns();
@@ -1549,21 +2954,87 @@ const App = () => {
   const resetClusterUploadForm = () => {
     setClusterNameInput("");
     setClusterPromInput("");
-    if (clusterFileRef.current) {
-      clusterFileRef.current.value = "";
-    }
+    setKubeconfigText("");
+    setKubeconfigFile(null);
+    setKubeconfigFileName(null);
+    setKubeconfigEdited(false);
+    setKubeconfigModalOpen(false);
   };
 
+  const handleOpenKubeconfigModal = useCallback(() => {
+    setKubeconfigModalOpen(true);
+  }, []);
+
+  const handleCloseKubeconfigModal = useCallback(() => {
+    setKubeconfigModalOpen(false);
+  }, []);
+
+  const handleKubeconfigFileSelected = useCallback((file: File) => {
+    setKubeconfigFile(file);
+    setKubeconfigFileName(file.name);
+    setKubeconfigEdited(false);
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setKubeconfigText(reader.result);
+        setClusterError(null);
+      } else {
+        setKubeconfigText("");
+      }
+    };
+    reader.onerror = () => {
+      setClusterError("读取 kubeconfig 文件失败，请重试");
+      setKubeconfigFile(null);
+      setKubeconfigFileName(null);
+      setKubeconfigText("");
+      setKubeconfigEdited(false);
+    };
+    reader.readAsText(file);
+  }, []);
+
+  const handleKubeconfigTextChange = useCallback((value: string) => {
+    setKubeconfigText(value);
+    if (value.trim().length === 0) {
+      setKubeconfigEdited(false);
+      setKubeconfigFile(null);
+      setKubeconfigFileName(null);
+    } else {
+      setKubeconfigEdited(true);
+    }
+    setClusterError(null);
+  }, []);
+
+  const handleKubeconfigClear = useCallback(() => {
+    setKubeconfigText("");
+    setKubeconfigFile(null);
+    setKubeconfigFileName(null);
+    setKubeconfigEdited(false);
+  }, []);
+
   const handleUploadCluster = useCallback(async () => {
-    const file =
-      clusterFileRef.current?.files && clusterFileRef.current.files[0];
-    if (!file) {
-      setClusterError("请选择要上传的 kubeconfig 文件");
+    const hasText = kubeconfigText.trim().length > 0;
+    let fileToUpload: File | null = null;
+
+    if (!kubeconfigEdited && kubeconfigFile) {
+      fileToUpload = kubeconfigFile;
+    } else if (hasText) {
+      const filename =
+        (kubeconfigFileName && kubeconfigFileName.trim()) ||
+        "kubeconfig.yaml";
+      fileToUpload = new File([kubeconfigText], filename, {
+        type: "application/x-yaml",
+      });
+    }
+
+    if (!fileToUpload) {
+      setClusterError("请先导入或粘贴 kubeconfig 内容");
+      setKubeconfigModalOpen(true);
       return;
     }
 
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", fileToUpload);
     if (clusterNameInput.trim()) {
       formData.append("name", clusterNameInput.trim());
     }
@@ -1573,17 +3044,19 @@ const App = () => {
 
     setClusterUploading(true);
     setClusterError(null);
-    setClusterNotice(null);
-    setClusterNoticeType(null);
+    clearClusterNotice();
 
     try {
-      logWithTimestamp("info", "上传集群: %s", clusterNameInput || file.name);
+      logWithTimestamp(
+        "info",
+        "上传集群: %s",
+        clusterNameInput || fileToUpload.name
+      );
       await registerCluster(formData);
       resetClusterUploadForm();
       await refreshClusters();
       await refreshRuns();
-      setClusterNotice("集群注册成功");
-      setClusterNoticeType("success");
+      showClusterNotice(currentNoticeScope, "集群注册成功", "success");
       logWithTimestamp("info", "集群注册成功");
     } catch (err) {
       const message =
@@ -1593,7 +3066,51 @@ const App = () => {
     } finally {
       setClusterUploading(false);
     }
-  }, [clusterNameInput, clusterPromInput, refreshClusters, refreshRuns]);
+  }, [
+    clusterNameInput,
+    clusterPromInput,
+    kubeconfigEdited,
+    kubeconfigFile,
+    kubeconfigFileName,
+    kubeconfigText,
+    refreshClusters,
+    refreshRuns,
+    clearClusterNotice,
+    currentNoticeScope,
+    showClusterNotice,
+  ]);
+
+  const hasManualKubeconfig = useMemo(
+    () => kubeconfigEdited && kubeconfigText.trim().length > 0,
+    [kubeconfigEdited, kubeconfigText]
+  );
+
+  const kubeconfigReady = useMemo(
+    () =>
+      hasManualKubeconfig ||
+      (!!kubeconfigFile && !kubeconfigEdited),
+    [hasManualKubeconfig, kubeconfigEdited, kubeconfigFile]
+  );
+
+  const kubeconfigSummary = useMemo(() => {
+    if (!kubeconfigReady) {
+      return null;
+    }
+    if (hasManualKubeconfig) {
+      return kubeconfigFileName
+        ? `已基于 ${kubeconfigFileName} 进行编辑`
+        : "已粘贴 kubeconfig 内容";
+    }
+    if (kubeconfigFile) {
+      return `已选择文件: ${kubeconfigFile.name}`;
+    }
+    return "已导入 kubeconfig 内容";
+  }, [
+    hasManualKubeconfig,
+    kubeconfigReady,
+    kubeconfigFileName,
+    kubeconfigFile,
+  ]);
 
   const setSelectedItemIds = useCallback(
     (updater: (prev: number[]) => number[]) => {
@@ -1652,31 +3169,39 @@ const App = () => {
         message: `确认删除集群(${cluster.name})？该操作不可恢复。`,
         confirmLabel: "删除",
         variant: "danger",
-        onConfirm: async () => {
-          try {
-            logWithTimestamp("info", "删除集群: %s", cluster.id);
-            await apiDeleteCluster(cluster.id);
-            await refreshClusters();
-            await refreshRuns();
-            setClusterNotice("集群已删除");
-            setClusterNoticeType("success");
-            if (location.pathname.includes("/clusters/")) {
-              navigate("/", { replace: true });
+        options: [
+          {
+            id: "deleteLocalFiles",
+            label: "同时删除本地 kubeconfig 及关联巡检报告文件",
+          },
+        ],
+          onConfirm: async (optionsMap) => {
+            try {
+              logWithTimestamp("info", "删除集群: %s", cluster.id);
+              const deleteFiles = Boolean(optionsMap?.deleteLocalFiles);
+              await apiDeleteCluster(cluster.id, { deleteFiles });
+              await refreshClusters();
+              await refreshRuns();
+              const successScope = location.pathname.includes("/clusters/")
+                ? "overview"
+                : currentNoticeScope;
+              showClusterNotice(successScope, "集群已删除", "success");
+              if (location.pathname.includes("/clusters/")) {
+                navigate("/", { replace: true });
+              }
+            } catch (err) {
+              const message =
+                err instanceof Error ? err.message : "删除集群失败";
+              logWithTimestamp("error", "删除集群失败: %s", message);
+              showClusterNotice(currentNoticeScope, message, "error");
+              throw err instanceof Error ? err : new Error(message);
             }
-          } catch (err) {
-            const message =
-              err instanceof Error ? err.message : "删除集群失败";
-            logWithTimestamp("error", "删除集群失败: %s", message);
-            setClusterNotice(message);
-            setClusterNoticeType("error");
-            throw err instanceof Error ? err : new Error(message);
-          }
-        },
-      });
-      return Promise.resolve();
-    },
-    [refreshClusters, refreshRuns, location.pathname, navigate]
-  );
+          },
+        });
+        return Promise.resolve();
+      },
+      [refreshClusters, refreshRuns, location.pathname, navigate, currentNoticeScope, showClusterNotice]
+    );
 
   const handleDeleteRun = useCallback(
     (run: InspectionRunListItem): Promise<void> => {
@@ -1686,27 +3211,32 @@ const App = () => {
         message: `确认删除巡检记录(${displayId})？该操作不可恢复。`,
         confirmLabel: "删除",
         variant: "danger",
-        onConfirm: async () => {
+        options: [
+          {
+            id: "deleteReportFile",
+            label: "同时删除本地巡检报告文件",
+          },
+        ],
+        onConfirm: async (optionsMap) => {
           try {
             logWithTimestamp("info", "删除巡检记录: %s", run.id);
-            await apiDeleteInspectionRun(run.id);
+            const deleteFiles = Boolean(optionsMap?.deleteReportFile);
+            await apiDeleteInspectionRun(run.id, { deleteFiles });
             await refreshRuns();
             await refreshClusters();
-            setClusterNotice("巡检记录已删除");
-            setClusterNoticeType("success");
+            showClusterNotice(currentNoticeScope, "巡检记录已删除", "success");
           } catch (err) {
             const message =
               err instanceof Error ? err.message : "删除巡检记录失败";
             logWithTimestamp("error", "删除巡检记录失败: %s", message);
-            setClusterNotice(message);
-            setClusterNoticeType("error");
+            showClusterNotice(currentNoticeScope, message, "error");
             throw err instanceof Error ? err : new Error(message);
           }
         },
       });
       return Promise.resolve();
     },
-    [runDisplayIds, refreshRuns, refreshClusters]
+    [runDisplayIds, refreshRuns, refreshClusters, currentNoticeScope, showClusterNotice]
   );
 
   const handleDeleteRunById = useCallback(
@@ -1717,14 +3247,24 @@ const App = () => {
         message: `确认删除巡检记录(${displayId})？该操作不可恢复。`,
         confirmLabel: "删除",
         variant: "danger",
-        onConfirm: async () => {
+        options: [
+          {
+            id: "deleteReportFile",
+            label: "同时删除本地巡检报告 (PDF)",
+            description: "勾选后将移除 reports/ 目录中的对应报告。",
+          },
+        ],
+        onConfirm: async (optionsMap) => {
           try {
             logWithTimestamp("info", "删除巡检记录: %s", runId);
-            await apiDeleteInspectionRun(runId);
+            const deleteFiles = Boolean(optionsMap?.deleteReportFile);
+            await apiDeleteInspectionRun(runId, { deleteFiles });
             await refreshRuns();
             await refreshClusters();
-            setClusterNotice("巡检记录已删除");
-            setClusterNoticeType("success");
+            const targetScope = redirectPath
+              ? resolveNoticeScope(redirectPath)
+              : currentNoticeScope;
+            showClusterNotice(targetScope, "巡检记录已删除", "success");
             if (redirectPath) {
               navigate(redirectPath, { replace: true });
             }
@@ -1732,21 +3272,220 @@ const App = () => {
             const message =
               err instanceof Error ? err.message : "删除巡检记录失败";
             logWithTimestamp("error", "删除巡检记录失败: %s", message);
-            setClusterNotice(message);
-            setClusterNoticeType("error");
+            showClusterNotice(currentNoticeScope, message, "error");
             throw err instanceof Error ? err : new Error(message);
           }
         },
       });
       return Promise.resolve();
     },
-    [runDisplayIds, refreshRuns, refreshClusters, navigate]
+    [
+      runDisplayIds,
+      refreshRuns,
+      refreshClusters,
+      navigate,
+      currentNoticeScope,
+      showClusterNotice,
+    ]
   );
 
   const handleEditCluster = useCallback((cluster: ClusterConfig) => {
     setClusterEditState(cluster);
     setClusterEditError(null);
   }, []);
+
+  const handleSaveInspectionItem = useCallback(
+    async ({
+      id,
+      name,
+      description,
+      check_type,
+      config,
+    }: {
+      id?: number;
+      name: string;
+      description?: string;
+      check_type: string;
+      config: Record<string, unknown>;
+    }) => {
+      setSettingsSubmitting(true);
+      try {
+        if (id) {
+          logWithTimestamp("info", "更新巡检项: %s", id);
+          await apiUpdateInspectionItem(id, {
+            name,
+            description,
+            check_type,
+            config,
+          });
+          setSettingsNotice("巡检项已更新");
+        } else {
+          logWithTimestamp("info", "创建巡检项: %s", name);
+          await apiCreateInspectionItem({
+            name,
+            description,
+            check_type,
+            config,
+          });
+          setSettingsNotice("巡检项已创建");
+        }
+        await refreshItems();
+        setSettingsError(null);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "保存巡检项失败";
+        logWithTimestamp("error", "保存巡检项失败: %s", message);
+        setSettingsError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setSettingsSubmitting(false);
+      }
+    },
+    [refreshItems]
+  );
+
+  const performDeleteInspectionItem = useCallback(
+    async (item: InspectionItem) => {
+      setSettingsSubmitting(true);
+      try {
+        logWithTimestamp("info", "删除巡检项: %s", item.id);
+        await apiDeleteInspectionItem(item.id);
+        await refreshItems();
+        setSettingsNotice("巡检项已删除");
+        setSettingsError(null);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "删除巡检项失败";
+        logWithTimestamp("error", "删除巡检项失败: %s", message);
+        setSettingsError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setSettingsSubmitting(false);
+      }
+    },
+    [refreshItems]
+  );
+
+  const handleDeleteInspectionItem = useCallback(
+    (item: InspectionItem) => {
+      setConfirmState({
+        title: "删除巡检项",
+        message: `确认删除巡检项(${item.name})？该操作不可恢复。`,
+        confirmLabel: "删除",
+        variant: "danger",
+        scope: "settings",
+        onConfirm: () => performDeleteInspectionItem(item),
+      });
+    },
+    [performDeleteInspectionItem]
+  );
+
+  const settingsTabs = useMemo<SettingsModalTab[]>(
+    () => [
+      {
+        id: "overview",
+        label: "设置总览",
+        render: ({ selectTab }) => (
+          <SettingsOverviewPanel
+            onOpenInspection={() => selectTab("inspection")}
+          />
+        ),
+      },
+      {
+        id: "inspection",
+        label: "巡检项设置",
+        render: ({ close }) => (
+          <InspectionSettingsPanel
+            items={sortedItems}
+            submitting={settingsSubmitting}
+            notice={settingsNotice}
+            error={settingsError}
+            onClose={close}
+            onSave={handleSaveInspectionItem}
+            onDelete={handleDeleteInspectionItem}
+          />
+        ),
+      },
+    ],
+    [
+      sortedItems,
+      settingsSubmitting,
+      settingsNotice,
+      settingsError,
+      handleSaveInspectionItem,
+      handleDeleteInspectionItem,
+    ]
+  );
+
+  const handleSelectSettingsTab = useCallback(
+    (tabId: string) => {
+      const normalized = tabId.toLowerCase();
+      const validTabIds = settingsTabs.map((tab) => tab.id);
+      const nextTab = validTabIds.includes(normalized) ? normalized : "overview";
+      if (nextTab !== settingsTabId) {
+        setSettingsTabId(nextTab);
+      }
+      const targetPath =
+        nextTab === "overview"
+          ? SETTINGS_BASE_PATH
+          : `${SETTINGS_BASE_PATH}/${nextTab}`;
+      if (location.pathname !== targetPath) {
+        const baseBackground = backgroundLocation ?? backgroundLocationRef.current;
+        navigate(targetPath, {
+          replace: location.pathname.startsWith(SETTINGS_BASE_PATH),
+          state: baseBackground ? { backgroundLocation: baseBackground } : undefined,
+        });
+      }
+    },
+    [
+      settingsTabs,
+      settingsTabId,
+      navigate,
+      location.pathname,
+      backgroundLocation,
+    ]
+  );
+
+  useEffect(() => {
+    if (!settingsTabs.length) {
+      return;
+    }
+    if (location.pathname.startsWith(SETTINGS_BASE_PATH)) {
+      setSettingsOpen(true);
+      const segments = location.pathname.split("/").filter(Boolean);
+      const requestedTab = (segments[1] ?? "overview").toLowerCase();
+      const validTabIds = settingsTabs.map((tab) => tab.id);
+      const nextTab = validTabIds.includes(requestedTab)
+        ? requestedTab
+        : "overview";
+      if (nextTab !== settingsTabId) {
+        setSettingsTabId(nextTab);
+      }
+      if (!validTabIds.includes(requestedTab)) {
+        const fallbackPath =
+          nextTab === "overview"
+            ? SETTINGS_BASE_PATH
+            : `${SETTINGS_BASE_PATH}/${nextTab}`;
+        if (location.pathname !== fallbackPath) {
+          const baseBackground =
+            backgroundLocation ?? backgroundLocationRef.current;
+          navigate(fallbackPath, {
+            replace: true,
+            state: baseBackground ? { backgroundLocation: baseBackground } : undefined,
+          });
+        }
+      }
+    } else {
+      setSettingsOpen(false);
+      backgroundLocationRef.current = null;
+    }
+  }, [
+    location.pathname,
+    settingsTabs,
+    settingsTabId,
+    navigate,
+    backgroundLocation,
+  ]);
 
   const handleSubmitClusterEdit = useCallback(
     async ({
@@ -1783,8 +3522,7 @@ const App = () => {
         await updateCluster(clusterEditState.id, formData);
         await refreshClusters();
         await refreshRuns();
-        setClusterNotice("集群信息已更新");
-        setClusterNoticeType("success");
+        showClusterNotice(currentNoticeScope, "集群信息已更新", "success");
         setClusterEditState(null);
       } catch (err) {
         const message =
@@ -1795,7 +3533,13 @@ const App = () => {
         setClusterEditSubmitting(false);
       }
     },
-    [clusterEditState, refreshClusters, refreshRuns]
+    [
+      clusterEditState,
+      refreshClusters,
+      refreshRuns,
+      currentNoticeScope,
+      showClusterNotice,
+    ]
   );
 
   const closeClusterEditModal = () => {
@@ -1803,32 +3547,37 @@ const App = () => {
     setClusterEditError(null);
   };
 
+  const overviewRouteElement = (
+    <OverviewView
+      clusters={clusters}
+      clusterError={clusterError}
+      clusterNotice={clusterNotice}
+      clusterNoticeType={clusterNoticeType}
+      clusterNoticeScope={clusterNoticeScope}
+      clusterUploading={clusterUploading}
+      clusterNameInput={clusterNameInput}
+      clusterPromInput={clusterPromInput}
+      setClusterNameInput={setClusterNameInput}
+      setClusterPromInput={setClusterPromInput}
+      openKubeconfigModal={handleOpenKubeconfigModal}
+      kubeconfigSummary={kubeconfigSummary}
+      kubeconfigReady={kubeconfigReady}
+      onUpload={handleUploadCluster}
+      onEditCluster={handleEditCluster}
+      onDeleteCluster={handleDeleteCluster}
+      clusterDisplayIds={clusterDisplayIds}
+      onTestClusterConnection={handleTestClusterConnection}
+      testingClusterIds={testingClusterIds}
+    />
+  );
+
   return (
     <>
-      <TopNavigation />
+      <TopNavigation onOpenSettings={handleOpenSettings} />
       <main className="app-shell">
-        <Routes>
-          <Route
-            path="/"
-            element={
-              <OverviewView
-                clusters={clusters}
-                clusterError={clusterError}
-                clusterNotice={clusterNotice}
-                clusterNoticeType={clusterNoticeType}
-                clusterUploading={clusterUploading}
-                clusterNameInput={clusterNameInput}
-                clusterPromInput={clusterPromInput}
-                setClusterNameInput={setClusterNameInput}
-                setClusterPromInput={setClusterPromInput}
-                clusterFileRef={clusterFileRef}
-                onUpload={handleUploadCluster}
-                onEditCluster={handleEditCluster}
-                onDeleteCluster={handleDeleteCluster}
-                clusterDisplayIds={clusterDisplayIds}
-              />
-            }
-          />
+        <Routes location={routesLocation}>
+          <Route path="/" element={overviewRouteElement} />
+          <Route path="/setting/*" element={overviewRouteElement} />
           <Route
             path="/history"
             element={
@@ -1838,6 +3587,9 @@ const App = () => {
                 onDeleteRun={handleDeleteRun}
                 clusterDisplayIds={clusterDisplayIds}
                 runDisplayIds={runDisplayIds}
+                notice={clusterNotice}
+                noticeType={clusterNoticeType}
+                noticeScope={clusterNoticeScope}
               />
             }
           />
@@ -1846,7 +3598,7 @@ const App = () => {
             element={
               <ClusterDetailView
                 clusters={clusters}
-                items={items}
+                items={sortedItems}
                 runs={runs}
                 selectedIds={selectedItemIds}
                 setSelectedIds={setSelectedItemIds}
@@ -1857,6 +3609,7 @@ const App = () => {
                 error={inspectionError}
                 clusterNotice={clusterNotice}
                 clusterNoticeType={clusterNoticeType}
+                clusterNoticeScope={clusterNoticeScope}
                 clusterError={clusterError}
                 onStartInspection={handleStartInspection}
                 onDeleteRun={handleDeleteRun}
@@ -1864,6 +3617,8 @@ const App = () => {
                 onDeleteCluster={handleDeleteCluster}
                 clusterDisplayIds={clusterDisplayIds}
                 runDisplayIds={runDisplayIds}
+                onTestClusterConnection={handleTestClusterConnection}
+                testingClusterIds={testingClusterIds}
               />
             }
           />
@@ -1872,9 +3627,13 @@ const App = () => {
             element={
               <RunDetailView
                 clusters={clusters}
+                items={sortedItems}
                 onDeleteRun={handleDeleteRunById}
                 clusterDisplayIds={clusterDisplayIds}
                 runDisplayIds={runDisplayIds}
+                notice={clusterNotice}
+                noticeType={clusterNoticeType}
+                noticeScope={clusterNoticeScope}
               />
             }
           />
@@ -1882,9 +3641,35 @@ const App = () => {
         </Routes>
       </main>
 
+      <KubeconfigModal
+        open={kubeconfigModalOpen}
+        text={kubeconfigText}
+        fileName={kubeconfigFileName}
+        hasManualContent={hasManualKubeconfig}
+        onClose={handleCloseKubeconfigModal}
+        onFileSelected={handleKubeconfigFileSelected}
+        onTextChange={handleKubeconfigTextChange}
+        onClear={handleKubeconfigClear}
+      />
+
       <ConfirmationModal
-        state={confirmState}
+        state={confirmState && confirmState.scope !== "settings" ? confirmState : null}
         onClose={() => setConfirmState(null)}
+      />
+
+      <SettingsModal
+        open={settingsOpen}
+        tabs={settingsTabs}
+        initialTabId="overview"
+        onClose={handleCloseSettings}
+        confirmState={
+          confirmState && confirmState.scope === "settings"
+            ? confirmState
+            : null
+        }
+        onConfirmClose={() => setConfirmState(null)}
+        activeTabId={settingsTabId}
+        onTabChange={handleSelectSettingsTab}
       />
 
       {clusterEditState && (
