@@ -7,11 +7,11 @@ ARG HTTPS_PROXY=""
 ARG NO_PROXY="localhost,127.0.0.1"
 
 # 安装依赖
-COPY inspect-k8s/backend/requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 拷贝源码
-COPY inspect-k8s/backend /app
+COPY backend /app
 
 ENV PYTHONUNBUFFERED=1
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
