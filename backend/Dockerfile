@@ -1,4 +1,4 @@
-FROM 192.168.10.51/base/zs-inspect-base-image:v0.1
+FROM 192.168.10.51/base/zs-inspect-base-image:v0.2
 WORKDIR /app
 
 # 声明变量，有默认值即可
