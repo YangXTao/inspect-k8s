@@ -124,11 +124,40 @@ def generate_pdf_report(
     )
     styles.add(
         ParagraphStyle(
+            name="MetaLabel",
+            parent=styles["BodyText"],
+            fontSize=10,
+            leading=14,
+            textColor=colors.HexColor("#64748b"),
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="MetaValue",
+            parent=styles["BodyText"],
+            fontSize=11,
+            leading=16,
+            textColor=colors.HexColor("#0f172a"),
+        )
+    )
+    styles.add(
+        ParagraphStyle(
             name="SectionHeading",
             parent=styles["Heading2"],
             spaceBefore=12,
             spaceAfter=6,
             fontName=base_font,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="SummaryCard",
+            parent=styles["BodyText"],
+            fontName=base_font,
+            fontSize=11,
+            leading=18,
+            alignment=1,  # center
+            textColor=colors.HexColor("#0f172a"),
         )
     )
     styles.add(
@@ -157,90 +186,151 @@ def generate_pdf_report(
 
     def format_dt(value: datetime | None) -> str:
         if value is None:
-            return "N/A"
+            return "未记录"
         if value.tzinfo is None:
             value = value.replace(tzinfo=timezone.utc)
-        return value.astimezone(tz).strftime("%Y-%m-%d %H:%M:%S %Z")
+        localized = value.astimezone(tz)
+        return f"{localized.strftime('%Y-%m-%d %H:%M:%S')} 中国标准时间"
 
-    story = []
-    story.append(Paragraph("Kubernetes Inspection Report", styles["Title"]))
-    story.append(Spacer(1, 6))
-    subtitle = f"Inspection ID: {display_id or run.id}"
-    if run.operator:
-        subtitle += f" | Operator: {run.operator}"
-    story.append(Paragraph(subtitle, styles["Meta"]))
-    story.append(Paragraph(f"Cluster: {getattr(run.cluster, 'name', 'N/A')}", styles["Meta"]))
-    story.append(
-        Paragraph(
-            f"Created: {format_dt(run.created_at)} | Completed: {format_dt(run.completed_at or datetime.utcnow())}",
-            styles["Meta"],
+    results_list = list(results)
+    total_checks = len(results_list)
+    passed_count = sum(1 for item in results_list if item.status.lower() == "passed")
+    warning_count = sum(1 for item in results_list if item.status.lower() == "warning")
+    failed_count = sum(1 for item in results_list if item.status.lower() == "failed")
+
+    story: list[object] = []
+    story.append(Paragraph("Kubernetes 巡检报告", styles["Title"]))
+    story.append(Spacer(1, 10))
+
+    meta_rows = [
+        ("巡检编号", str(display_id or run.id)),
+        ("巡检人", run.operator or "未填写"),
+        ("目标集群", getattr(run.cluster, "name", "未配置")),
+        ("巡检开始时间", format_dt(run.created_at)),
+        ("巡检完成时间", format_dt(run.completed_at or datetime.utcnow())),
+    ]
+    meta_table_data = [
+        [Paragraph(label, styles["MetaLabel"]), Paragraph(value, styles["MetaValue"])]
+        for label, value in meta_rows
+    ]
+    meta_table = Table(meta_table_data, colWidths=[90, doc.width - 90], hAlign="LEFT")
+    meta_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8fafc")),
+                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#e2e8f0")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e2e8f0")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
         )
     )
-
-    story.append(Spacer(1, 12))
+    story.append(meta_table)
+    story.append(Spacer(1, 16))
 
     if logo_path:
         from reportlab.platypus import Image  # local import to avoid optional dependency issues
 
         story.append(Image(logo_path, width=120, height=50))
-        story.append(Spacer(1, 12))
+        story.append(Spacer(1, 14))
 
-    story.append(Paragraph("Summary", styles["SectionHeading"]))
-    summary_text = run.summary or "No summary provided."
-    story.append(Paragraph(summary_text, styles["Muted"]))
-    story.append(Spacer(1, 12))
-
-    story.append(Paragraph("Inspection Details", styles["SectionHeading"]))
-
-    header = ["Check Item", "Status", "Detail", "Suggestion"]
-    data = [[Paragraph(text, styles["TableHeader"]) for text in header]]
-
-    status_colors = {
-        "passed": colors.HexColor("#15803d"),
-        "warning": colors.HexColor("#b45309"),
-        "failed": colors.HexColor("#b91c1c"),
-    }
-    status_backgrounds = {
-        "passed": colors.HexColor("#dcfce7"),
-        "warning": colors.HexColor("#fef3c7"),
-        "failed": colors.HexColor("#fee2e2"),
-    }
-
-    detail_style = styles["BodyText"]
-    suggestion_style = styles["Muted"]
-
-    results_list = list(results)
-    for result in results_list:
-        status = result.status.lower()
-        status_label = status.capitalize()
-        data.append(
-            [
-                Paragraph(
-                    result.item.name if result.item else (result.item_name_cached or "已删除巡检项"),
-                    styles["BodyText"],
-                ),
-                Paragraph(status_label, styles["TableStatus"]),
-                Paragraph(result.detail or "-", detail_style),
-                Paragraph(result.suggestion or "-", suggestion_style),
-            ]
-        )
-
-    table = Table(data, colWidths=[120, 70, 200, 190], repeatRows=1)
-    commands = [
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#101c3a")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#f9fafb")),
-        ("FONTNAME", (0, 0), (-1, 0), base_font),
-        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-        ("TOPPADDING", (0, 0), (-1, 0), 8),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#f8fafc"), colors.white]),
-        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#d1d9e6")),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-        ("ALIGN", (1, 1), (1, -1), "CENTER"),
+    story.append(Paragraph("巡检概览", styles["SectionHeading"]))
+    card_config = [
+        ("检查项总数", total_checks, "#dbeafe"),
+        ("通过项", passed_count, "#dcfce7"),
+        ("警告项", warning_count, "#fef3c7"),
+        ("失败项", failed_count, "#fee2e2"),
     ]
+    card_cells = []
+    for label, value, bg_color in card_config:
+        card_text = (
+            f'<para alignment="center"><font size="18"><b>{value}</b></font>'
+            f'<br/><font size="9" color="#64748b">{label}</font></para>'
+        )
+        card_cells.append(Paragraph(card_text, styles["SummaryCard"]))
+    if card_cells:
+        summary_table = Table(
+            [card_cells],
+            colWidths=[(doc.width - 18) / len(card_cells)] * len(card_cells),
+            hAlign="LEFT",
+        )
+        summary_style = [
+            ("INNERGRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#e2e8f0")),
+            ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#e2e8f0")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+        ]
+        for idx, (_, _, bg_color) in enumerate(card_config):
+            summary_style.append(("BACKGROUND", (idx, 0), (idx, 0), colors.HexColor(bg_color)))
+        summary_table.setStyle(TableStyle(summary_style))
+        story.append(summary_table)
+        story.append(Spacer(1, 16))
 
+    story.append(Paragraph("巡检摘要", styles["SectionHeading"]))
+    summary_text = (run.summary or "").strip() or "暂无巡检摘要。"
+    story.append(Paragraph(summary_text, styles["Muted"]))
+    story.append(Spacer(1, 14))
+
+    story.append(Paragraph("巡检明细", styles["SectionHeading"]))
+
+    header = ["检查项", "状态", "详情", "建议"]
+    data = [[Paragraph(text, styles["TableHeader"]) for text in header]]
+
+    status_colors = {
+        "passed": colors.HexColor("#16a34a"),
+        "warning": colors.HexColor("#f59e0b"),
+        "failed": colors.HexColor("#dc2626"),
+    }
+    status_backgrounds = {
+        "passed": colors.HexColor("#dcfce7"),
+        "warning": colors.HexColor("#fef3c7"),
+        "failed": colors.HexColor("#fee2e2"),
+    }
+
+    detail_style = styles["BodyText"]
+    suggestion_style = styles["Muted"]
+
+    for result in results_list:
+        status = result.status.lower()
+        status_label = {
+            "passed": "通过",
+            "warning": "警告",
+            "failed": "失败",
+        }.get(status, result.status)
+        data.append(
+            [
+                Paragraph(
+                    result.item.name if result.item else (result.item_name_cached or "巡检项已删除"),
+                    styles["BodyText"],
+                ),
+                Paragraph(status_label, styles["TableStatus"]),
+                Paragraph(result.detail or "-", detail_style),
+                Paragraph(result.suggestion or "-", suggestion_style),
+            ]
+        )
+
+    table = Table(data, colWidths=[130, 70, 210, 160], repeatRows=1)
+    commands = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#f8fafc")),
+        ("FONTNAME", (0, 0), (-1, 0), base_font),
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, 0), 9),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 9),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#f8fafc"), colors.white]),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#d7e0ea")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("ALIGN", (1, 1), (1, -1), "CENTER"),
+    ]
+
     for idx, result in enumerate(results_list, start=1):
         status = result.status.lower()
         commands.append(("TEXTCOLOR", (1, idx), (1, idx), status_colors.get(status, colors.HexColor("#111827"))))

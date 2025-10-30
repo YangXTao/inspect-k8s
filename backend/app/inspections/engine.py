@@ -156,7 +156,14 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
             suggestion = config.get("suggestion_on_fail") or "Verify the command output."
             return CHECK_STATUS_WARNING, detail, suggestion
 
-        detail = config.get("success_message") or _truncate_output(stdout or "Command executed successfully.")
+        success_override = config.get("success_message")
+        output_text = stdout.strip() or stderr.strip()
+        if success_override:
+            detail = _truncate_output(str(success_override))
+        elif output_text:
+            detail = _truncate_output(output_text)
+        else:
+            detail = "命令执行成功（无输出）"
         suggestion = config.get("suggestion_on_success") or ""
         return CHECK_STATUS_PASSED, detail, suggestion
 
