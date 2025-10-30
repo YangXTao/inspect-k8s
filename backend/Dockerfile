@@ -7,7 +7,7 @@ ARG HTTPS_PROXY=""
 ARG NO_PROXY="localhost,127.0.0.1"
 
 # 安装依赖
-COPY backend/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 拷贝源码
