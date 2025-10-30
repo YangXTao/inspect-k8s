@@ -33,9 +33,14 @@ spec:
               name: http
               protocol: TCP
           volumeMounts:
-            - name: data
-              mountPath: /app
+            - name: configs
+              mountPath: /app/configs
+            - name: reports
+              mountPath: /app/reports
       volumes:
-        - name: data
+        - name: configs
           persistentVolumeClaim:
-            claimName: backend-data
+            claimName: backend-configs
+        - name: reports
+          persistentVolumeClaim:
+            claimName: backend-reports
