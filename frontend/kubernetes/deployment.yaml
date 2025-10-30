@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: <NAMESPACE>
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - env:
+            - name: API_SERVER
+              value: <API_SERVER>
+          image: <NAME>:<image-tag>
+          imagePullPolicy: Always
+          name: frontend
+          ports:
+            - containerPort: 80
+              name: http
+              protocol: TCP

@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: <NAMESPACE>
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+        - env:
+            - name: MYSQL_HOST
+              value: <MYSQL_HOST>
+            - name: MYSQL_PORT
+              value: '<MYSQL_PORT>'
+            - name: MYSQL_USER
+              value: <MYSQL_USER>
+            - name: MYSQL_PASSWORD
+              value: <MYSQL_PASSWORD>
+            - name: MYSQL_DATABASE
+              value: <MYSQL_DATABASE>
+          image: <NAME>:<image-tag>
+          imagePullPolicy: Always
+          name: backend
+          ports:
+            - containerPort: 8000
+              name: http
+              protocol: TCP
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: backend-data
