@@ -1,11 +1,11 @@
-FROM hub.zscr.io/node:20-alpine AS build
+FROM 192.168.10.51/base/node:20-alpine AS build
 WORKDIR /frontend
 COPY package*.json ./
 RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM hub.zscr.io/nginx:1.27-alpine
+FROM 192.168.10.51/base/nginx:1.27-alpine
 WORKDIR /etc/nginx
 ENV API_SERVER=http://inspect-backend:8000
 COPY docker/default.conf.template ./templates/default.conf.template
