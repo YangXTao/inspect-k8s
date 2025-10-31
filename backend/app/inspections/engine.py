@@ -158,10 +158,10 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
 
         success_override = config.get("success_message")
         output_text = stdout.strip() or stderr.strip()
-        if success_override:
-            detail = _truncate_output(str(success_override))
-        elif output_text:
+        if output_text:
             detail = _truncate_output(output_text)
+        elif success_override:
+            detail = _truncate_output(str(success_override))
         else:
             detail = "命令执行成功（无输出）"
         suggestion = config.get("suggestion_on_success") or ""

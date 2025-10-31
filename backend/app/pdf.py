@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from datetime import datetime, timezone, timedelta
 try:
@@ -55,6 +56,18 @@ def generate_pdf_report(
 
     def _register_font_family() -> str:
         """Register a modern Sans Serif font with CJK support if available."""
+        env_font_path = os.getenv("PDF_REPORT_FONT_PATH")
+        env_font_name = os.getenv("PDF_REPORT_FONT_NAME")
+        if env_font_path:
+            font_path = Path(env_font_path)
+            if font_path.exists():
+                font_name = env_font_name or font_path.stem
+                try:
+                    pdfmetrics.registerFont(TTFont(font_name, str(font_path)))
+                    return font_name
+                except Exception:
+                    pass
+
         candidates: list[tuple[str, Path, int | None]] = [
             ("MicrosoftYaHei", Path("C:/Windows/Fonts/msyh.ttc"), 0),
             ("MicrosoftYaHei", Path("C:/Windows/Fonts/msyh.ttf"), None),
@@ -63,6 +76,9 @@ def generate_pdf_report(
             ("SourceHanSansCN", Path("/System/Library/Fonts/STHeiti Medium.ttc"), 0),
             ("NotoSansCJK", Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"), 0),
             ("NotoSansCJK", Path("/usr/share/fonts/truetype/noto/NotoSansCJKsc-Regular.otf"), None),
+            ("NotoSansSC", Path("/usr/share/fonts/truetype/noto/NotoSansSC-Regular.otf"), None),
+            ("NotoSansSC", Path("/usr/share/fonts/truetype/noto/NotoSansSC-Medium.otf"), None),
+            ("WenQuanYi", Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"), 0),
         ]
         for name, font_path, sub_index in candidates:
             if font_path.exists():
@@ -244,7 +260,7 @@ def generate_pdf_report(
         ("警告项", warning_count, "#fef3c7"),
         ("失败项", failed_count, "#fee2e2"),
     ]
-    card_cells = []
+    card_cells: list[Paragraph] = []
     for label, value, bg_color in card_config:
         card_text = (
             f'<para alignment="center"><font size="18"><b>{value}</b></font>'
@@ -279,58 +295,73 @@ def generate_pdf_report(
 
     story.append(Paragraph("巡检明细", styles["SectionHeading"]))
 
-    header = ["检查项", "状态", "详情", "建议"]
-    data = [[Paragraph(text, styles["TableHeader"]) for text in header]]
-
-    status_colors = {
-        "passed": colors.HexColor("#16a34a"),
-        "warning": colors.HexColor("#f59e0b"),
-        "failed": colors.HexColor("#dc2626"),
-    }
-    status_backgrounds = {
-        "passed": colors.HexColor("#dcfce7"),
-        "warning": colors.HexColor("#fef3c7"),
-        "failed": colors.HexColor("#fee2e2"),
-    }
-
-    detail_style = styles["BodyText"]
-    suggestion_style = styles["Muted"]
-
-    for result in results_list:
-        status = result.status.lower()
-        status_label = {
-            "passed": "通过",
-            "warning": "警告",
-            "failed": "失败",
-        }.get(status, result.status)
-        data.append(
-            [
-                Paragraph(
-                    result.item.name if result.item else (result.item_name_cached or "巡检项已删除"),
-                    styles["BodyText"],
-                ),
-                Paragraph(status_label, styles["TableStatus"]),
-                Paragraph(result.detail or "-", detail_style),
-                Paragraph(result.suggestion or "-", suggestion_style),
-            ]
-        )
-
-    table = Table(data, colWidths=[130, 70, 210, 160], repeatRows=1)
-    commands = [
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#f8fafc")),
-        ("FONTNAME", (0, 0), (-1, 0), base_font),
-        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-        ("TOPPADDING", (0, 0), (-1, 0), 9),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 9),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#f8fafc"), colors.white]),
-        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#d7e0ea")),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-        ("ALIGN", (1, 1), (1, -1), "CENTER"),
-    ]
-
+    header = ["检查项", "状态", "详情", "建议"]
+    data = [[Paragraph(text, styles["TableHeader"]) for text in header]]
+
+    status_colors = {
+        "passed": colors.HexColor("#16a34a"),
+        "warning": colors.HexColor("#f59e0b"),
+        "failed": colors.HexColor("#dc2626"),
+    }
+    status_backgrounds = {
+        "passed": colors.HexColor("#dcfce7"),
+        "warning": colors.HexColor("#fef3c7"),
+        "failed": colors.HexColor("#fee2e2"),
+    }
+
+    detail_style = styles["BodyText"]
+    suggestion_style = styles["Muted"]
+
+    for result in results_list:
+        status = result.status.lower()
+        status_label = {
+            "passed": "通过",
+            "warning": "警告",
+            "failed": "失败",
+        }.get(status, result.status)
+        data.append(
+            [
+                Paragraph(
+                    result.item.name if result.item else (result.item_name_cached or "巡检项已删除"),
+                    styles["BodyText"],
+                ),
+                Paragraph(status_label, styles["TableStatus"]),
+                Paragraph(result.detail or "-", detail_style),
+                Paragraph(result.suggestion or "-", suggestion_style),
+            ]
+        )
+    table = Table(data, colWidths=[130, 70, 210, 160], repeatRows=1)
+
+    commands = [
+
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#f8fafc")),
+
+        ("FONTNAME", (0, 0), (-1, 0), base_font),
+
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+
+        ("TOPPADDING", (0, 0), (-1, 0), 9),
+
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 9),
+
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#f8fafc"), colors.white]),
+
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#d7e0ea")),
+
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+
+        ("ALIGN", (1, 1), (1, -1), "CENTER"),
+
+    ]
+
+
+
     for idx, result in enumerate(results_list, start=1):
         status = result.status.lower()
         commands.append(("TEXTCOLOR", (1, idx), (1, idx), status_colors.get(status, colors.HexColor("#111827"))))
