@@ -1745,13 +1745,17 @@ const RunDetailView = ({
               ? previousInfo
               : nextInfo
           );
-          setRun((previous) =>
-            hasRunStateChanged(previous, data) ? data : previous
-          );
-          const shouldContinue =
+          const isProcessing =
             nextInfo.status === "running" ||
             (!nextInfo.reportReady && nextInfo.progress >= 100);
-          if (shouldContinue && !cancelled) {
+          if (!isProcessing) {
+            setRun((previous) =>
+              hasRunStateChanged(previous, data) ? data : previous
+            );
+          } else if (!run) {
+            setRun(data);
+          }
+          if (isProcessing && !cancelled) {
             window.setTimeout(() => {
               if (!cancelled) {
                 fetchDetail();
