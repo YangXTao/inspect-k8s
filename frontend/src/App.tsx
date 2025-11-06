@@ -135,9 +135,6 @@ const hasRunStateChanged = (
   }
   if (
     previous.status !== next.status ||
-    previous.progress !== next.progress ||
-    previous.processed_items !== next.processed_items ||
-    previous.total_items !== next.total_items ||
     previous.report_path !== next.report_path ||
     previous.summary !== next.summary
   ) {
@@ -161,11 +158,52 @@ const hasRunStateChanged = (
   return false;
 };
 
+type RunProgressInfo = {
+  status: InspectionRunStatus;
+  progress: number;
+  processed: number;
+  total: number;
+  pending: number;
+  reportReady: boolean;
+};
+
+const buildRunProgressInfo = (run: InspectionRun): RunProgressInfo => {
+  const total = Math.max(run.total_items ?? 0, run.results.length);
+  const processed = Math.min(run.processed_items ?? 0, total);
+  const pending = Math.max(total - processed, 0);
+  const progress = clampProgress(run.progress);
+  return {
+    status: run.status,
+    progress,
+    processed,
+    total,
+    pending,
+    reportReady: Boolean(run.report_path),
+  };
+};
+
+const isProgressInfoEqual = (
+  previous: RunProgressInfo | null,
+  next: RunProgressInfo
+) => {
+  if (!previous) {
+    return false;
+  }
+  return (
+    previous.status === next.status &&
+    previous.progress === next.progress &&
+    previous.processed === next.processed &&
+    previous.total === next.total &&
+    previous.pending === next.pending &&
+    previous.reportReady === next.reportReady
+  );
+};
+
 const areRunListsEqual = (
   previous: InspectionRunListItem[] | undefined,
   next: InspectionRunListItem[]
 ) => {
-  if (!previous || !next || previous.length !== next.length) {
+  if (!previous || previous.length !== next.length) {
     return false;
   }
   for (let index = 0; index < next.length; index += 1) {
@@ -183,6 +221,26 @@ const areRunListsEqual = (
     }
   }
   return true;
+};
+
+const isRunStillProcessing = (
+  info: RunProgressInfo | null,
+  run: InspectionRun | null
+) => {
+  if (info) {
+    return (
+      info.status === "running" ||
+      (!info.reportReady && info.progress >= 100)
+    );
+  }
+  if (!run) {
+    return false;
+  }
+  const progress = clampProgress(run.progress);
+  return (
+    run.status === "running" ||
+    (!run.report_path && progress >= 100)
+  );
 };
 
 const renderRunStatusBadge = (
@@ -1600,6 +1658,7 @@ const RunDetailView = ({
   }, [runKey, runDisplayIds]);
 
   const [run, setRun] = useState<InspectionRun | null>(null);
+  const [runProgressInfo, setRunProgressInfo] = useState<RunProgressInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -1629,6 +1688,7 @@ const RunDetailView = ({
   useEffect(() => {
     if (isRunIdInvalid) {
       setRun(null);
+      setRunProgressInfo(null);
       setLoading(false);
       setError("巡检编号无效");
       logWithTimestamp("error", "巡检编号无效: %s", runKey ?? "");
@@ -1644,6 +1704,10 @@ const RunDetailView = ({
     getInspectionRun(numericRunId)
       .then((data) => {
         setRun(data);
+        setRunProgressInfo((previous) => {
+          const nextInfo = buildRunProgressInfo(data);
+          return isProgressInfoEqual(previous, nextInfo) ? previous : nextInfo;
+        });
         logWithTimestamp(
           "info",
           "巡检详情获取成功: %s",
@@ -1662,9 +1726,7 @@ const RunDetailView = ({
   useEffect(() => {
     const shouldPoll =
       !Number.isNaN(numericRunId) &&
-      (!run ||
-        run.status === "running" ||
-        (!run.report_path && run.progress >= 100));
+      isRunStillProcessing(runProgressInfo, run);
     if (!shouldPoll) {
       return undefined;
     }
@@ -1677,12 +1739,18 @@ const RunDetailView = ({
           if (cancelled) {
             return;
           }
+          const nextInfo = buildRunProgressInfo(data);
+          setRunProgressInfo((previousInfo) =>
+            isProgressInfoEqual(previousInfo, nextInfo)
+              ? previousInfo
+              : nextInfo
+          );
           setRun((previous) =>
             hasRunStateChanged(previous, data) ? data : previous
           );
           const shouldContinue =
-            data.status === "running" ||
-            (!data.report_path && data.progress >= 100);
+            nextInfo.status === "running" ||
+            (!nextInfo.reportReady && nextInfo.progress >= 100);
           if (shouldContinue && !cancelled) {
             window.setTimeout(() => {
               if (!cancelled) {
@@ -1702,7 +1770,7 @@ const RunDetailView = ({
     return () => {
       cancelled = true;
     };
-  }, [numericRunId, run?.status, run?.report_path, run?.progress]);
+  }, [numericRunId, run, runProgressInfo]);
 
   const resolvedClusterSlug =
     clusterSlug ??
@@ -1716,13 +1784,24 @@ const RunDetailView = ({
         numericRunId
       ).padStart(2, "0")}`;
   const runDisplayId = runDisplayIds[numericRunId] ?? fallbackRunDisplayId;
-  const runProgress = run ? clampProgress(run.progress) : 0;
-  const processedCount = run
-    ? Math.min(run.processed_items, run.total_items)
-    : 0;
-  const pendingCount = run
-    ? Math.max(run.total_items - run.processed_items, 0)
-    : 0;
+  const currentProgressInfo = useMemo<RunProgressInfo | null>(() => {
+    if (runProgressInfo) {
+      return runProgressInfo;
+    }
+    if (run) {
+      return buildRunProgressInfo(run);
+    }
+    return null;
+  }, [runProgressInfo, run]);
+
+  const runProgress = currentProgressInfo?.progress ?? 0;
+  const processedCount = currentProgressInfo?.processed ?? 0;
+  const totalCount = currentProgressInfo?.total ?? run?.total_items ?? 0;
+  const pendingCount =
+    currentProgressInfo?.pending ??
+    (run ? Math.max(run.total_items - run.processed_items, 0) : 0);
+  const progressStatus =
+    currentProgressInfo?.status ?? run?.status ?? "running";
 
   const handleDownloadReport = useCallback(() => {
     if (!run?.report_path || !run?.id) {
@@ -1863,15 +1942,15 @@ const RunDetailView = ({
                 </div>
                 <div>
                   <strong>状态: </strong>
-                  {run.status === "running"
+                  {progressStatus === "running"
                     ? "巡检中"
-                    : formatRunStatusLabel(run.status)}
+                    : formatRunStatusLabel(progressStatus)}
                 </div>
-            {run.status === "running" && (
+            {progressStatus === "running" && currentProgressInfo && (
               <div className="run-progress-card">
                 <div className="run-progress-meta">
                   <span>
-                    当前进度：{processedCount} / {run.total_items || "-"} 项
+                    当前进度：{processedCount} / {totalCount || "-"} 项
                   </span>
                   <span>{runProgress}%</span>
                 </div>
