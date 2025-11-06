@@ -239,11 +239,15 @@ def create_inspection_run(
     operator: Optional[str],
     cluster: models.ClusterConfig,
     status: str = "pending",
+    total_items: int = 0,
+    processed_items: int = 0,
 ) -> models.InspectionRun:
     run = models.InspectionRun(
         operator=operator,
         cluster_id=cluster.id,
         status=status,
+        total_items=max(0, total_items),
+        processed_items=max(0, processed_items),
     )
     db.add(run)
     db.commit()
@@ -265,10 +269,18 @@ def finalize_inspection_run(
     status: str,
     summary: str,
     report_path: Optional[str],
+    processed_items: Optional[int] = None,
 ) -> models.InspectionRun:
     run.status = status
     run.summary = summary
     run.report_path = report_path
+    if processed_items is None:
+        processed = run.total_items if run.total_items else run.processed_items
+    else:
+        processed = processed_items
+    if run.total_items:
+        processed = min(max(processed, run.total_items), run.total_items)
+    run.processed_items = max(processed, run.processed_items or 0)
     run.completed_at = datetime.utcnow()
     db.add(run)
     db.commit()
@@ -311,6 +323,19 @@ def add_inspection_result(
         description=f"Recorded result for item '{item.name}' with status={status}",
     )
     return result
+
+
+def update_inspection_run_progress(
+    db: Session,
+    *,
+    run: models.InspectionRun,
+    processed_items: int,
+) -> models.InspectionRun:
+    run.processed_items = max(0, min(processed_items, run.total_items or processed_items))
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    return run
 
 
 def list_inspection_runs(db: Session) -> List[models.InspectionRun]:

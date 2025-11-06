@@ -20,6 +20,8 @@ export type ClusterConfig = {
   updated_at: string;
 };
 
+export type InspectionRunStatus = "running" | "passed" | "warning" | "failed";
+
 export type InspectionResult = {
   id: number;
   item_id: number | null;
@@ -34,9 +36,12 @@ export type InspectionRun = {
   operator?: string;
   cluster_id: number;
   cluster_name: string;
-  status: "passed" | "warning" | "failed";
+  status: InspectionRunStatus;
   summary?: string;
   report_path?: string;
+  total_items: number;
+  processed_items: number;
+  progress: number;
   created_at: string;
   completed_at?: string;
   results: InspectionResult[];
@@ -47,9 +52,12 @@ export type InspectionRunListItem = {
   operator?: string;
   cluster_id: number;
   cluster_name: string;
-  status: "passed" | "warning" | "failed";
+  status: InspectionRunStatus;
   summary?: string;
   report_path?: string;
+  total_items: number;
+  processed_items: number;
+  progress: number;
   created_at: string;
   completed_at?: string;
 };

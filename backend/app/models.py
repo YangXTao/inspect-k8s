@@ -90,6 +90,8 @@ class InspectionRun(Base):
     status = Column(String(20), nullable=False, default="pending")
     summary = Column(Text, nullable=True)
     report_path = Column(String(255), nullable=True)
+    total_items = Column(Integer, nullable=False, default=0)
+    processed_items = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     completed_at = Column(DateTime, nullable=True)
 

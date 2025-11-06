@@ -64,6 +64,7 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_cluster_schema()
     _ensure_inspection_schema()
+    _ensure_inspection_runs_schema()
     _ensure_inspection_results_schema()
     _ensure_audit_log_schema()
 
@@ -178,6 +179,42 @@ def _ensure_inspection_schema() -> None:
             )
         statements.append(
             "ALTER TABLE inspection_items MODIFY is_archived TINYINT(1) NOT NULL DEFAULT 0"
+        )
+
+    if not statements:
+        return
+
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+
+
+def _ensure_inspection_runs_schema() -> None:
+    inspector = inspect(engine)
+    if "inspection_runs" not in inspector.get_table_names():
+        return
+
+    existing_columns = {
+        column["name"] for column in inspector.get_columns("inspection_runs")
+    }
+    dialect = engine.dialect.name
+    statements: list[str] = []
+
+    if "total_items" not in existing_columns:
+        column_type = "INTEGER" if dialect == "sqlite" else "INT"
+        statements.append(
+            f"ALTER TABLE inspection_runs ADD COLUMN total_items {column_type} NOT NULL DEFAULT 0"
+        )
+
+    if "processed_items" not in existing_columns:
+        column_type = "INTEGER" if dialect == "sqlite" else "INT"
+        statements.append(
+            f"ALTER TABLE inspection_runs ADD COLUMN processed_items {column_type} NOT NULL DEFAULT 0"
+        )
+
+    if dialect != "sqlite":
+        statements.append(
+            "ALTER TABLE inspection_runs CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
         )
 
     if not statements:

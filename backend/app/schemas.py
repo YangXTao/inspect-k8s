@@ -92,6 +92,9 @@ class InspectionRunOut(BaseModel):
     status: str
     summary: Optional[str]
     report_path: Optional[str]
+    total_items: int
+    processed_items: int
+    progress: int
     created_at: datetime
     completed_at: Optional[datetime]
     results: List[InspectionResultOut]
@@ -107,6 +110,9 @@ class InspectionRunListOut(BaseModel):
     status: str
     summary: Optional[str]
     report_path: Optional[str]
+    total_items: int
+    processed_items: int
+    progress: int
     created_at: datetime
     completed_at: Optional[datetime]
 
