@@ -130,16 +130,23 @@ const renderRunStatusBadge = (
   if (status === "running") {
     const clamped = clampProgress(progress);
     return (
-      <div className="status-progress">
-        <span className={statusClass(status)}>
-          {`${formatRunStatusLabel(status)} ${clamped}%`}
-        </span>
-        <div className="status-progress-bar">
-          <div
-            className="status-progress-value"
-            style={{ width: `${clamped}%` }}
-          />
+      <div className="status-progress status-progress-circle">
+        <div className="status-circle">
+          <svg viewBox="0 0 40 40">
+            <circle className="status-circle-bg" cx="20" cy="20" r="18" />
+            <circle
+              className="status-circle-value"
+              cx="20"
+              cy="20"
+              r="18"
+              strokeDasharray={`${Math.max((clamped / 100) * 113.097, 0)} 113.097`}
+            />
+          </svg>
+          <span className="status-circle-label">{clamped}%</span>
         </div>
+        <span className={statusClass(status)}>
+          {formatRunStatusLabel(status)}
+        </span>
       </div>
     );
   }
@@ -1029,9 +1036,9 @@ const HistoryView = ({
                       {run.cluster_name}({clusterSlug})
                     </td>
                     <td>{run.operator || "-"}</td>
-                  <td>
+                    <td>
                       {renderRunStatusBadge(run.status, run.progress)}
-                  </td>
+                    </td>
                     <td>{formatDate(run.created_at)}</td>
                     <td>{formatDate(run.completed_at)}</td>
                     <td className="actions">
@@ -1765,9 +1772,11 @@ const RunDetailView = ({
                   {run.operator || "-"}
                 </div>
                 <div>
-              <strong>状态: </strong>
-              {renderRunStatusBadge(run.status, run.progress)}
-            </div>
+                  <strong>状态: </strong>
+                  {run.status === "running"
+                    ? "巡检中"
+                    : formatRunStatusLabel(run.status)}
+                </div>
             {run.status === "running" && (
               <div className="run-progress-card">
                 <div className="run-progress-meta">
