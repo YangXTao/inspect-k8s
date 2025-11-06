@@ -1658,9 +1658,51 @@ const RunDetailView = ({
   }, [runKey, runDisplayIds]);
 
   const [run, setRun] = useState<InspectionRun | null>(null);
-  const [runProgressInfo, setRunProgressInfo] = useState<RunProgressInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const progressInfoRef = useRef<RunProgressInfo | null>(null);
+  const progressCardRef = useRef<HTMLDivElement | null>(null);
+  const progressMetaRef = useRef<HTMLSpanElement | null>(null);
+  const progressPercentRef = useRef<HTMLSpanElement | null>(null);
+  const progressBarValueRef = useRef<HTMLDivElement | null>(null);
+  const progressHintRef = useRef<HTMLDivElement | null>(null);
+  const statusTextRef = useRef<HTMLSpanElement | null>(null);
+
+  const updateProgressDisplay = useCallback((info: RunProgressInfo) => {
+    const previous = progressInfoRef.current;
+    if (isProgressInfoEqual(previous, info)) {
+      return;
+    }
+    progressInfoRef.current = info;
+
+    if (statusTextRef.current) {
+      statusTextRef.current.textContent =
+        info.status === "running"
+          ? "巡检中"
+          : formatRunStatusLabel(info.status);
+    }
+    if (progressCardRef.current) {
+      progressCardRef.current.style.display =
+        info.status === "running" ? "" : "none";
+    }
+    if (progressMetaRef.current) {
+      const totalLabel =
+        info.total > 0 ? String(info.total) : "-";
+      progressMetaRef.current.textContent = `当前进度：${info.processed} / ${totalLabel} 项`;
+    }
+    if (progressPercentRef.current) {
+      progressPercentRef.current.textContent = `${info.progress}%`;
+    }
+    if (progressBarValueRef.current) {
+      progressBarValueRef.current.style.width = `${info.progress}%`;
+    }
+    if (progressHintRef.current) {
+      progressHintRef.current.textContent =
+        info.status === "running"
+          ? `剩余${info.pending}个巡检项执行中…`
+          : "巡检已完成";
+    }
+  }, []);
 
   const cluster = useMemo(() => {
     if (Number.isNaN(numericClusterId)) {
@@ -1688,10 +1730,16 @@ const RunDetailView = ({
   useEffect(() => {
     if (isRunIdInvalid) {
       setRun(null);
-      setRunProgressInfo(null);
       setLoading(false);
       setError("巡检编号无效");
       logWithTimestamp("error", "巡检编号无效: %s", runKey ?? "");
+      progressInfoRef.current = null;
+      if (progressCardRef.current) {
+        progressCardRef.current.style.display = "none";
+      }
+      if (statusTextRef.current) {
+        statusTextRef.current.textContent = "-";
+      }
       return;
     }
     setLoading(true);
@@ -1704,10 +1752,7 @@ const RunDetailView = ({
     getInspectionRun(numericRunId)
       .then((data) => {
         setRun(data);
-        setRunProgressInfo((previous) => {
-          const nextInfo = buildRunProgressInfo(data);
-          return isProgressInfoEqual(previous, nextInfo) ? previous : nextInfo;
-        });
+        updateProgressDisplay(buildRunProgressInfo(data));
         logWithTimestamp(
           "info",
           "巡检详情获取成功: %s",
@@ -1721,12 +1766,12 @@ const RunDetailView = ({
         setError(message);
       })
       .finally(() => setLoading(false));
-  }, [numericRunId, runDisplayIds, runKey, isRunIdInvalid]);
+  }, [numericRunId, runDisplayIds, runKey, isRunIdInvalid, updateProgressDisplay]);
 
   useEffect(() => {
     const shouldPoll =
       !Number.isNaN(numericRunId) &&
-      isRunStillProcessing(runProgressInfo, run);
+      isRunStillProcessing(progressInfoRef.current, run);
     if (!shouldPoll) {
       return undefined;
     }
@@ -1740,11 +1785,7 @@ const RunDetailView = ({
             return;
           }
           const nextInfo = buildRunProgressInfo(data);
-          setRunProgressInfo((previousInfo) =>
-            isProgressInfoEqual(previousInfo, nextInfo)
-              ? previousInfo
-              : nextInfo
-          );
+          updateProgressDisplay(nextInfo);
           const isProcessing =
             nextInfo.status === "running" ||
             (!nextInfo.reportReady && nextInfo.progress >= 100);
@@ -1774,7 +1815,7 @@ const RunDetailView = ({
     return () => {
       cancelled = true;
     };
-  }, [numericRunId, run, runProgressInfo]);
+  }, [numericRunId, run, updateProgressDisplay]);
 
   const resolvedClusterSlug =
     clusterSlug ??
@@ -1788,24 +1829,6 @@ const RunDetailView = ({
         numericRunId
       ).padStart(2, "0")}`;
   const runDisplayId = runDisplayIds[numericRunId] ?? fallbackRunDisplayId;
-  const currentProgressInfo = useMemo<RunProgressInfo | null>(() => {
-    if (runProgressInfo) {
-      return runProgressInfo;
-    }
-    if (run) {
-      return buildRunProgressInfo(run);
-    }
-    return null;
-  }, [runProgressInfo, run]);
-
-  const runProgress = currentProgressInfo?.progress ?? 0;
-  const processedCount = currentProgressInfo?.processed ?? 0;
-  const totalCount = currentProgressInfo?.total ?? run?.total_items ?? 0;
-  const pendingCount =
-    currentProgressInfo?.pending ??
-    (run ? Math.max(run.total_items - run.processed_items, 0) : 0);
-  const progressStatus =
-    currentProgressInfo?.status ?? run?.status ?? "running";
 
   const handleDownloadReport = useCallback(() => {
     if (!run?.report_path || !run?.id) {
@@ -1946,29 +1969,56 @@ const RunDetailView = ({
                 </div>
                 <div>
                   <strong>状态: </strong>
-                  {progressStatus === "running"
-                    ? "巡检中"
-                    : formatRunStatusLabel(progressStatus)}
-                </div>
-            {progressStatus === "running" && currentProgressInfo && (
-              <div className="run-progress-card">
-                <div className="run-progress-meta">
-                  <span>
-                    当前进度：{processedCount} / {totalCount || "-"} 项
+                  <span ref={statusTextRef}>
+                    {run?.status
+                      ? run.status === "running"
+                        ? "巡检中"
+                        : formatRunStatusLabel(run.status)
+                      : "-"}
                   </span>
-                  <span>{runProgress}%</span>
                 </div>
-                <div className="run-progress-bar">
-                  <div
-                    className="run-progress-value"
-                    style={{ width: `${runProgress}%` }}
-                  />
+                <div
+                  className="run-progress-card"
+                  ref={progressCardRef}
+                  style={{
+                    display:
+                      run?.status === "running" ? undefined : "none",
+                  }}
+                >
+                  <div className="run-progress-meta">
+                    <span ref={progressMetaRef}>
+                      {run
+                        ? `当前进度：${Math.min(
+                            run.processed_items ?? 0,
+                            run.total_items ?? 0
+                          )} / ${run.total_items ?? "-"} 项`
+                        : "当前进度：0 / - 项"}
+                    </span>
+                    <span ref={progressPercentRef}>
+                      {run ? `${clampProgress(run.progress)}%` : "0%"}
+                    </span>
+                  </div>
+                  <div className="run-progress-bar">
+                    <div
+                      className="run-progress-value"
+                      ref={progressBarValueRef}
+                      style={{
+                        width: run ? `${clampProgress(run.progress)}%` : "0%",
+                      }}
+                    />
+                  </div>
+                  <div className="run-progress-hint" ref={progressHintRef}>
+                    {run
+                      ? run.status === "running"
+                        ? `剩余${Math.max(
+                            (run.total_items ?? 0) -
+                              (run.processed_items ?? 0),
+                            0
+                          )}个巡检项执行中…`
+                        : "巡检已完成"
+                      : "剩余巡检项执行中…"}
+                  </div>
                 </div>
-                <div className="run-progress-hint">
-                  剩余{pendingCount}个巡检项执行中…
-                </div>
-              </div>
-            )}
             <div>
               <strong>开始时间: </strong>
               {formatDate(run.created_at)}
