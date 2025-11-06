@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 import urllib3
+from pydantic import ValidationError
 
 try:
     from kubernetes import client as k8s_client
@@ -492,6 +493,171 @@ def list_audit_logs(limit: int = 100, db: Session = Depends(get_db)):
 @app.get("/inspection-items", response_model=List[schemas.InspectionItemOut])
 def list_inspection_items(db: Session = Depends(get_db)):
     return crud.get_inspection_items(db)
+
+
+@app.get(
+    "/inspection-items/export",
+    response_model=schemas.InspectionItemsExportOut,
+)
+def export_inspection_items(db: Session = Depends(get_db)):
+    items = crud.get_inspection_items(db)
+    return {
+        "exported_at": datetime.utcnow(),
+        "items": items,
+    }
+
+
+@app.post(
+    "/inspection-items/import",
+    response_model=schemas.InspectionItemsImportResult,
+    status_code=201,
+)
+async def import_inspection_items(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    raw_bytes = await file.read()
+    if not raw_bytes:
+        raise HTTPException(status_code=400, detail="导入文件为空")
+    try:
+        text = raw_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="导入文件必须为 UTF-8 编码") from exc
+
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"导入文件不是有效的 JSON：{exc.msg}",
+        ) from exc
+
+    if isinstance(payload, dict):
+        items_data = payload.get("items")
+        if items_data is None:
+            raise HTTPException(
+                status_code=400,
+                detail="JSON 中缺少 items 字段",
+            )
+    elif isinstance(payload, list):
+        items_data = payload
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="JSON 格式不正确，应为巡检项数组或包含 items 字段的对象",
+        )
+
+    if not isinstance(items_data, list):
+        raise HTTPException(
+            status_code=400,
+            detail="items 字段必须是数组",
+        )
+    if not items_data:
+        raise HTTPException(status_code=400, detail="导入文件中没有巡检项数据")
+
+    validated_items: List[tuple[str, schemas.InspectionItemCreate]] = []
+    seen_names: set[str] = set()
+    duplicates: set[str] = set()
+
+    for index, item in enumerate(items_data, start=1):
+        if not isinstance(item, dict):
+            raise HTTPException(
+                status_code=400,
+                detail=f"第 {index} 个巡检项不是对象",
+            )
+        try:
+            validated = schemas.InspectionItemCreate.model_validate(item)
+        except ValidationError as exc:
+            messages: list[str] = []
+            for error in exc.errors():
+                location = ".".join(str(part) for part in error.get("loc", ()))
+                field_label = location or "字段"
+                messages.append(f"{field_label}: {error.get('msg')}")
+            detail_message = "；".join(messages) or "数据校验失败"
+            raise HTTPException(
+                status_code=400,
+                detail=f"第 {index} 个巡检项数据不合法：{detail_message}",
+            ) from exc
+
+        trimmed_name = validated.name.strip()
+        if not trimmed_name:
+            raise HTTPException(
+                status_code=400,
+                detail=f"第 {index} 个巡检项名称不能为空",
+            )
+        if trimmed_name in seen_names:
+            duplicates.add(trimmed_name)
+        seen_names.add(trimmed_name)
+        validated_items.append((trimmed_name, validated))
+
+    if duplicates:
+        duplicate_list = "、".join(sorted(duplicates))
+        raise HTTPException(
+            status_code=400,
+            detail=f"导入文件中存在重复的巡检项名称：{duplicate_list}",
+        )
+
+    lookup_names = [name for name, _ in validated_items]
+    existing_items = (
+        db.query(models.InspectionItem)
+        .filter(models.InspectionItem.name.in_(lookup_names))
+        .all()
+    )
+    existing_map = {item.name.strip(): item for item in existing_items}
+
+    created_items: List[models.InspectionItem] = []
+    updated_items: List[models.InspectionItem] = []
+
+    for name, payload in validated_items:
+        config = payload.config if isinstance(payload.config, dict) else None
+        existing = existing_map.get(name)
+        if existing:
+            existing.name = name
+            existing.description = payload.description
+            existing.check_type = payload.check_type
+            existing.is_archived = False
+            existing.set_config(config)
+            existing.updated_at = datetime.utcnow()
+            db.add(existing)
+            updated_items.append(existing)
+        else:
+            item = models.InspectionItem(
+                name=name,
+                description=payload.description,
+                check_type=payload.check_type,
+                is_archived=False,
+            )
+            item.set_config(config)
+            db.add(item)
+            created_items.append(item)
+
+    db.commit()
+
+    for item in created_items:
+        db.refresh(item)
+        crud.log_action(
+            db,
+            action="create",
+            entity_type="inspection_item",
+            entity_id=item.id,
+            description=f"导入巡检项 '{item.name}'",
+        )
+
+    for item in updated_items:
+        db.refresh(item)
+        crud.log_action(
+            db,
+            action="update",
+            entity_type="inspection_item",
+            entity_id=item.id,
+            description=f"更新巡检项 '{item.name}'（导入）",
+        )
+
+    return schemas.InspectionItemsImportResult(
+        created=len(created_items),
+        updated=len(updated_items),
+        total=len(validated_items),
+    )
 
 
 @app.post("/inspection-items", response_model=schemas.InspectionItemOut, status_code=201)

@@ -4,6 +4,8 @@ import {
   InspectionItem,
   InspectionRun,
   InspectionRunListItem,
+  InspectionItemsExportPayload,
+  InspectionItemsImportResult,
 } from "./types";
 
 const API_BASE = appConfig.apiBaseUrl.replace(/\/$/, "");
@@ -72,6 +74,19 @@ async function request<T>(
 
 export function getInspectionItems(): Promise<InspectionItem[]> {
   return request<InspectionItem[]>("/inspection-items");
+}
+
+export function exportInspectionItems(): Promise<InspectionItemsExportPayload> {
+  return request<InspectionItemsExportPayload>("/inspection-items/export");
+}
+
+export function importInspectionItems(
+  formData: FormData
+): Promise<InspectionItemsImportResult> {
+  return request<InspectionItemsImportResult>("/inspection-items/import", {
+    method: "POST",
+    body: formData,
+  });
 }
 
 export function createInspectionRun(

@@ -109,3 +109,18 @@ class InspectionRunListOut(BaseModel):
     report_path: Optional[str]
     created_at: datetime
     completed_at: Optional[datetime]
+
+
+class InspectionItemsExportOut(BaseModel):
+    exported_at: datetime
+    items: List[InspectionItemOut]
+
+
+class InspectionItemsImportPayload(BaseModel):
+    items: List[InspectionItemCreate] = Field(..., min_length=1)
+
+
+class InspectionItemsImportResult(BaseModel):
+    created: int = Field(..., ge=0)
+    updated: int = Field(..., ge=0)
+    total: int = Field(..., ge=0)

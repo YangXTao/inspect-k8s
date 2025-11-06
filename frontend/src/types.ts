@@ -53,3 +53,14 @@ export type InspectionRunListItem = {
   created_at: string;
   completed_at?: string;
 };
+
+export type InspectionItemsExportPayload = {
+  exported_at: string;
+  items: InspectionItem[];
+};
+
+export type InspectionItemsImportResult = {
+  created: number;
+  updated: number;
+  total: number;
+};
