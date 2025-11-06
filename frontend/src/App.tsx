@@ -243,6 +243,28 @@ const isRunStillProcessing = (
   );
 };
 
+const areResultsEqual = (
+  previous: InspectionResult[] | null | undefined,
+  next: InspectionResult[]
+) => {
+  if (!previous || previous.length !== next.length) {
+    return false;
+  }
+  for (let index = 0; index < next.length; index += 1) {
+    const prev = previous[index];
+    const curr = next[index];
+    if (
+      prev.id !== curr.id ||
+      prev.status !== curr.status ||
+      prev.detail !== curr.detail ||
+      prev.suggestion !== curr.suggestion
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
+
 const renderRunStatusBadge = (
   status: InspectionRunStatus,
   progress?: number
@@ -1660,6 +1682,7 @@ const RunDetailView = ({
   const [run, setRun] = useState<InspectionRun | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [displayResults, setDisplayResults] = useState<InspectionResult[]>([]);
   const progressInfoRef = useRef<RunProgressInfo | null>(null);
   const progressCardRef = useRef<HTMLDivElement | null>(null);
   const progressMetaRef = useRef<HTMLSpanElement | null>(null);
@@ -1733,6 +1756,7 @@ const RunDetailView = ({
       setLoading(false);
       setError("巡检编号无效");
       logWithTimestamp("error", "巡检编号无效: %s", runKey ?? "");
+      setDisplayResults([]);
       progressInfoRef.current = null;
       if (progressCardRef.current) {
         progressCardRef.current.style.display = "none";
@@ -1752,6 +1776,11 @@ const RunDetailView = ({
     getInspectionRun(numericRunId)
       .then((data) => {
         setRun(data);
+        if (data.status !== "running") {
+          setDisplayResults(data.results.slice());
+        } else {
+          setDisplayResults([]);
+        }
         updateProgressDisplay(buildRunProgressInfo(data));
         logWithTimestamp(
           "info",
@@ -1792,6 +1821,11 @@ const RunDetailView = ({
           if (!isProcessing) {
             setRun((previous) =>
               hasRunStateChanged(previous, data) ? data : previous
+            );
+            setDisplayResults((previous) =>
+              areResultsEqual(previous, data.results)
+                ? previous
+                : data.results.slice()
             );
           } else if (!run) {
             setRun(data);
@@ -1849,10 +1883,10 @@ const RunDetailView = ({
   }, [items]);
 
   const orderedResults = useMemo(() => {
-    if (!run?.results) {
+    if (!displayResults.length) {
       return [];
     }
-    return run.results
+    return displayResults
       .slice()
       .sort((a, b) => {
         const orderA =
@@ -1868,7 +1902,7 @@ const RunDetailView = ({
         }
         return a.id - b.id;
       });
-  }, [run, itemOrderMap]);
+  }, [displayResults, itemOrderMap]);
 
   if (isClusterIdInvalid) {
     return (
