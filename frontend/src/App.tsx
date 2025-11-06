@@ -123,6 +123,9 @@ const clampProgress = (value: number | undefined) => {
   return Math.min(100, Math.max(0, Math.round(value)));
 };
 
+const STATUS_CIRCLE_RADIUS = 16;
+const STATUS_CIRCLE_CIRCUMFERENCE = 2 * Math.PI * STATUS_CIRCLE_RADIUS;
+
 const renderRunStatusBadge = (
   status: InspectionRunStatus,
   progress?: number
@@ -133,13 +136,16 @@ const renderRunStatusBadge = (
       <div className="status-progress status-progress-circle">
         <div className="status-circle">
           <svg viewBox="0 0 40 40">
-            <circle className="status-circle-bg" cx="20" cy="20" r="18" />
+            <circle className="status-circle-bg" cx="20" cy="20" r={STATUS_CIRCLE_RADIUS} />
             <circle
               className="status-circle-value"
               cx="20"
               cy="20"
-              r="18"
-              strokeDasharray={`${Math.max((clamped / 100) * 113.097, 0)} 113.097`}
+              r={STATUS_CIRCLE_RADIUS}
+              strokeDasharray={STATUS_CIRCLE_CIRCUMFERENCE}
+              strokeDashoffset={
+                ((100 - clamped) / 100) * STATUS_CIRCLE_CIRCUMFERENCE
+              }
             />
           </svg>
           <span className="status-circle-label">{clamped}%</span>
@@ -1598,19 +1604,34 @@ const RunDetailView = ({
     if (Number.isNaN(numericRunId) || run?.status !== "running") {
       return undefined;
     }
-    const timer = window.setInterval(() => {
+
+    let cancelled = false;
+
+    const fetchDetail = () => {
       getInspectionRun(numericRunId)
         .then((data) => {
+          if (cancelled) {
+            return;
+          }
           setRun(data);
+          if (data.status === "running" && !cancelled) {
+            window.setTimeout(() => {
+              if (!cancelled) {
+                fetchDetail();
+              }
+            }, 0);
+          }
         })
         .catch((err) => {
           const message =
             err instanceof Error ? err.message : "获取巡检详情失败";
           logWithTimestamp("error", "获取巡检详情失败: %s", message);
         });
-    }, 3000);
+    };
+
+    fetchDetail();
     return () => {
-      window.clearInterval(timer);
+      cancelled = true;
     };
   }, [numericRunId, run?.status]);
 
@@ -3060,11 +3081,13 @@ const backgroundLocation =
       const data = await getInspectionRuns();
       setRuns(data);
       logWithTimestamp("info", "巡检历史获取成功,数量: %d", data.length);
+      return data;
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "获取巡检历史失败";
       logWithTimestamp("error", "获取巡检历史失败: %s", message);
       showClusterNotice(currentNoticeScope, message, "error");
+      return null;
     }
   }, [currentNoticeScope, showClusterNotice]);
 
@@ -3077,11 +3100,27 @@ const backgroundLocation =
     if (!hasRunningRuns) {
       return;
     }
-    const timer = window.setInterval(() => {
-      void refreshRuns();
-    }, 3000);
+    let cancelled = false;
+
+    const poll = async () => {
+      const data = await refreshRuns();
+      if (cancelled) {
+        return;
+      }
+      const stillRunning =
+        data?.some((run) => run.status === "running") ?? false;
+      if (stillRunning && !cancelled) {
+        window.setTimeout(() => {
+          if (!cancelled) {
+            void poll();
+          }
+        }, 0);
+      }
+    };
+
+    void poll();
     return () => {
-      window.clearInterval(timer);
+      cancelled = true;
     };
   }, [hasRunningRuns, refreshRuns]);
 
