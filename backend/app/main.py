@@ -34,6 +34,8 @@ from .prometheus import PrometheusClient
 
 logger = logging.getLogger(__name__)
 
+_INSPECTION_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+
 
 def _normalise_cluster_name(name: str | None) -> str:
     if not name:
@@ -57,6 +59,20 @@ def _build_run_display_id(db: Session, run: models.InspectionRun) -> str:
             return f"{slug}-{index:02d}"
     return f"{slug}-{run.id:02d}"
 
+
+def _calculate_run_progress(run: models.InspectionRun) -> tuple[int, int, int]:
+    total_items = run.total_items or 0
+    processed_items = run.processed_items or 0
+    if total_items > 0:
+        processed_items = max(0, min(processed_items, total_items))
+        if run.status != "running":
+            processed_items = max(processed_items, total_items)
+        progress = int((processed_items / total_items) * 100)
+    else:
+        progress = 0 if run.status == "running" else 100
+    progress = max(0, min(progress, 100))
+    return total_items, processed_items, progress
+
 app = FastAPI(title="K8s Inspection Service", version="0.3.0")
 
 CONNECTION_TEST_TIMEOUT_SECONDS = 8.0
@@ -76,6 +92,121 @@ def get_db() -> Session:
     db = SessionLocal()
     try:
         yield db
+    finally:
+        db.close()
+
+
+def _execute_inspection_run_async(run_id: int, item_ids: List[int]) -> None:
+    db = SessionLocal()
+    try:
+        run = crud.get_inspection_run(db, run_id)
+        if not run:
+            logger.error("Inspection run %s not found for async execution.", run_id)
+            return
+
+        cluster = crud.get_cluster(db, run.cluster_id)
+        if not cluster:
+            raise RuntimeError("指定的集群不存在。")
+
+        kubeconfig_path = Path(cluster.kubeconfig_path)
+        if not kubeconfig_path.exists():
+            raise RuntimeError("集群 kubeconfig 文件不存在。")
+
+        items = crud.get_items_by_ids(db, item_ids)
+        if len(items) != len(set(item_ids)):
+            raise RuntimeError("部分巡检项不存在或已删除。")
+
+        total_items = len(items)
+        if run.total_items != total_items:
+            run.total_items = total_items
+            db.add(run)
+            db.commit()
+            db.refresh(run)
+
+        prom_client: Optional[PrometheusClient] = None
+        if cluster.prometheus_url:
+            prom_client = PrometheusClient(cluster.prometheus_url)
+
+        context = CheckContext(
+            kubeconfig_path=str(kubeconfig_path),
+            prom=prom_client,
+        )
+
+        status_counter = {"passed": 0, "warning": 0, "failed": 0}
+
+        for index, item in enumerate(items, start=1):
+            status, detail, suggestion = dispatch_checks(
+                item.check_type, context, item.config
+            )
+            sanitized_detail = _sanitize_optional_text(detail)
+            sanitized_suggestion = _sanitize_optional_text(suggestion)
+            crud.add_inspection_result(
+                db,
+                run=run,
+                item=item,
+                status=status,
+                detail=sanitized_detail,
+                suggestion=sanitized_suggestion,
+            )
+            run = crud.update_inspection_run_progress(
+                db, run=run, processed_items=index
+            )
+            status_counter[status] = status_counter.get(status, 0) + 1
+
+        overall_status = "passed"
+        if status_counter.get("failed", 0) > 0:
+            overall_status = "failed"
+        elif status_counter.get("warning", 0) > 0:
+            overall_status = "warning"
+
+        summary = (
+            f"Cluster {cluster.name} -> passed: {status_counter['passed']}, "
+            f"warning: {status_counter['warning']}, failed: {status_counter['failed']}."
+        )
+
+        run = crud.finalize_inspection_run(
+            db,
+            run=run,
+            status=overall_status,
+            summary=summary,
+            report_path=None,
+            processed_items=run.total_items or len(items),
+        )
+
+        run = crud.get_inspection_run(db, run.id)
+        if not run:
+            raise RuntimeError("无法加载巡检结果。")
+
+        display_id = _build_run_display_id(db, run)
+        report_path = generate_pdf_report(
+            run=run, results=run.results, display_id=display_id
+        )
+        run.report_path = report_path
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        crud.log_action(
+            db,
+            action="update",
+            entity_type="inspection_run",
+            entity_id=run.id,
+            description="Attached PDF report to inspection run.",
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.exception("Inspection run %s failed during execution.", run_id)
+        db.rollback()
+        run = crud.get_inspection_run(db, run_id)
+        if run:
+            message = _sanitize_optional_text(str(exc)) or "巡检执行过程中出现未知错误。"
+            summary = f"巡检执行失败：{message}"
+            crud.finalize_inspection_run(
+                db,
+                run=run,
+                status="failed",
+                summary=summary[:500],
+                report_path=None,
+                processed_items=run.total_items or len(item_ids),
+            )
     finally:
         db.close()
 
@@ -713,6 +844,7 @@ def _serialize_run(run: models.InspectionRun) -> schemas.InspectionRunOut:
     cluster = run.cluster
     if cluster is None:
         raise HTTPException(status_code=500, detail="Cluster information missing.")
+    total_items, processed_items, progress = _calculate_run_progress(run)
     return schemas.InspectionRunOut(
         id=run.id,
         operator=run.operator,
@@ -721,6 +853,9 @@ def _serialize_run(run: models.InspectionRun) -> schemas.InspectionRunOut:
         status=run.status,
         summary=run.summary,
         report_path=run.report_path,
+        total_items=total_items,
+        processed_items=processed_items,
+        progress=progress,
         created_at=run.created_at,
         completed_at=run.completed_at,
         results=[_serialize_result(result) for result in run.results],
@@ -731,6 +866,7 @@ def _serialize_run_list(run: models.InspectionRun) -> schemas.InspectionRunListO
     cluster = run.cluster
     if cluster is None:
         raise HTTPException(status_code=500, detail="Cluster information missing.")
+    total_items, processed_items, progress = _calculate_run_progress(run)
     return schemas.InspectionRunListOut(
         id=run.id,
         operator=run.operator,
@@ -739,6 +875,9 @@ def _serialize_run_list(run: models.InspectionRun) -> schemas.InspectionRunListO
         status=run.status,
         summary=run.summary,
         report_path=run.report_path,
+        total_items=total_items,
+        processed_items=processed_items,
+        progress=progress,
         created_at=run.created_at,
         completed_at=run.completed_at,
     )
@@ -765,73 +904,23 @@ def trigger_inspection(
         )
 
     run = crud.create_inspection_run(
-        db, operator=run_in.operator, cluster=cluster, status="running"
-    )
-
-    prom_client: Optional[PrometheusClient] = None
-    if cluster.prometheus_url:
-        prom_client = PrometheusClient(cluster.prometheus_url)
-
-    context = CheckContext(
-        kubeconfig_path=str(kubeconfig_path),
-        prom=prom_client,
-    )
-
-    status_counter = {"passed": 0, "warning": 0, "failed": 0}
-    for item in items:
-        status, detail, suggestion = dispatch_checks(item.check_type, context, item.config)
-        sanitized_detail = _sanitize_optional_text(detail)
-        sanitized_suggestion = _sanitize_optional_text(suggestion)
-        crud.add_inspection_result(
-            db,
-            run=run,
-            item=item,
-            status=status,
-            detail=sanitized_detail,
-            suggestion=sanitized_suggestion,
-        )
-        status_counter[status] = status_counter.get(status, 0) + 1
-
-    overall_status = "passed"
-    if status_counter.get("failed", 0) > 0:
-        overall_status = "failed"
-    elif status_counter.get("warning", 0) > 0:
-        overall_status = "warning"
-
-    summary = (
-        f"Cluster {cluster.name} -> passed: {status_counter['passed']}, "
-        f"warning: {status_counter['warning']}, failed: {status_counter['failed']}."
-    )
-
-    run = crud.finalize_inspection_run(
         db,
-        run=run,
-        status=overall_status,
-        summary=summary,
-        report_path=None,
+        operator=run_in.operator,
+        cluster=cluster,
+        status="running",
+        total_items=len(items),
+        processed_items=0,
+    )
+
+    _INSPECTION_EXECUTOR.submit(
+        _execute_inspection_run_async,
+        run.id,
+        list(run_in.item_ids),
     )
 
     run = crud.get_inspection_run(db, run.id)
     if not run:
-        raise HTTPException(status_code=500, detail="无法加载巡检结果。")
-
-    display_id = _build_run_display_id(db, run)
-    report_path = generate_pdf_report(run=run, results=run.results, display_id=display_id)
-    run.report_path = report_path
-    db.add(run)
-    db.commit()
-    db.refresh(run)
-    crud.log_action(
-        db,
-        action="update",
-        entity_type="inspection_run",
-        entity_id=run.id,
-        description="Attached PDF report to inspection run.",
-    )
-
-    run = crud.get_inspection_run(db, run.id)
-    if not run:
-        raise HTTPException(status_code=500, detail="Unable to refresh run details.")
+        raise HTTPException(status_code=500, detail="无法加载巡检任务。")
     return _serialize_run(run)
 
 

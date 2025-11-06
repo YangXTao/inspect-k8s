@@ -47,6 +47,7 @@ import {
   InspectionResult,
   InspectionRun,
   InspectionRunListItem,
+  InspectionRunStatus,
 } from "./types";
 
 type NoticeType = "success" | "warning" | "error" | null;
@@ -93,9 +94,59 @@ const statusClass = (status: string) => {
       return "status-pill warning";
     case "failed":
       return "status-pill danger";
+    case "running":
+      return "status-pill running";
     default:
       return "status-pill";
   }
+};
+
+const formatRunStatusLabel = (status: InspectionRunStatus) => {
+  switch (status) {
+    case "running":
+      return "巡检中";
+    case "passed":
+      return "Passed";
+    case "warning":
+      return "Warning";
+    case "failed":
+      return "Failed";
+    default:
+      return status;
+  }
+};
+
+const clampProgress = (value: number | undefined) => {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return 0;
+  }
+  return Math.min(100, Math.max(0, Math.round(value)));
+};
+
+const renderRunStatusBadge = (
+  status: InspectionRunStatus,
+  progress?: number
+) => {
+  if (status === "running") {
+    const clamped = clampProgress(progress);
+    return (
+      <div className="status-progress">
+        <span className={statusClass(status)}>
+          {`${formatRunStatusLabel(status)} ${clamped}%`}
+        </span>
+        <div className="status-progress-bar">
+          <div
+            className="status-progress-value"
+            style={{ width: `${clamped}%` }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <span className={statusClass(status)}>{formatRunStatusLabel(status)}</span>
+  );
 };
 
 const formatDate = (value?: string | null) => {
@@ -978,11 +1029,9 @@ const HistoryView = ({
                       {run.cluster_name}({clusterSlug})
                     </td>
                     <td>{run.operator || "-"}</td>
-                    <td>
-                      <span className={statusClass(run.status)}>
-                        {run.status}
-                      </span>
-                    </td>
+                  <td>
+                      {renderRunStatusBadge(run.status, run.progress)}
+                  </td>
                     <td>{formatDate(run.created_at)}</td>
                     <td>{formatDate(run.completed_at)}</td>
                     <td className="actions">
@@ -1379,13 +1428,11 @@ const ClusterDetailView = ({
                 const runSlug = runDisplayIds[run.id] ?? String(run.id);
                 return (
                   <tr key={run.id}>
-                    <td>{runSlug}</td>
-                    <td>{run.operator || "-"}</td>
-                    <td>
-                      <span className={statusClass(run.status)}>
-                        {run.status}
-                      </span>
-                    </td>
+                <td>{runSlug}</td>
+                <td>{run.operator || "-"}</td>
+                <td>
+                  {renderRunStatusBadge(run.status, run.progress)}
+                </td>
                     <td>{formatDate(run.created_at)}</td>
                     <td>{formatDate(run.completed_at)}</td>
                     <td className="actions">
@@ -1540,6 +1587,26 @@ const RunDetailView = ({
       .finally(() => setLoading(false));
   }, [numericRunId, runDisplayIds, runKey, isRunIdInvalid]);
 
+  useEffect(() => {
+    if (Number.isNaN(numericRunId) || run?.status !== "running") {
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      getInspectionRun(numericRunId)
+        .then((data) => {
+          setRun(data);
+        })
+        .catch((err) => {
+          const message =
+            err instanceof Error ? err.message : "获取巡检详情失败";
+          logWithTimestamp("error", "获取巡检详情失败: %s", message);
+        });
+    }, 3000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [numericRunId, run?.status]);
+
   const resolvedClusterSlug =
     clusterSlug ??
     (cluster ? getClusterDisplayId(clusterDisplayIds, cluster.id, cluster) : "");
@@ -1692,9 +1759,7 @@ const RunDetailView = ({
                 </div>
                 <div>
                   <strong>状态: </strong>
-                  <span className={statusClass(run.status)}>
-                    {run.status}
-                  </span>
+                  {renderRunStatusBadge(run.status, run.progress)}
                 </div>
                 <div>
                   <strong>开始时间: </strong>
@@ -2968,6 +3033,23 @@ const backgroundLocation =
     }
   }, [currentNoticeScope, showClusterNotice]);
 
+  const hasRunningRuns = useMemo(
+    () => runs.some((run) => run.status === "running"),
+    [runs]
+  );
+
+  useEffect(() => {
+    if (!hasRunningRuns) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void refreshRuns();
+    }, 3000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [hasRunningRuns, refreshRuns]);
+
   const refreshItems = useCallback(async () => {
     try {
       logWithTimestamp("info", "开始获取巡检项");
@@ -3215,7 +3297,7 @@ const backgroundLocation =
           clusterId,
           operatorName || undefined
         );
-        setInspectionNotice("巡检任务已创建,可在历史巡检中查看进度");
+        setInspectionNotice("巡检任务已启动，状态会自动更新。");
         setSelectedItemIdsState([]);
         await refreshRuns();
         await refreshClusters();
