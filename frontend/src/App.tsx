@@ -126,6 +126,65 @@ const clampProgress = (value: number | undefined) => {
 const STATUS_CIRCLE_RADIUS = 16;
 const STATUS_CIRCLE_CIRCUMFERENCE = 2 * Math.PI * STATUS_CIRCLE_RADIUS;
 
+const hasRunStateChanged = (
+  previous: InspectionRun | null,
+  next: InspectionRun
+) => {
+  if (!previous) {
+    return true;
+  }
+  if (
+    previous.status !== next.status ||
+    previous.progress !== next.progress ||
+    previous.processed_items !== next.processed_items ||
+    previous.total_items !== next.total_items ||
+    previous.report_path !== next.report_path ||
+    previous.summary !== next.summary
+  ) {
+    return true;
+  }
+  if (previous.results.length !== next.results.length) {
+    return true;
+  }
+  for (let index = 0; index < next.results.length; index += 1) {
+    const prevResult = previous.results[index];
+    const nextResult = next.results[index];
+    if (
+      !prevResult ||
+      prevResult.status !== nextResult.status ||
+      prevResult.detail !== nextResult.detail ||
+      prevResult.suggestion !== nextResult.suggestion
+    ) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const areRunListsEqual = (
+  previous: InspectionRunListItem[] | undefined,
+  next: InspectionRunListItem[]
+) => {
+  if (!previous || !next || previous.length !== next.length) {
+    return false;
+  }
+  for (let index = 0; index < next.length; index += 1) {
+    const prev = previous[index];
+    const curr = next[index];
+    if (
+      prev.id !== curr.id ||
+      prev.status !== curr.status ||
+      prev.progress !== curr.progress ||
+      prev.processed_items !== curr.processed_items ||
+      prev.total_items !== curr.total_items ||
+      prev.report_path !== curr.report_path
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
+
 const renderRunStatusBadge = (
   status: InspectionRunStatus,
   progress?: number
@@ -1601,7 +1660,12 @@ const RunDetailView = ({
   }, [numericRunId, runDisplayIds, runKey, isRunIdInvalid]);
 
   useEffect(() => {
-    if (Number.isNaN(numericRunId) || run?.status !== "running") {
+    const shouldPoll =
+      !Number.isNaN(numericRunId) &&
+      (!run ||
+        run.status === "running" ||
+        (!run.report_path && run.progress >= 100));
+    if (!shouldPoll) {
       return undefined;
     }
 
@@ -1613,13 +1677,18 @@ const RunDetailView = ({
           if (cancelled) {
             return;
           }
-          setRun(data);
-          if (data.status === "running" && !cancelled) {
+          setRun((previous) =>
+            hasRunStateChanged(previous, data) ? data : previous
+          );
+          const shouldContinue =
+            data.status === "running" ||
+            (!data.report_path && data.progress >= 100);
+          if (shouldContinue && !cancelled) {
             window.setTimeout(() => {
               if (!cancelled) {
                 fetchDetail();
               }
-            }, 0);
+            }, 400);
           }
         })
         .catch((err) => {
@@ -1633,7 +1702,7 @@ const RunDetailView = ({
     return () => {
       cancelled = true;
     };
-  }, [numericRunId, run?.status]);
+  }, [numericRunId, run?.status, run?.report_path, run?.progress]);
 
   const resolvedClusterSlug =
     clusterSlug ??
@@ -3079,7 +3148,9 @@ const backgroundLocation =
     try {
       logWithTimestamp("info", "开始获取巡检历史");
       const data = await getInspectionRuns();
-      setRuns(data);
+      setRuns((previous) =>
+        areRunListsEqual(previous, data) ? previous ?? data : data
+      );
       logWithTimestamp("info", "巡检历史获取成功,数量: %d", data.length);
       return data;
     } catch (err) {
@@ -3092,7 +3163,12 @@ const backgroundLocation =
   }, [currentNoticeScope, showClusterNotice]);
 
   const hasRunningRuns = useMemo(
-    () => runs.some((run) => run.status === "running"),
+    () =>
+      runs.some(
+        (run) =>
+          run.status === "running" ||
+          (!run.report_path && run.progress >= 100)
+      ),
     [runs]
   );
 
@@ -3107,14 +3183,18 @@ const backgroundLocation =
       if (cancelled) {
         return;
       }
-      const stillRunning =
-        data?.some((run) => run.status === "running") ?? false;
-      if (stillRunning && !cancelled) {
+      const shouldContinue =
+        data?.some(
+          (run) =>
+            run.status === "running" ||
+            (!run.report_path && run.progress >= 100)
+        ) ?? false;
+      if (shouldContinue && !cancelled) {
         window.setTimeout(() => {
           if (!cancelled) {
             void poll();
           }
-        }, 0);
+        }, 400);
       }
     };
 
