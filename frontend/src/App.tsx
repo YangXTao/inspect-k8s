@@ -37,6 +37,8 @@ import {
   createInspectionItem as apiCreateInspectionItem,
   updateInspectionItem as apiUpdateInspectionItem,
   deleteInspectionItem as apiDeleteInspectionItem,
+  exportInspectionItems,
+  importInspectionItems,
 } from "./api";
 import { appConfig } from "./config";
 import {
@@ -2011,6 +2013,8 @@ interface InspectionSettingsPanelProps {
     config: Record<string, unknown>;
   }) => Promise<void>;
   onDelete: (item: InspectionItem) => void;
+  onExport: () => Promise<void>;
+  onImport: (file: File) => Promise<void>;
 }
 
 type InspectionCheckType = "command" | "promql";
@@ -2087,9 +2091,12 @@ const InspectionSettingsPanel = ({
   onClose,
   onSave,
   onDelete,
+  onExport,
+  onImport,
 }: InspectionSettingsPanelProps) => {
   const [formState, setFormState] = useState(defaultInspectionForm);
   const [formError, setFormError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleResetForm = () => {
     setFormState(defaultInspectionForm);
@@ -2108,6 +2115,41 @@ const InspectionSettingsPanel = ({
       command: value === "command" ? prev.command : "",
       expression: value === "promql" ? prev.expression : "",
     }));
+  };
+
+  const handleExportClick = async () => {
+    setFormError(null);
+    try {
+      await onExport();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "导出巡检项失败";
+      setFormError(message);
+    }
+  };
+
+  const handleTriggerImport = () => {
+    if (submitting) {
+      return;
+    }
+    setFormError(null);
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = "";
+    if (!file || submitting) {
+      return;
+    }
+    setFormError(null);
+    try {
+      await onImport(file);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "导入巡检项失败";
+      setFormError(message);
+    }
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -2185,11 +2227,41 @@ const InspectionSettingsPanel = ({
   return (
     <div className="inspection-settings-panel">
       <div className="settings-header">
-          <h3>巡检项设置</h3>
-          <button className="link-button" onClick={() => handleResetForm()}>
+        <h3>巡检项设置</h3>
+        <div className="settings-actions">
+          <button
+            type="button"
+            className="link-button"
+            onClick={handleExportClick}
+            disabled={submitting}
+          >
+            导出 JSON
+          </button>
+          <button
+            type="button"
+            className="link-button"
+            onClick={handleTriggerImport}
+            disabled={submitting}
+          >
+            导入 JSON
+          </button>
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => handleResetForm()}
+            disabled={submitting}
+          >
             新建巡检项
           </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json"
+            onChange={handleFileChange}
+            style={{ display: "none" }}
+          />
         </div>
+      </div>
         {notice && <div className="feedback success">{notice}</div>}
         {(error || formError) && (
           <div className="feedback error">{formError ?? error}</div>
@@ -3380,6 +3452,94 @@ const backgroundLocation =
     [performDeleteInspectionItem]
   );
 
+  const handleExportInspectionItems = useCallback(async () => {
+    setSettingsSubmitting(true);
+    setSettingsNotice(null);
+    setSettingsError(null);
+    let objectUrl: string | null = null;
+    let tempLink: HTMLAnchorElement | null = null;
+    try {
+      logWithTimestamp("info", "导出巡检项");
+      const payload = await exportInspectionItems();
+      const rawTimestamp = payload.exported_at ?? new Date().toISOString();
+      let exportDate = new Date(rawTimestamp);
+      if (Number.isNaN(exportDate.getTime())) {
+        exportDate = new Date();
+      }
+      const pad = (value: number) => value.toString().padStart(2, "0");
+      const filename = `inspection-items-${exportDate.getFullYear()}${pad(
+        exportDate.getMonth() + 1
+      )}${pad(exportDate.getDate())}-${pad(exportDate.getHours())}${pad(
+        exportDate.getMinutes()
+      )}${pad(exportDate.getSeconds())}.json`;
+
+      const exportPayload = {
+        exported_at: exportDate.toISOString(),
+        items: payload.items,
+      };
+      const fileContent = JSON.stringify(exportPayload, null, 2);
+      const blob = new Blob([fileContent], {
+        type: "application/json;charset=utf-8",
+      });
+      objectUrl = URL.createObjectURL(blob);
+      tempLink = document.createElement("a");
+      tempLink.href = objectUrl;
+      tempLink.download = filename;
+      document.body.appendChild(tempLink);
+      tempLink.click();
+      setSettingsNotice("巡检项导出成功，文件已下载");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "导出巡检项失败";
+      logWithTimestamp("error", "导出巡检项失败: %s", message);
+      setSettingsError(message);
+      throw err instanceof Error ? err : new Error(message);
+    } finally {
+      if (tempLink && tempLink.parentNode) {
+        tempLink.parentNode.removeChild(tempLink);
+      }
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+      setSettingsSubmitting(false);
+    }
+  }, []);
+
+  const handleImportInspectionItems = useCallback(
+    async (file: File) => {
+      setSettingsSubmitting(true);
+      setSettingsNotice(null);
+      setSettingsError(null);
+      try {
+        logWithTimestamp("info", "导入巡检项，文件: %s", file.name);
+        const formData = new FormData();
+        formData.append("file", file, file.name || "inspection-items.json");
+        const result = await importInspectionItems(formData);
+        await refreshItems();
+        const summaryParts: string[] = [];
+        if (result.created > 0) {
+          summaryParts.push(`新增 ${result.created} 条`);
+        }
+        if (result.updated > 0) {
+          summaryParts.push(`更新 ${result.updated} 条`);
+        }
+        const summaryText =
+          summaryParts.length > 0 ? summaryParts.join("，") : "数据未发生变化";
+        setSettingsNotice(`导入成功（共 ${result.total} 条），${summaryText}`);
+        setSettingsError(null);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "导入巡检项失败";
+        logWithTimestamp("error", "导入巡检项失败: %s", message);
+        setSettingsError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setSettingsSubmitting(false);
+      }
+    },
+    [refreshItems]
+  );
+
   const settingsTabs = useMemo<SettingsModalTab[]>(
     () => [
       {
@@ -3403,6 +3563,8 @@ const backgroundLocation =
             onClose={close}
             onSave={handleSaveInspectionItem}
             onDelete={handleDeleteInspectionItem}
+            onExport={handleExportInspectionItems}
+            onImport={handleImportInspectionItems}
           />
         ),
       },
@@ -3414,6 +3576,8 @@ const backgroundLocation =
       settingsError,
       handleSaveInspectionItem,
       handleDeleteInspectionItem,
+      handleExportInspectionItems,
+      handleImportInspectionItems,
     ]
   );
 

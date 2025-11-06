@@ -1006,6 +1006,17 @@ th {
   justify-content: space-between;
 }
 
+.settings-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.settings-actions .link-button {
+  white-space: nowrap;
+}
+
 .settings-content {
   display: flex;
   gap: 18px;
