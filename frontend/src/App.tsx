@@ -1682,44 +1682,6 @@ const RunDetailView = ({
   const [run, setRun] = useState<InspectionRun | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const progressInfoRef = useRef<RunProgressInfo | null>(null);
-  const progressCardRef = useRef<HTMLDivElement | null>(null);
-  const progressMetaRef = useRef<HTMLSpanElement | null>(null);
-  const progressPercentRef = useRef<HTMLSpanElement | null>(null);
-  const progressBarValueRef = useRef<HTMLDivElement | null>(null);
-  const progressHintRef = useRef<HTMLDivElement | null>(null);
-  const statusTextRef = useRef<HTMLSpanElement | null>(null);
-
-  const updateProgressDisplay = useCallback((info: RunProgressInfo) => {
-    const previous = progressInfoRef.current;
-    if (isProgressInfoEqual(previous, info)) {
-      return;
-    }
-    progressInfoRef.current = info;
-
-    if (progressCardRef.current) {
-      progressCardRef.current.style.display =
-        info.status === "running" ? "" : "none";
-    }
-    if (progressMetaRef.current) {
-      const totalLabel =
-        info.total > 0 ? String(info.total) : "-";
-      progressMetaRef.current.textContent = `当前进度：${info.processed} / ${totalLabel} 项`;
-    }
-    if (progressPercentRef.current) {
-      progressPercentRef.current.textContent = `${info.progress}%`;
-    }
-    if (progressBarValueRef.current) {
-      progressBarValueRef.current.style.width = `${info.progress}%`;
-    }
-    if (progressHintRef.current) {
-      progressHintRef.current.textContent =
-        info.status === "running"
-          ? `剩余${info.pending}个巡检项执行中…`
-          : "巡检已完成";
-    }
-  }, []);
-
   const cluster = useMemo(() => {
     if (Number.isNaN(numericClusterId)) {
       return null;
@@ -1743,93 +1705,6 @@ const RunDetailView = ({
   const isClusterIdInvalid = Number.isNaN(numericClusterId);
   const isRunIdInvalid = Number.isNaN(numericRunId);
 
-  useEffect(() => {
-    if (isRunIdInvalid) {
-      setRun(null);
-      setLoading(false);
-      setError("巡检编号无效");
-      logWithTimestamp("error", "巡检编号无效: %s", runKey ?? "");
-      progressInfoRef.current = null;
-      if (progressCardRef.current) {
-        progressCardRef.current.style.display = "none";
-      }
-      if (statusTextRef.current) {
-        statusTextRef.current.textContent = "-";
-      }
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    logWithTimestamp(
-      "info",
-      "开始获取巡检详情: %s",
-      runDisplayIds[numericRunId] ?? numericRunId
-    );
-    getInspectionRun(numericRunId)
-      .then((data) => {
-        setRun(data);
-        updateProgressDisplay(buildRunProgressInfo(data));
-        logWithTimestamp(
-          "info",
-          "巡检详情获取成功: %s",
-          runDisplayIds[numericRunId] ?? numericRunId
-        );
-      })
-      .catch((err) => {
-        const message =
-          err instanceof Error ? err.message : "获取巡检详情失败";
-        logWithTimestamp("error", "获取巡检详情失败: %s", message);
-        setError(message);
-      })
-      .finally(() => setLoading(false));
-  }, [numericRunId, runDisplayIds, runKey, isRunIdInvalid, updateProgressDisplay]);
-
-  useEffect(() => {
-    const shouldPoll =
-      !Number.isNaN(numericRunId) &&
-      isRunStillProcessing(progressInfoRef.current, run);
-    if (!shouldPoll) {
-      return undefined;
-    }
-
-    let cancelled = false;
-
-    const fetchDetail = () => {
-      getInspectionRun(numericRunId)
-        .then((data) => {
-          if (cancelled) {
-            return;
-          }
-          const nextInfo = buildRunProgressInfo(data);
-          updateProgressDisplay(nextInfo);
-          const isProcessing =
-            nextInfo.status === "running" ||
-            (!nextInfo.reportReady && nextInfo.progress >= 100);
-          if (!isProcessing || !run) {
-            setRun((previous) =>
-              hasRunStateChanged(previous, data) ? data : previous
-            );
-          }
-          if (isProcessing && !cancelled) {
-            window.setTimeout(() => {
-              if (!cancelled) {
-                fetchDetail();
-              }
-            }, 400);
-          }
-        })
-        .catch((err) => {
-          const message =
-            err instanceof Error ? err.message : "获取巡检详情失败";
-          logWithTimestamp("error", "获取巡检详情失败: %s", message);
-        });
-    };
-
-    fetchDetail();
-    return () => {
-      cancelled = true;
-    };
-  }, [numericRunId, run, updateProgressDisplay]);
 
   const resolvedClusterSlug =
     clusterSlug ??
@@ -1980,48 +1855,6 @@ const RunDetailView = ({
                 <div>
                   <strong>巡检人: </strong>
                   {run.operator || "-"}
-                </div>
-                <div
-                  className="run-progress-card"
-                  ref={progressCardRef}
-                  style={{
-                    display:
-                      run?.status === "running" ? undefined : "none",
-                  }}
-                >
-                  <div className="run-progress-meta">
-                    <span ref={progressMetaRef}>
-                      {run
-                        ? `当前进度：${Math.min(
-                            run.processed_items ?? 0,
-                            run.total_items ?? 0
-                          )} / ${run.total_items ?? "-"} 项`
-                        : "当前进度：0 / - 项"}
-                    </span>
-                    <span ref={progressPercentRef}>
-                      {run ? `${clampProgress(run.progress)}%` : "0%"}
-                    </span>
-                  </div>
-                  <div className="run-progress-bar">
-                    <div
-                      className="run-progress-value"
-                      ref={progressBarValueRef}
-                      style={{
-                        width: run ? `${clampProgress(run.progress)}%` : "0%",
-                      }}
-                    />
-                  </div>
-                  <div className="run-progress-hint" ref={progressHintRef}>
-                    {run
-                      ? run.status === "running"
-                        ? `剩余${Math.max(
-                            (run.total_items ?? 0) -
-                              (run.processed_items ?? 0),
-                            0
-                          )}个巡检项执行中…`
-                        : "巡检已完成"
-                      : "剩余巡检项执行中…"}
-                  </div>
                 </div>
             <div>
               <strong>开始时间: </strong>
