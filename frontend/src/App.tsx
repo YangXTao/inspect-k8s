@@ -1619,6 +1619,13 @@ const RunDetailView = ({
         numericRunId
       ).padStart(2, "0")}`;
   const runDisplayId = runDisplayIds[numericRunId] ?? fallbackRunDisplayId;
+  const runProgress = run ? clampProgress(run.progress) : 0;
+  const processedCount = run
+    ? Math.min(run.processed_items, run.total_items)
+    : 0;
+  const pendingCount = run
+    ? Math.max(run.total_items - run.processed_items, 0)
+    : 0;
 
   const handleDownloadReport = useCallback(() => {
     if (!run?.report_path || !run?.id) {
@@ -1758,13 +1765,32 @@ const RunDetailView = ({
                   {run.operator || "-"}
                 </div>
                 <div>
-                  <strong>状态: </strong>
-                  {renderRunStatusBadge(run.status, run.progress)}
+              <strong>状态: </strong>
+              {renderRunStatusBadge(run.status, run.progress)}
+            </div>
+            {run.status === "running" && (
+              <div className="run-progress-card">
+                <div className="run-progress-meta">
+                  <span>
+                    当前进度：{processedCount} / {run.total_items || "-"} 项
+                  </span>
+                  <span>{runProgress}%</span>
                 </div>
-                <div>
-                  <strong>开始时间: </strong>
-                  {formatDate(run.created_at)}
+                <div className="run-progress-bar">
+                  <div
+                    className="run-progress-value"
+                    style={{ width: `${runProgress}%` }}
+                  />
                 </div>
+                <div className="run-progress-hint">
+                  剩余{pendingCount}个巡检项执行中…
+                </div>
+              </div>
+            )}
+            <div>
+              <strong>开始时间: </strong>
+              {formatDate(run.created_at)}
+            </div>
                 <div>
                   <strong>完成时间: </strong>
                   {formatDate(run.completed_at)}
