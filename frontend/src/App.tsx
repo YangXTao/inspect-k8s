@@ -1682,7 +1682,6 @@ const RunDetailView = ({
   const [run, setRun] = useState<InspectionRun | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [displayResults, setDisplayResults] = useState<InspectionResult[]>([]);
   const progressInfoRef = useRef<RunProgressInfo | null>(null);
   const progressCardRef = useRef<HTMLDivElement | null>(null);
   const progressMetaRef = useRef<HTMLSpanElement | null>(null);
@@ -1698,12 +1697,6 @@ const RunDetailView = ({
     }
     progressInfoRef.current = info;
 
-    if (statusTextRef.current) {
-      statusTextRef.current.textContent =
-        info.status === "running"
-          ? "巡检中"
-          : formatRunStatusLabel(info.status);
-    }
     if (progressCardRef.current) {
       progressCardRef.current.style.display =
         info.status === "running" ? "" : "none";
@@ -1756,7 +1749,6 @@ const RunDetailView = ({
       setLoading(false);
       setError("巡检编号无效");
       logWithTimestamp("error", "巡检编号无效: %s", runKey ?? "");
-      setDisplayResults([]);
       progressInfoRef.current = null;
       if (progressCardRef.current) {
         progressCardRef.current.style.display = "none";
@@ -1776,11 +1768,6 @@ const RunDetailView = ({
     getInspectionRun(numericRunId)
       .then((data) => {
         setRun(data);
-        if (data.status !== "running") {
-          setDisplayResults(data.results.slice());
-        } else {
-          setDisplayResults([]);
-        }
         updateProgressDisplay(buildRunProgressInfo(data));
         logWithTimestamp(
           "info",
@@ -1818,17 +1805,10 @@ const RunDetailView = ({
           const isProcessing =
             nextInfo.status === "running" ||
             (!nextInfo.reportReady && nextInfo.progress >= 100);
-          if (!isProcessing) {
+          if (!isProcessing || !run) {
             setRun((previous) =>
               hasRunStateChanged(previous, data) ? data : previous
             );
-            setDisplayResults((previous) =>
-              areResultsEqual(previous, data.results)
-                ? previous
-                : data.results.slice()
-            );
-          } else if (!run) {
-            setRun(data);
           }
           if (isProcessing && !cancelled) {
             window.setTimeout(() => {
@@ -1883,10 +1863,10 @@ const RunDetailView = ({
   }, [items]);
 
   const orderedResults = useMemo(() => {
-    if (!displayResults.length) {
+    if (!run?.results?.length) {
       return [];
     }
-    return displayResults
+    return run.results
       .slice()
       .sort((a, b) => {
         const orderA =
@@ -1902,7 +1882,7 @@ const RunDetailView = ({
         }
         return a.id - b.id;
       });
-  }, [displayResults, itemOrderMap]);
+  }, [run, itemOrderMap]);
 
   if (isClusterIdInvalid) {
     return (
@@ -2000,16 +1980,6 @@ const RunDetailView = ({
                 <div>
                   <strong>巡检人: </strong>
                   {run.operator || "-"}
-                </div>
-                <div>
-                  <strong>状态: </strong>
-                  <span ref={statusTextRef}>
-                    {run?.status
-                      ? run.status === "running"
-                        ? "巡检中"
-                        : formatRunStatusLabel(run.status)
-                      : "-"}
-                  </span>
                 </div>
                 <div
                   className="run-progress-card"
