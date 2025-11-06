@@ -1705,6 +1705,52 @@ const RunDetailView = ({
   const isClusterIdInvalid = Number.isNaN(numericClusterId);
   const isRunIdInvalid = Number.isNaN(numericRunId);
 
+  useEffect(() => {
+    if (isRunIdInvalid) {
+      setRun(null);
+      setLoading(false);
+      setError("巡检编号无效");
+      logWithTimestamp("error", "巡检编号无效: %s", runKey ?? "");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    logWithTimestamp(
+      "info",
+      "开始获取巡检详情: %s",
+      runDisplayIds[numericRunId] ?? numericRunId
+    );
+    let cancelled = false;
+    getInspectionRun(numericRunId)
+      .then((data) => {
+        if (cancelled) {
+          return;
+        }
+        setRun(data);
+        logWithTimestamp(
+          "info",
+          "巡检详情获取成功: %s",
+          runDisplayIds[numericRunId] ?? numericRunId
+        );
+      })
+      .catch((err) => {
+        const message =
+          err instanceof Error ? err.message : "获取巡检详情失败";
+        logWithTimestamp("error", "获取巡检详情失败: %s", message);
+        if (!cancelled) {
+          setError(message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [numericRunId, runDisplayIds, runKey, isRunIdInvalid]);
+
 
   const resolvedClusterSlug =
     clusterSlug ??
