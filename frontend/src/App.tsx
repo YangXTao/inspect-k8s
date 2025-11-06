@@ -1715,11 +1715,8 @@ const RunDetailView = ({
     }
     setLoading(true);
     setError(null);
-    logWithTimestamp(
-      "info",
-      "开始获取巡检详情: %s",
-      runDisplayIds[numericRunId] ?? numericRunId
-    );
+    const runLabel = runDisplayIds[numericRunId] ?? numericRunId;
+    logWithTimestamp("info", "开始获取巡检详情: %s", runLabel);
     let cancelled = false;
     getInspectionRun(numericRunId)
       .then((data) => {
@@ -1727,11 +1724,7 @@ const RunDetailView = ({
           return;
         }
         setRun(data);
-        logWithTimestamp(
-          "info",
-          "巡检详情获取成功: %s",
-          runDisplayIds[numericRunId] ?? numericRunId
-        );
+        logWithTimestamp("info", "巡检详情获取成功: %s", runLabel);
       })
       .catch((err) => {
         const message =
@@ -1749,7 +1742,8 @@ const RunDetailView = ({
     return () => {
       cancelled = true;
     };
-  }, [numericRunId, runDisplayIds, runKey, isRunIdInvalid]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [numericRunId, isRunIdInvalid]);
 
 
   const resolvedClusterSlug =
