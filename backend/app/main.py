@@ -1173,17 +1173,7 @@ def get_inspection_run(run_id: int, db: Session = Depends(get_db)):
     response_model=schemas.InspectionRunOut,
 )
 def pause_inspection_run(run_id: int, db: Session = Depends(get_db)):
-    run = crud.get_inspection_run(db, run_id)
-    if not run:
-        raise HTTPException(status_code=404, detail="Inspection run not found.")
-    if run.status != "running":
-        raise HTTPException(status_code=400, detail="仅可暂停进行中的巡检。")
-    crud.pause_inspection_run(db, run)
-    _pause_run_execution(run.id)
-    refreshed = crud.get_inspection_run(db, run_id)
-    if not refreshed:
-        raise HTTPException(status_code=404, detail="Inspection run not found.")
-    return _serialize_run(refreshed)
+    raise HTTPException(status_code=410, detail="暂停功能已停用。")
 
 
 @app.post(
@@ -1191,37 +1181,7 @@ def pause_inspection_run(run_id: int, db: Session = Depends(get_db)):
     response_model=schemas.InspectionRunOut,
 )
 def resume_inspection_run(run_id: int, db: Session = Depends(get_db)):
-    run = crud.get_inspection_run(db, run_id)
-    if not run:
-        raise HTTPException(status_code=404, detail="Inspection run not found.")
-    if run.status != "paused":
-        raise HTTPException(status_code=400, detail="仅可恢复已暂停的巡检。")
-    cached_item_ids = _get_run_item_ids(run.id)
-    future = _get_run_future(run.id)
-    if (not future or future.done()) and not cached_item_ids:
-        raise HTTPException(
-            status_code=409,
-            detail="无法恢复巡检任务，缺少执行上下文，请重新发起新的巡检。",
-        )
-    crud.resume_inspection_run(db, run)
-    resumed = _resume_run_execution(run.id)
-    if not resumed:
-        if not cached_item_ids:
-            crud.pause_inspection_run(db, run)
-            _pause_run_execution(run.id)
-            raise HTTPException(
-                status_code=409,
-                detail="无法恢复巡检任务，缺少执行上下文，请重新发起新的巡检。",
-            )
-        logger.info(
-            "Spawning new worker to resume inspection run %s (thread was inactive).",
-            run.id,
-        )
-        _submit_run_execution(run.id, cached_item_ids)
-    refreshed = crud.get_inspection_run(db, run_id)
-    if not refreshed:
-        raise HTTPException(status_code=404, detail="Inspection run not found.")
-    return _serialize_run(refreshed)
+    raise HTTPException(status_code=410, detail="继续功能已停用。")
 
 
 @app.post(
