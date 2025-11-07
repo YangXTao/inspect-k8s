@@ -1336,11 +1336,11 @@ const HistoryView = ({
   return (
     <section className="card history history-page">
       <div className="card-header">
-        <h2>历史巡检</h2>
-        <div className="card-actions">
-          {runs.length > 0 && (
-            <>
-              <div className="card-actions-group">
+          <h2>历史巡检</h2>
+          <div className="card-actions">
+            {runs.length > 0 && (
+              <>
+                <div className="card-actions-group">
                 <span className="selection-hint">
                   已选 {selectedRunIds.length} / {runs.length}
                 </span>
@@ -1354,79 +1354,17 @@ const HistoryView = ({
                 <button
                   type="button"
                   className="secondary danger"
-                  onClick={handleDeleteSelectedRuns}
-                  disabled={selectedRunIds.length === 0}
-                >
-                  删除选中
-                </button>
-              </div>
-              <div className="card-actions-group table-pagination">
-                <label className="page-size-control">
-                  每页
-                  <select
-                    className="page-size-select"
-                    value={pageSize}
-                    onChange={(event) =>
-                      handlePageSizeChange(Number(event.target.value))
-                    }
+                    onClick={handleDeleteSelectedRuns}
+                    disabled={selectedRunIds.length === 0}
                   >
-                    {RUN_PAGE_SIZE_OPTIONS.map((size) => (
-                      <option key={size} value={size}>
-                        {size}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <span className="page-indicator">
-                  第 {page} / {totalPages} 页
-                </span>
-                <button
-                  type="button"
-                  className="pagination-nav"
-                  onClick={() => handlePageChange(-1)}
-                  disabled={page <= 1}
-                >
-                  上一页
-                </button>
-                <button
-                  type="button"
-                  className="pagination-nav"
-                  onClick={() => handlePageChange(1)}
-                  disabled={page >= totalPages}
-                >
-                  下一页
-                </button>
-                <div className="page-jump">
-                  <input
-                    type="number"
-                    min={1}
-                    max={totalPages}
-                    value={pageInput}
-                    onChange={(event) => setPageInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        handlePageJump();
-                      }
-                    }}
-                    className="page-jump-input"
-                    placeholder="页码"
-                  />
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={handlePageJump}
-                    disabled={totalPages === 0}
-                  >
-                    跳转
+                    删除选中
                   </button>
                 </div>
-              </div>
-            </>
-          )}
-          <button
-            type="button"
-            className="secondary"
+              </>
+            )}
+            <button
+              type="button"
+              className="secondary"
             onClick={() => void onRefreshRuns()}
           >
             刷新
@@ -1520,6 +1458,70 @@ const HistoryView = ({
               })}
             </tbody>
           </table>
+        </div>
+      )}
+      {runs.length > 0 && (
+        <div className="table-pagination">
+          <label className="page-size-control">
+            每页
+            <select
+              className="page-size-select"
+              value={pageSize}
+              onChange={(event) =>
+                handlePageSizeChange(Number(event.target.value))
+              }
+            >
+              {RUN_PAGE_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="page-indicator">
+            第 {page} / {totalPages} 页
+          </span>
+          <button
+            type="button"
+            className="pagination-nav"
+            onClick={() => handlePageChange(-1)}
+            disabled={page <= 1}
+          >
+            上一页
+          </button>
+          <button
+            type="button"
+            className="pagination-nav"
+            onClick={() => handlePageChange(1)}
+            disabled={page >= totalPages}
+          >
+            下一页
+          </button>
+          <div className="page-jump">
+            <input
+              type="number"
+              min={1}
+              max={totalPages}
+              value={pageInput}
+              onChange={(event) => setPageInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  handlePageJump();
+                }
+              }}
+              className="page-jump-input"
+              placeholder="页码"
+            />
+            <button
+              type="button"
+              className="secondary"
+              onClick={handlePageJump}
+              disabled={totalPages === 0}
+            >
+              跳转
+            </button>
+          </div>
         </div>
       )}
     </section>
@@ -2011,68 +2013,6 @@ const ClusterDetailView = ({
                   删除选中
                 </button>
               </div>
-              <div className="card-actions-group table-pagination">
-                <label className="page-size-control">
-                  每页
-                  <select
-                    className="page-size-select"
-                    value={runPageSize}
-                    onChange={(event) =>
-                      handleRunPageSizeChange(Number(event.target.value))
-                    }
-                  >
-                    {RUN_PAGE_SIZE_OPTIONS.map((size) => (
-                      <option key={size} value={size}>
-                        {size}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <span className="page-indicator">
-                  第 {runPage} / {totalRunPages} 页
-                </span>
-                <button
-                  type="button"
-                  className="pagination-nav"
-                  onClick={() => handleRunPageChange(-1)}
-                  disabled={runPage <= 1}
-                >
-                  上一页
-                </button>
-                <button
-                  type="button"
-                  className="pagination-nav"
-                  onClick={() => handleRunPageChange(1)}
-                  disabled={runPage >= totalRunPages}
-                >
-                  下一页
-                </button>
-                <div className="page-jump">
-                  <input
-                    type="number"
-                    min={1}
-                    max={totalRunPages}
-                    value={runPageInput}
-                    onChange={(event) => setRunPageInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        handleRunPageJump();
-                      }
-                    }}
-                    className="page-jump-input"
-                    placeholder="页码"
-                  />
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={handleRunPageJump}
-                    disabled={totalRunPages === 0}
-                  >
-                    跳转
-                  </button>
-                </div>
-              </div>
             </div>
           )}
         </div>
@@ -2152,6 +2092,70 @@ const ClusterDetailView = ({
             </tbody>
           </table>
         </div>
+        {clusterRuns.length > 0 && (
+          <div className="table-pagination">
+            <label className="page-size-control">
+              每页
+              <select
+                className="page-size-select"
+                value={runPageSize}
+                onChange={(event) =>
+                  handleRunPageSizeChange(Number(event.target.value))
+                }
+              >
+                {RUN_PAGE_SIZE_OPTIONS.map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span className="page-indicator">
+              第 {runPage} / {totalRunPages} 页
+            </span>
+            <button
+              type="button"
+              className="pagination-nav"
+              onClick={() => handleRunPageChange(-1)}
+              disabled={runPage <= 1}
+            >
+              上一页
+            </button>
+            <button
+              type="button"
+              className="pagination-nav"
+              onClick={() => handleRunPageChange(1)}
+              disabled={runPage >= totalRunPages}
+            >
+              下一页
+            </button>
+            <div className="page-jump">
+              <input
+                type="number"
+                min={1}
+                max={totalRunPages}
+                value={runPageInput}
+                onChange={(event) => setRunPageInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    handleRunPageJump();
+                  }
+                }}
+                className="page-jump-input"
+                placeholder="页码"
+              />
+              <button
+                type="button"
+                className="secondary"
+                onClick={handleRunPageJump}
+                disabled={totalRunPages === 0}
+              >
+                跳转
+              </button>
+            </div>
+          </div>
+        )}
       </section>
     </>
   );
