@@ -2506,6 +2506,13 @@ const RunDetailView = ({
     [run]
   );
 
+  const canCancelRun = useMemo(() => {
+    if (!run) {
+      return false;
+    }
+    return run.status === "running" || run.status === "paused";
+  }, [run]);
+
   useEffect(() => {
     if (!run?.id || run.status !== "running") {
       return;
@@ -2571,7 +2578,7 @@ const RunDetailView = ({
   }, [run?.id, run?.status]);
 
   const handleCancelRunDetail = useCallback(() => {
-    if (!run) {
+    if (!run || !(run.status === "running" || run.status === "paused")) {
       return;
     }
     void onCancelRun(run.id, clusterPath);
@@ -2641,6 +2648,7 @@ const RunDetailView = ({
               type="button"
               className="secondary danger"
               onClick={handleCancelRunDetail}
+              disabled={!canCancelRun}
             >
               取消
             </button>
