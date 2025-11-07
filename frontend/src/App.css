@@ -284,6 +284,39 @@ body {
   align-items: center;
 }
 
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.selection-hint {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.selection-cell {
+  width: 36px;
+  text-align: center;
+}
+
+.selection-cell input {
+  cursor: pointer;
+}
+
+.selected-row {
+  background: #f1f5f9;
+}
+
+.selection-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 12px;
+  flex-wrap: wrap;
+}
+
 .cluster-panel {
   padding: 14px 18px 18px;
   gap: 10px;
@@ -388,6 +421,11 @@ body {
   box-shadow: 0 16px 28px rgba(37, 99, 235, 0.3);
 }
 
+.cluster-card.selected {
+  border-color: #2563eb;
+  box-shadow: 0 16px 28px rgba(37, 99, 235, 0.26);
+}
+
 .cluster-card-top {
   display: flex;
   justify-content: space-between;
@@ -402,6 +440,10 @@ body {
   gap: 8px;
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.cluster-name-row input[type="checkbox"] {
+  margin-right: 6px;
 }
 
 .cluster-id-badge {

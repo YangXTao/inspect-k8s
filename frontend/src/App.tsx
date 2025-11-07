@@ -659,6 +659,7 @@ interface OverviewProps {
   onUpload: () => Promise<void>;
   onEditCluster: (cluster: ClusterConfig) => void;
   onDeleteCluster: (cluster: ClusterConfig) => Promise<void>;
+  onDeleteClustersBulk: (clusterIds: number[]) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
   onTestClusterConnection: (clusterId: number) => Promise<void>;
   testingClusterIds: Record<number, boolean>;
@@ -681,6 +682,7 @@ const OverviewView = ({
   onUpload,
   onEditCluster,
   onDeleteCluster,
+  onDeleteClustersBulk,
   clusterDisplayIds,
   onTestClusterConnection,
   testingClusterIds,
@@ -780,6 +782,44 @@ const OverviewView = ({
     };
   }, [columnsForPage]);
 
+  const [selectedClusterIds, setSelectedClusterIds] = useState<number[]>([]);
+
+  useEffect(() => {
+    setSelectedClusterIds((prev) =>
+      prev.filter((id) => clusters.some((cluster) => cluster.id === id))
+    );
+  }, [clusters]);
+
+  const allSelected =
+    clusters.length > 0 && selectedClusterIds.length === clusters.length;
+
+  const handleToggleCluster = useCallback((clusterId: number) => {
+    setSelectedClusterIds((prev) =>
+      prev.includes(clusterId)
+        ? prev.filter((id) => id !== clusterId)
+        : [...prev, clusterId]
+    );
+  }, []);
+
+  const handleToggleAllClusters = useCallback(() => {
+    setSelectedClusterIds((prev) => {
+      if (clusters.length === 0) {
+        return [];
+      }
+      if (prev.length === clusters.length) {
+        return [];
+      }
+      return clusters.map((cluster) => cluster.id);
+    });
+  }, [clusters]);
+
+  const handleDeleteSelectedClusters = useCallback(() => {
+    if (selectedClusterIds.length === 0) {
+      return;
+    }
+    void onDeleteClustersBulk(selectedClusterIds);
+  }, [onDeleteClustersBulk, selectedClusterIds]);
+
   return (
     <>
       <header className="app-header">
@@ -841,13 +881,37 @@ const OverviewView = ({
       <section className="card cluster-panel">
         <div className="card-header">
           <h2>集群列表</h2>
-      </div>
-      {clusterError && <div className="feedback error">{clusterError}</div>}
-      {clusterNotice &&
-        clusterNoticeType &&
-        clusterNoticeScope === "overview" && (
-          <div className={`feedback ${clusterNoticeType}`}>{clusterNotice}</div>
-        )}
+          {clusters.length > 0 && (
+            <div className="card-actions">
+              <span className="selection-hint">
+                已选 {selectedClusterIds.length} / {clusters.length}
+              </span>
+              <button
+                type="button"
+                className="secondary"
+                onClick={handleToggleAllClusters}
+              >
+                {allSelected ? "取消全选" : "全选"}
+              </button>
+              <button
+                type="button"
+                className="secondary danger"
+                onClick={handleDeleteSelectedClusters}
+                disabled={selectedClusterIds.length === 0}
+              >
+                删除选中
+              </button>
+            </div>
+          )}
+        </div>
+        {clusterError && <div className="feedback error">{clusterError}</div>}
+        {clusterNotice &&
+          clusterNoticeType &&
+          clusterNoticeScope === "overview" && (
+            <div className={`feedback ${clusterNoticeType}`}>
+              {clusterNotice}
+            </div>
+          )}
         {clusters.length === 0 ? (
           <p className="placeholder">
             还没有集群,请上传 kubeconfig 完成注册。
@@ -865,14 +929,33 @@ const OverviewView = ({
                   cluster
                 );
                 const isTesting = Boolean(testingClusterIds[cluster.id]);
+                const isSelected = selectedClusterIds.includes(cluster.id);
+                const handleNavigate = () => navigate(`/clusters/${displayId}`);
                 return (
-                  <button
+                  <div
                     key={cluster.id}
-                    className="cluster-card"
-                    onClick={() => navigate(`/clusters/${displayId}`)}
+                    className={`cluster-card${isSelected ? " selected" : ""}`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={handleNavigate}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        handleNavigate();
+                      }
+                    }}
                   >
                     <div className="cluster-card-top">
                       <div className="cluster-name-row">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(event) => {
+                            event.stopPropagation();
+                            handleToggleCluster(cluster.id);
+                          }}
+                          onClick={(event) => event.stopPropagation()}
+                        />
                         <span className="cluster-id-badge">{displayId}</span>
                         <div className="cluster-name">{cluster.name}</div>
                       </div>
@@ -932,7 +1015,7 @@ const OverviewView = ({
                       <span>创建时间: {formatDate(cluster.created_at)}</span>
                       <span>更新时间: {formatDate(cluster.updated_at)}</span>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -1119,6 +1202,7 @@ interface HistoryViewProps {
   runs: InspectionRunListItem[];
   onRefreshRuns: () => Promise<void>;
   onDeleteRun: (run: InspectionRunListItem) => Promise<void>;
+  onDeleteRunsBulk: (runIds: number[]) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
   notice?: string | null;
@@ -1130,6 +1214,7 @@ const HistoryView = ({
   runs,
   onRefreshRuns,
   onDeleteRun,
+  onDeleteRunsBulk,
   clusterDisplayIds,
   runDisplayIds,
   notice,
@@ -1140,13 +1225,79 @@ const HistoryView = ({
   const shouldShowNotice =
     notice && noticeType && noticeScope === "history";
 
+  const [selectedRunIds, setSelectedRunIds] = useState<number[]>([]);
+
+  useEffect(() => {
+    setSelectedRunIds((prev) =>
+      prev.filter((id) => runs.some((run) => run.id === id))
+    );
+  }, [runs]);
+
+  const allSelected =
+    runs.length > 0 && selectedRunIds.length === runs.length;
+
+  const handleToggleRun = useCallback((runId: number) => {
+    setSelectedRunIds((prev) =>
+      prev.includes(runId)
+        ? prev.filter((id) => id !== runId)
+        : [...prev, runId]
+    );
+  }, []);
+
+  const handleToggleAllRuns = useCallback(() => {
+    setSelectedRunIds((prev) => {
+      if (runs.length === 0) {
+        return [];
+      }
+      if (prev.length === runs.length) {
+        return [];
+      }
+      return runs.map((run) => run.id);
+    });
+  }, [runs]);
+
+  const handleDeleteSelectedRuns = useCallback(() => {
+    if (selectedRunIds.length === 0) {
+      return;
+    }
+    void onDeleteRunsBulk(selectedRunIds);
+  }, [onDeleteRunsBulk, selectedRunIds]);
+
   return (
     <section className="card history history-page">
       <div className="card-header">
         <h2>历史巡检</h2>
-        <button className="secondary" onClick={() => void onRefreshRuns()}>
-          刷新
-        </button>
+        <div className="card-actions">
+          {runs.length > 0 && (
+            <>
+              <span className="selection-hint">
+                已选 {selectedRunIds.length} / {runs.length}
+              </span>
+              <button
+                type="button"
+                className="secondary"
+                onClick={handleToggleAllRuns}
+              >
+                {allSelected ? "取消全选" : "全选"}
+              </button>
+              <button
+                type="button"
+                className="secondary danger"
+                onClick={handleDeleteSelectedRuns}
+                disabled={selectedRunIds.length === 0}
+              >
+                删除选中
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => void onRefreshRuns()}
+          >
+            刷新
+          </button>
+        </div>
       </div>
       {shouldShowNotice && (
         <div className={`feedback ${noticeType}`}>{notice}</div>
@@ -1158,6 +1309,13 @@ const HistoryView = ({
           <table>
             <thead>
               <tr>
+                <th className="selection-cell">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={handleToggleAllRuns}
+                  />
+                </th>
                 <th>巡检编号</th>
                 <th>集群</th>
                 <th>巡检人</th>
@@ -1174,8 +1332,19 @@ const HistoryView = ({
                   run.cluster_id
                 );
                 const runSlug = runDisplayIds[run.id] ?? String(run.id);
+                const isSelected = selectedRunIds.includes(run.id);
                 return (
-                  <tr key={run.id}>
+                  <tr
+                    key={run.id}
+                    className={isSelected ? "selected-row" : undefined}
+                  >
+                    <td className="selection-cell">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => handleToggleRun(run.id)}
+                      />
+                    </td>
                     <td>{runSlug}</td>
                     <td>
                       {run.cluster_name}({clusterSlug})
@@ -1240,6 +1409,7 @@ interface ClusterDetailProps {
   clusterError: string | null;
   onStartInspection: (clusterId: number) => Promise<void>;
   onDeleteRun: (run: InspectionRunListItem) => Promise<void>;
+  onDeleteRunsBulk: (runIds: number[]) => Promise<void>;
   onEditCluster: (cluster: ClusterConfig) => void;
   onDeleteCluster: (cluster: ClusterConfig) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
@@ -1265,6 +1435,7 @@ const ClusterDetailView = ({
   clusterError,
   onStartInspection,
   onDeleteRun,
+  onDeleteRunsBulk,
   onEditCluster,
   onDeleteCluster,
   clusterDisplayIds,
@@ -1317,6 +1488,48 @@ const ClusterDetailView = ({
     }
     return runs.filter((run) => run.cluster_id === cluster.id);
   }, [runs, cluster]);
+
+  const [selectedRunIds, setSelectedRunIds] = useState<number[]>([]);
+
+  useEffect(() => {
+    setSelectedRunIds((prev) =>
+      prev.filter((id) => clusterRuns.some((run) => run.id === id))
+    );
+  }, [clusterRuns]);
+
+  useEffect(() => {
+    setSelectedRunIds([]);
+  }, [numericId]);
+
+  const allRunsSelected =
+    clusterRuns.length > 0 && selectedRunIds.length === clusterRuns.length;
+
+  const handleToggleClusterRun = useCallback((runId: number) => {
+    setSelectedRunIds((prev) =>
+      prev.includes(runId)
+        ? prev.filter((id) => id !== runId)
+        : [...prev, runId]
+    );
+  }, []);
+
+  const handleToggleAllClusterRuns = useCallback(() => {
+    setSelectedRunIds((prev) => {
+      if (clusterRuns.length === 0) {
+        return [];
+      }
+      if (prev.length === clusterRuns.length) {
+        return [];
+      }
+      return clusterRuns.map((run) => run.id);
+    });
+  }, [clusterRuns]);
+
+  const handleDeleteSelectedClusterRuns = useCallback(() => {
+    if (selectedRunIds.length === 0) {
+      return;
+    }
+    void onDeleteRunsBulk(selectedRunIds);
+  }, [onDeleteRunsBulk, selectedRunIds]);
 
   const PAGE_SIZE = 10;
   const [itemPage, setItemPage] = useState(0);
@@ -1562,11 +1775,40 @@ const ClusterDetailView = ({
       <section className="card history">
         <div className="card-header">
           <h2>{cluster.name} · 巡检记录</h2>
+          {clusterRuns.length > 0 && (
+            <div className="card-actions">
+              <span className="selection-hint">
+                已选 {selectedRunIds.length} / {clusterRuns.length}
+              </span>
+              <button
+                type="button"
+                className="secondary"
+                onClick={handleToggleAllClusterRuns}
+              >
+                {allRunsSelected ? "取消全选" : "全选"}
+              </button>
+              <button
+                type="button"
+                className="secondary danger"
+                onClick={handleDeleteSelectedClusterRuns}
+                disabled={selectedRunIds.length === 0}
+              >
+                删除选中
+              </button>
+            </div>
+          )}
         </div>
         <div className="table-wrapper">
           <table>
             <thead>
               <tr>
+                <th className="selection-cell">
+                  <input
+                    type="checkbox"
+                    checked={allRunsSelected}
+                    onChange={handleToggleAllClusterRuns}
+                  />
+                </th>
                 <th>巡检编号</th>
                 <th>巡检人</th>
                 <th>状态</th>
@@ -1578,13 +1820,24 @@ const ClusterDetailView = ({
             <tbody>
               {clusterRuns.map((run) => {
                 const runSlug = runDisplayIds[run.id] ?? String(run.id);
+                const isSelected = selectedRunIds.includes(run.id);
                 return (
-                  <tr key={run.id}>
-                <td>{runSlug}</td>
-                <td>{run.operator || "-"}</td>
-                <td>
-                  {renderRunStatusBadge(run.status, run.progress)}
-                </td>
+                  <tr
+                    key={run.id}
+                    className={isSelected ? "selected-row" : undefined}
+                  >
+                    <td className="selection-cell">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => handleToggleClusterRun(run.id)}
+                      />
+                    </td>
+                    <td>{runSlug}</td>
+                    <td>{run.operator || "-"}</td>
+                    <td>
+                      {renderRunStatusBadge(run.status, run.progress)}
+                    </td>
                     <td>{formatDate(run.created_at)}</td>
                     <td>{formatDate(run.completed_at)}</td>
                     <td className="actions">
@@ -2213,6 +2466,7 @@ interface InspectionSettingsPanelProps {
     config: Record<string, unknown>;
   }) => Promise<void>;
   onDelete: (item: InspectionItem) => void;
+  onDeleteMany: (itemIds: number[]) => void;
   onExport: () => Promise<void>;
   onImport: (file: File) => Promise<void>;
 }
@@ -2291,12 +2545,50 @@ const InspectionSettingsPanel = ({
   onClose,
   onSave,
   onDelete,
+  onDeleteMany,
   onExport,
   onImport,
 }: InspectionSettingsPanelProps) => {
   const [formState, setFormState] = useState(defaultInspectionForm);
   const [formError, setFormError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [selectedItemIds, setSelectedItemIds] = useState<number[]>([]);
+
+  useEffect(() => {
+    setSelectedItemIds((prev) =>
+      prev.filter((id) => items.some((item) => item.id === id))
+    );
+  }, [items]);
+
+  const allItemsSelected =
+    items.length > 0 && selectedItemIds.length === items.length;
+
+  const handleToggleItemSelection = (itemId: number) => {
+    setSelectedItemIds((prev) =>
+      prev.includes(itemId)
+        ? prev.filter((id) => id !== itemId)
+        : [...prev, itemId]
+    );
+  };
+
+  const handleToggleAllItems = () => {
+    setSelectedItemIds((prev) => {
+      if (items.length === 0) {
+        return [];
+      }
+      if (prev.length === items.length) {
+        return [];
+      }
+      return items.map((item) => item.id);
+    });
+  };
+
+  const handleDeleteSelectedItems = () => {
+    if (selectedItemIds.length === 0) {
+      return;
+    }
+    onDeleteMany(selectedItemIds);
+  };
 
   const handleResetForm = () => {
     setFormState(defaultInspectionForm);
@@ -2429,6 +2721,29 @@ const InspectionSettingsPanel = ({
       <div className="settings-header">
         <h3>巡检项设置</h3>
         <div className="settings-actions">
+          {items.length > 0 && (
+            <div className="selection-actions">
+              <span className="selection-hint">
+                已选 {selectedItemIds.length} / {items.length}
+              </span>
+              <button
+                type="button"
+                className="link-button"
+                onClick={handleToggleAllItems}
+                disabled={submitting}
+              >
+                {allItemsSelected ? "取消全选" : "全选"}
+              </button>
+              <button
+                type="button"
+                className="link-button danger"
+                onClick={handleDeleteSelectedItems}
+                disabled={selectedItemIds.length === 0 || submitting}
+              >
+                删除选中
+              </button>
+            </div>
+          )}
           <button
             type="button"
             className="link-button"
@@ -2471,6 +2786,14 @@ const InspectionSettingsPanel = ({
             <table>
               <thead>
                 <tr>
+                  <th className="selection-cell">
+                    <input
+                      type="checkbox"
+                      checked={allItemsSelected}
+                      onChange={handleToggleAllItems}
+                      disabled={submitting}
+                    />
+                  </th>
                   <th>序号</th>
                   <th>名称</th>
                   <th>类型</th>
@@ -2481,11 +2804,26 @@ const InspectionSettingsPanel = ({
               <tbody>
                 {activeItems.length === 0 ? (
                   <tr>
-                    <td colSpan={5}>暂无巡检项</td>
+                    <td colSpan={6}>暂无巡检项</td>
                   </tr>
                 ) : (
                   activeItems.map((item, index) => (
-                    <tr key={item.id}>
+                    <tr
+                      key={item.id}
+                      className={
+                        selectedItemIds.includes(item.id)
+                          ? "selected-row"
+                          : undefined
+                      }
+                    >
+                      <td className="selection-cell">
+                        <input
+                          type="checkbox"
+                          checked={selectedItemIds.includes(item.id)}
+                          onChange={() => handleToggleItemSelection(item.id)}
+                          disabled={submitting}
+                        />
+                      </td>
                       <td>{index + 1}</td>
                       <td>{item.name}</td>
                       <td>{item.check_type}</td>
@@ -3474,10 +3812,53 @@ const backgroundLocation =
         logWithTimestamp("error", "创建巡检失败: %s", message);
         setInspectionError(message);
       } finally {
-        setInspectionLoading(false);
+      setInspectionLoading(false);
+    }
+  },
+  [selectedItemIds, operator, refreshRuns, refreshClusters]
+);
+
+  const handleDeleteClustersBulk = useCallback(
+    (clusterIds: number[]): Promise<void> => {
+      const targets = clusters.filter((cluster) =>
+        clusterIds.includes(cluster.id)
+      );
+      if (targets.length === 0) {
+        return Promise.resolve();
       }
+      setConfirmState({
+        title: "批量删除集群",
+        message: `确认删除选中的 ${targets.length} 个集群？该操作不可恢复。`,
+        confirmLabel: "删除",
+        variant: "danger",
+        options: [
+          {
+            id: "deleteLocalFiles",
+            label: "同时删除本地 kubeconfig 及关联巡检报告文件",
+          },
+        ],
+        onConfirm: async (optionsMap) => {
+          try {
+            const deleteFiles = Boolean(optionsMap?.deleteLocalFiles);
+            for (const cluster of targets) {
+              logWithTimestamp("info", "删除集群: %s", cluster.id);
+              await apiDeleteCluster(cluster.id, { deleteFiles });
+            }
+            await refreshClusters();
+            await refreshRuns();
+            showClusterNotice("overview", `已删除 ${targets.length} 个集群`, "success");
+          } catch (err) {
+            const message =
+              err instanceof Error ? err.message : "删除集群失败";
+            logWithTimestamp("error", "批量删除集群失败: %s", message);
+            showClusterNotice("overview", message, "error");
+            throw err instanceof Error ? err : new Error(message);
+          }
+        },
+      });
+      return Promise.resolve();
     },
-    [selectedItemIds, operator, refreshRuns, refreshClusters]
+    [clusters, refreshClusters, refreshRuns, showClusterNotice]
   );
 
   const handleDeleteCluster = useCallback(
@@ -3517,9 +3898,50 @@ const backgroundLocation =
           },
         });
         return Promise.resolve();
-      },
-      [refreshClusters, refreshRuns, location.pathname, navigate, currentNoticeScope, showClusterNotice]
-    );
+    },
+    [refreshClusters, refreshRuns, location.pathname, navigate, currentNoticeScope, showClusterNotice]
+  );
+
+  const handleDeleteRunsBulk = useCallback(
+    (runIds: number[], scope: NoticeScope): Promise<void> => {
+      const targets = runs.filter((run) => runIds.includes(run.id));
+      if (targets.length === 0) {
+        return Promise.resolve();
+      }
+      setConfirmState({
+        title: "批量删除巡检记录",
+        message: `确认删除选中的 ${targets.length} 条巡检记录？该操作不可恢复。`,
+        confirmLabel: "删除",
+        variant: "danger",
+        options: [
+          {
+            id: "deleteReportFile",
+            label: "同时删除本地巡检报告文件",
+          },
+        ],
+        onConfirm: async (optionsMap) => {
+          try {
+            const deleteFiles = Boolean(optionsMap?.deleteReportFile);
+            for (const run of targets) {
+              logWithTimestamp("info", "删除巡检记录: %s", run.id);
+              await apiDeleteInspectionRun(run.id, { deleteFiles });
+            }
+            await refreshRuns();
+            await refreshClusters();
+            showClusterNotice(scope, `已删除 ${targets.length} 条巡检记录`, "success");
+          } catch (err) {
+            const message =
+              err instanceof Error ? err.message : "删除巡检记录失败";
+            logWithTimestamp("error", "批量删除巡检记录失败: %s", message);
+            showClusterNotice(scope, message, "error");
+            throw err instanceof Error ? err : new Error(message);
+          }
+        },
+      });
+      return Promise.resolve();
+    },
+    [runs, refreshRuns, refreshClusters, showClusterNotice]
+  );
 
   const handleDeleteRun = useCallback(
     (run: InspectionRunListItem): Promise<void> => {
@@ -3662,14 +4084,16 @@ const backgroundLocation =
     [refreshItems]
   );
 
-  const performDeleteInspectionItem = useCallback(
-    async (item: InspectionItem) => {
+  const deleteInspectionItemsBatch = useCallback(
+    async (ids: number[], successMessage: string) => {
       setSettingsSubmitting(true);
       try {
-        logWithTimestamp("info", "删除巡检项: %s", item.id);
-        await apiDeleteInspectionItem(item.id);
+        for (const itemId of ids) {
+          logWithTimestamp("info", "删除巡检项: %s", itemId);
+          await apiDeleteInspectionItem(itemId);
+        }
         await refreshItems();
-        setSettingsNotice("巡检项已删除");
+        setSettingsNotice(successMessage);
         setSettingsError(null);
       } catch (err) {
         const message =
@@ -3684,6 +4108,12 @@ const backgroundLocation =
     [refreshItems]
   );
 
+  const performDeleteInspectionItem = useCallback(
+    (item: InspectionItem) =>
+      deleteInspectionItemsBatch([item.id], "巡检项已删除"),
+    [deleteInspectionItemsBatch]
+  );
+
   const handleDeleteInspectionItem = useCallback(
     (item: InspectionItem) => {
       setConfirmState({
@@ -3696,6 +4126,30 @@ const backgroundLocation =
       });
     },
     [performDeleteInspectionItem]
+  );
+
+  const handleDeleteInspectionItemsBulk = useCallback(
+    (itemIds: number[]) => {
+      const targetIds = items
+        .filter((item) => itemIds.includes(item.id))
+        .map((item) => item.id);
+      if (targetIds.length === 0) {
+        return;
+      }
+      setConfirmState({
+        title: "批量删除巡检项",
+        message: `确认删除选中的 ${targetIds.length} 条巡检项？该操作不可恢复。`,
+        confirmLabel: "删除",
+        variant: "danger",
+        scope: "settings",
+        onConfirm: () =>
+          deleteInspectionItemsBatch(
+            targetIds,
+            `已删除 ${targetIds.length} 个巡检项`
+          ),
+      });
+    },
+    [items, deleteInspectionItemsBatch]
   );
 
   const handleExportInspectionItems = useCallback(async () => {
@@ -3809,6 +4263,7 @@ const backgroundLocation =
             onClose={close}
             onSave={handleSaveInspectionItem}
             onDelete={handleDeleteInspectionItem}
+            onDeleteMany={handleDeleteInspectionItemsBulk}
             onExport={handleExportInspectionItems}
             onImport={handleImportInspectionItems}
           />
@@ -3822,6 +4277,7 @@ const backgroundLocation =
       settingsError,
       handleSaveInspectionItem,
       handleDeleteInspectionItem,
+      handleDeleteInspectionItemsBulk,
       handleExportInspectionItems,
       handleImportInspectionItems,
     ]
@@ -3975,6 +4431,7 @@ const backgroundLocation =
       onUpload={handleUploadCluster}
       onEditCluster={handleEditCluster}
       onDeleteCluster={handleDeleteCluster}
+      onDeleteClustersBulk={handleDeleteClustersBulk}
       clusterDisplayIds={clusterDisplayIds}
       onTestClusterConnection={handleTestClusterConnection}
       testingClusterIds={testingClusterIds}
@@ -3995,6 +4452,9 @@ const backgroundLocation =
                 runs={runs}
                 onRefreshRuns={refreshRuns}
                 onDeleteRun={handleDeleteRun}
+                onDeleteRunsBulk={(ids) =>
+                  handleDeleteRunsBulk(ids, "history")
+                }
                 clusterDisplayIds={clusterDisplayIds}
                 runDisplayIds={runDisplayIds}
                 notice={clusterNotice}
@@ -4023,6 +4483,9 @@ const backgroundLocation =
                 clusterError={clusterError}
                 onStartInspection={handleStartInspection}
                 onDeleteRun={handleDeleteRun}
+                onDeleteRunsBulk={(ids) =>
+                  handleDeleteRunsBulk(ids, "clusterDetail")
+                }
                 onEditCluster={handleEditCluster}
                 onDeleteCluster={handleDeleteCluster}
                 clusterDisplayIds={clusterDisplayIds}
