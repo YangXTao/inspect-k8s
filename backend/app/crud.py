@@ -226,11 +226,16 @@ def delete_inspection_item(db: Session, item: models.InspectionItem) -> None:
 def get_items_by_ids(
     db: Session, item_ids: Iterable[int]
 ) -> List[models.InspectionItem]:
-    return (
+    ids = list(dict.fromkeys(item_ids))
+    if not ids:
+        return []
+    items = (
         db.query(models.InspectionItem)
-        .filter(models.InspectionItem.id.in_(list(item_ids)))
+        .filter(models.InspectionItem.id.in_(ids))
         .all()
     )
+    item_map = {item.id: item for item in items}
+    return [item_map[item_id] for item_id in ids if item_id in item_map]
 
 
 def create_inspection_run(

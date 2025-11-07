@@ -3,12 +3,13 @@
 import json
 import logging
 import re
-import time
+import threading
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 from uuid import uuid4
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 import os
 import shutil
@@ -39,6 +40,103 @@ from .prometheus import PrometheusClient
 logger = logging.getLogger(__name__)
 
 _INSPECTION_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+
+
+@dataclass
+class RunExecutionControl:
+    pause_event: threading.Event = field(default_factory=threading.Event)
+    cancel_event: threading.Event = field(default_factory=threading.Event)
+
+    def __post_init__(self) -> None:
+        self.pause_event.set()
+
+
+_RUN_EXECUTION_LOCK = threading.Lock()
+_ACTIVE_RUN_CONTROLS: Dict[int, RunExecutionControl] = {}
+_ACTIVE_RUN_FUTURES: Dict[int, Future] = {}
+_RUN_ITEM_CACHE: Dict[int, List[int]] = {}
+
+
+def _register_run_execution(
+    run_id: int,
+    item_ids: List[int],
+    control: RunExecutionControl,
+    future: Future,
+) -> None:
+    snapshot = list(item_ids)
+    with _RUN_EXECUTION_LOCK:
+        _RUN_ITEM_CACHE[run_id] = snapshot
+        _ACTIVE_RUN_CONTROLS[run_id] = control
+        _ACTIVE_RUN_FUTURES[run_id] = future
+
+    def _cleanup(fut: Future) -> None:
+        with _RUN_EXECUTION_LOCK:
+            stored = _ACTIVE_RUN_FUTURES.get(run_id)
+            if stored is not fut:
+                return
+            _ACTIVE_RUN_FUTURES.pop(run_id, None)
+            _ACTIVE_RUN_CONTROLS.pop(run_id, None)
+        db = SessionLocal()
+        try:
+            run = crud.get_inspection_run(db, run_id)
+            if run and run.status not in {"running", "paused"}:
+                with _RUN_EXECUTION_LOCK:
+                    _RUN_ITEM_CACHE.pop(run_id, None)
+        finally:
+            db.close()
+
+    future.add_done_callback(_cleanup)
+
+
+def _get_run_control(run_id: int) -> Optional[RunExecutionControl]:
+    with _RUN_EXECUTION_LOCK:
+        return _ACTIVE_RUN_CONTROLS.get(run_id)
+
+
+def _get_run_future(run_id: int) -> Optional[Future]:
+    with _RUN_EXECUTION_LOCK:
+        return _ACTIVE_RUN_FUTURES.get(run_id)
+
+
+def _get_run_item_ids(run_id: int) -> Optional[List[int]]:
+    with _RUN_EXECUTION_LOCK:
+        snapshot = _RUN_ITEM_CACHE.get(run_id)
+        return list(snapshot) if snapshot is not None else None
+
+
+def _submit_run_execution(run_id: int, item_ids: List[int]) -> None:
+    control = RunExecutionControl()
+    future = _INSPECTION_EXECUTOR.submit(
+        _execute_inspection_run_async,
+        run_id,
+        list(item_ids),
+        control,
+    )
+    _register_run_execution(run_id, list(item_ids), control, future)
+
+
+def _pause_run_execution(run_id: int) -> None:
+    control = _get_run_control(run_id)
+    if control:
+        control.pause_event.clear()
+
+
+def _resume_run_execution(run_id: int) -> bool:
+    control = _get_run_control(run_id)
+    future = _get_run_future(run_id)
+    if not control or not future:
+        return False
+    if future.done():
+        return False
+    control.pause_event.set()
+    return True
+
+
+def _cancel_run_execution(run_id: int) -> None:
+    control = _get_run_control(run_id)
+    if control:
+        control.cancel_event.set()
+        control.pause_event.set()
 
 
 def _normalise_cluster_name(name: str | None) -> str:
@@ -101,7 +199,11 @@ def get_db() -> Session:
         db.close()
 
 
-def _execute_inspection_run_async(run_id: int, item_ids: List[int]) -> None:
+def _execute_inspection_run_async(
+    run_id: int,
+    item_ids: List[int],
+    control: RunExecutionControl,
+) -> None:
     db = SessionLocal()
     try:
         run = crud.get_inspection_run(db, run_id)
@@ -128,6 +230,13 @@ def _execute_inspection_run_async(run_id: int, item_ids: List[int]) -> None:
             db.commit()
             db.refresh(run)
 
+        processed_count = int(run.processed_items or 0)
+        if processed_count < 0:
+            processed_count = 0
+        if processed_count > total_items:
+            processed_count = total_items
+        remaining_items = items[processed_count:]
+
         prom_client: Optional[PrometheusClient] = None
         if cluster.prometheus_url:
             prom_client = PrometheusClient(cluster.prometheus_url)
@@ -138,9 +247,22 @@ def _execute_inspection_run_async(run_id: int, item_ids: List[int]) -> None:
         )
 
         status_counter = {"passed": 0, "warning": 0, "failed": 0}
+        for existing in run.results or []:
+            key = (existing.status or "passed").lower()
+            if key not in {"passed", "warning", "failed"}:
+                key = "warning"
+            status_counter[key] = status_counter.get(key, 0) + 1
 
-        for index, item in enumerate(items, start=1):
+        for offset, item in enumerate(remaining_items, start=1):
+            target_index = processed_count + offset
             while True:
+                if control.cancel_event.is_set():
+                    logger.info("Inspection run %s interrupted via cancel event.", run_id)
+                    return
+                control.pause_event.wait()
+                if control.cancel_event.is_set():
+                    logger.info("Inspection run %s interrupted via cancel event.", run_id)
+                    return
                 try:
                     db.refresh(run)
                 except Exception:
@@ -150,7 +272,7 @@ def _execute_inspection_run_async(run_id: int, item_ids: List[int]) -> None:
                         return
                     run = refreshed
                 if run.status == "paused":
-                    time.sleep(1.0)
+                    control.pause_event.clear()
                     continue
                 if run.status != "running":
                     logger.info(
@@ -174,9 +296,33 @@ def _execute_inspection_run_async(run_id: int, item_ids: List[int]) -> None:
                 suggestion=sanitized_suggestion,
             )
             run = crud.update_inspection_run_progress(
-                db, run=run, processed_items=index
+                db, run=run, processed_items=target_index
             )
-            status_counter[status] = status_counter.get(status, 0) + 1
+            normalized_status = (status or "warning").lower()
+            if normalized_status not in {"passed", "warning", "failed"}:
+                normalized_status = "warning"
+            status_counter[normalized_status] = status_counter.get(normalized_status, 0) + 1
+
+        if control.cancel_event.is_set():
+            logger.info(
+                "Inspection run %s cancellation detected before finalization.",
+                run_id,
+            )
+            return
+        try:
+            db.refresh(run)
+        except Exception:
+            refreshed = crud.get_inspection_run(db, run_id)
+            if not refreshed:
+                logger.info(
+                    "Inspection run %s missing during finalization, aborting.",
+                    run_id,
+                )
+                return
+            run = refreshed
+        if run.status == "cancelled":
+            logger.info("Inspection run %s has been cancelled before finalization.", run_id)
+            return
 
         overall_status = "passed"
         if status_counter.get("failed", 0) > 0:
@@ -972,11 +1118,7 @@ def trigger_inspection(
         processed_items=0,
     )
 
-    _INSPECTION_EXECUTOR.submit(
-        _execute_inspection_run_async,
-        run.id,
-        list(run_in.item_ids),
-    )
+    _submit_run_execution(run.id, list(run_in.item_ids))
 
     run = crud.get_inspection_run(db, run.id)
     if not run:
@@ -1009,6 +1151,7 @@ def pause_inspection_run(run_id: int, db: Session = Depends(get_db)):
     if run.status != "running":
         raise HTTPException(status_code=400, detail="仅可暂停进行中的巡检。")
     crud.pause_inspection_run(db, run)
+    _pause_run_execution(run.id)
     refreshed = crud.get_inspection_run(db, run_id)
     if not refreshed:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
@@ -1025,7 +1168,28 @@ def resume_inspection_run(run_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Inspection run not found.")
     if run.status != "paused":
         raise HTTPException(status_code=400, detail="仅可恢复已暂停的巡检。")
+    cached_item_ids = _get_run_item_ids(run.id)
+    future = _get_run_future(run.id)
+    if (not future or future.done()) and not cached_item_ids:
+        raise HTTPException(
+            status_code=409,
+            detail="无法恢复巡检任务，缺少执行上下文，请重新发起新的巡检。",
+        )
     crud.resume_inspection_run(db, run)
+    resumed = _resume_run_execution(run.id)
+    if not resumed:
+        if not cached_item_ids:
+            crud.pause_inspection_run(db, run)
+            _pause_run_execution(run.id)
+            raise HTTPException(
+                status_code=409,
+                detail="无法恢复巡检任务，缺少执行上下文，请重新发起新的巡检。",
+            )
+        logger.info(
+            "Spawning new worker to resume inspection run %s (thread was inactive).",
+            run.id,
+        )
+        _submit_run_execution(run.id, cached_item_ids)
     refreshed = crud.get_inspection_run(db, run_id)
     if not refreshed:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
@@ -1043,6 +1207,7 @@ def cancel_inspection_run(run_id: int, db: Session = Depends(get_db)):
     if run.status not in {"running", "paused"}:
         raise HTTPException(status_code=400, detail="仅可取消进行中或已暂停的巡检。")
     crud.cancel_inspection_run(db, run)
+    _cancel_run_execution(run.id)
     refreshed = crud.get_inspection_run(db, run_id)
     if not refreshed:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
