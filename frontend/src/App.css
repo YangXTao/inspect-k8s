@@ -317,6 +317,52 @@ body {
   flex-wrap: wrap;
 }
 
+.card-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.table-pagination {
+  gap: 8px;
+}
+
+.page-size-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.page-size-select {
+  padding: 4px 8px;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  background: #fff;
+  font-family: inherit;
+}
+
+.page-indicator {
+  font-size: 13px;
+  color: #475569;
+}
+
+.page-jump {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.page-jump-input {
+  width: 72px;
+  padding: 4px 8px;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  font-family: inherit;
+}
+
 .cluster-panel {
   padding: 14px 18px 18px;
   gap: 10px;

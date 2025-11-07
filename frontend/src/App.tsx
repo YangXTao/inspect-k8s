@@ -74,6 +74,7 @@ interface ConfirmDialogState {
 
 const CLUSTER_ID_STORAGE_KEY = "clusterDisplayIdMap.v1";
 const CLUSTER_PAGE_SIZE = 10;
+const RUN_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const SETTINGS_BASE_PATH = "/setting";
 
 const BEIJING_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
@@ -1238,6 +1239,24 @@ const HistoryView = ({
   const shouldShowNotice =
     notice && noticeType && noticeScope === "history";
 
+  const [pageSize, setPageSize] = useState<number>(RUN_PAGE_SIZE_OPTIONS[0]);
+  const [page, setPage] = useState(1);
+  const [pageInput, setPageInput] = useState("");
+
+  useEffect(() => {
+    setPage(1);
+    setPageInput("");
+  }, [pageSize]);
+
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(runs.length / Math.max(pageSize, 1))),
+    [runs.length, pageSize]
+  );
+
+  useEffect(() => {
+    setPage((prev) => Math.min(Math.max(prev, 1), totalPages));
+  }, [totalPages]);
+
   const [selectedRunIds, setSelectedRunIds] = useState<number[]>([]);
 
   useEffect(() => {
@@ -1245,6 +1264,11 @@ const HistoryView = ({
       prev.filter((id) => runs.some((run) => run.id === id))
     );
   }, [runs]);
+
+  const pagedRuns = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return runs.slice(start, start + pageSize);
+  }, [runs, page, pageSize]);
 
   const allSelected =
     runs.length > 0 && selectedRunIds.length === runs.length;
@@ -1269,6 +1293,39 @@ const HistoryView = ({
     });
   }, [runs]);
 
+  const handlePageChange = useCallback(
+    (offset: number) => {
+      setPage((prev) => {
+        const next = prev + offset;
+        if (next < 1) {
+          return 1;
+        }
+        if (next > totalPages) {
+          return totalPages;
+        }
+        return next;
+      });
+    },
+    [totalPages]
+  );
+
+  const handlePageSizeChange = useCallback((value: number) => {
+    setPageSize(value);
+  }, []);
+
+  const handlePageJump = useCallback(() => {
+    const trimmed = pageInput.trim();
+    if (!trimmed) {
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isNaN(parsed) && Number.isInteger(parsed)) {
+      const target = Math.min(Math.max(parsed, 1), totalPages);
+      setPage(target);
+    }
+    setPageInput("");
+  }, [pageInput, totalPages]);
+
   const handleDeleteSelectedRuns = useCallback(() => {
     if (selectedRunIds.length === 0) {
       return;
@@ -1283,24 +1340,88 @@ const HistoryView = ({
         <div className="card-actions">
           {runs.length > 0 && (
             <>
-              <span className="selection-hint">
-                已选 {selectedRunIds.length} / {runs.length}
-              </span>
-              <button
-                type="button"
-                className="secondary"
-                onClick={handleToggleAllRuns}
-              >
-                {allSelected ? "取消全选" : "全选"}
-              </button>
-              <button
-                type="button"
-                className="secondary danger"
-                onClick={handleDeleteSelectedRuns}
-                disabled={selectedRunIds.length === 0}
-              >
-                删除
-              </button>
+              <div className="card-actions-group">
+                <span className="selection-hint">
+                  已选 {selectedRunIds.length} / {runs.length}
+                </span>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={handleToggleAllRuns}
+                >
+                  {allSelected ? "取消全选" : "全选"}
+                </button>
+                <button
+                  type="button"
+                  className="secondary danger"
+                  onClick={handleDeleteSelectedRuns}
+                  disabled={selectedRunIds.length === 0}
+                >
+                  删除选中
+                </button>
+              </div>
+              <div className="card-actions-group table-pagination">
+                <label className="page-size-control">
+                  每页
+                  <select
+                    className="page-size-select"
+                    value={pageSize}
+                    onChange={(event) =>
+                      handlePageSizeChange(Number(event.target.value))
+                    }
+                  >
+                    {RUN_PAGE_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <span className="page-indicator">
+                  第 {page} / {totalPages} 页
+                </span>
+                <button
+                  type="button"
+                  className="pagination-nav"
+                  onClick={() => handlePageChange(-1)}
+                  disabled={page <= 1}
+                >
+                  上一页
+                </button>
+                <button
+                  type="button"
+                  className="pagination-nav"
+                  onClick={() => handlePageChange(1)}
+                  disabled={page >= totalPages}
+                >
+                  下一页
+                </button>
+                <div className="page-jump">
+                  <input
+                    type="number"
+                    min={1}
+                    max={totalPages}
+                    value={pageInput}
+                    onChange={(event) => setPageInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        handlePageJump();
+                      }
+                    }}
+                    className="page-jump-input"
+                    placeholder="页码"
+                  />
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={handlePageJump}
+                    disabled={totalPages === 0}
+                  >
+                    跳转
+                  </button>
+                </div>
+              </div>
             </>
           )}
           <button
@@ -1339,7 +1460,7 @@ const HistoryView = ({
               </tr>
             </thead>
             <tbody>
-              {runs.map((run) => {
+              {pagedRuns.map((run) => {
                 const clusterSlug = getClusterDisplayId(
                   clusterDisplayIds,
                   run.cluster_id
@@ -1502,6 +1623,40 @@ const ClusterDetailView = ({
     return runs.filter((run) => run.cluster_id === cluster.id);
   }, [runs, cluster]);
 
+  const [runPageSize, setRunPageSize] = useState<number>(
+    RUN_PAGE_SIZE_OPTIONS[0]
+  );
+  const [runPage, setRunPage] = useState(1);
+  const [runPageInput, setRunPageInput] = useState("");
+
+  useEffect(() => {
+    setRunPage(1);
+    setRunPageInput("");
+  }, [numericId]);
+
+  useEffect(() => {
+    setRunPage(1);
+    setRunPageInput("");
+  }, [runPageSize]);
+
+  const totalRunPages = useMemo(
+    () =>
+      Math.max(
+        1,
+        Math.ceil(clusterRuns.length / Math.max(runPageSize, 1))
+      ),
+    [clusterRuns.length, runPageSize]
+  );
+
+  useEffect(() => {
+    setRunPage((prev) => Math.min(Math.max(prev, 1), totalRunPages));
+  }, [totalRunPages]);
+
+  const pagedClusterRuns = useMemo(() => {
+    const start = (runPage - 1) * runPageSize;
+    return clusterRuns.slice(start, start + runPageSize);
+  }, [clusterRuns, runPage, runPageSize]);
+
   const [selectedRunIds, setSelectedRunIds] = useState<number[]>([]);
 
   useEffect(() => {
@@ -1624,6 +1779,39 @@ const ClusterDetailView = ({
       prev.length === items.length ? [] : items.map((item) => item.id)
     );
   };
+
+  const handleRunPageChange = useCallback(
+    (offset: number) => {
+      setRunPage((prev) => {
+        const next = prev + offset;
+        if (next < 1) {
+          return 1;
+        }
+        if (next > totalRunPages) {
+          return totalRunPages;
+        }
+        return next;
+      });
+    },
+    [totalRunPages]
+  );
+
+  const handleRunPageSizeChange = useCallback((value: number) => {
+    setRunPageSize(value);
+  }, []);
+
+  const handleRunPageJump = useCallback(() => {
+    const trimmed = runPageInput.trim();
+    if (!trimmed) {
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isNaN(parsed) && Number.isInteger(parsed)) {
+      const clamped = Math.min(Math.max(parsed, 1), totalRunPages);
+      setRunPage(clamped);
+    }
+    setRunPageInput("");
+  }, [runPageInput, totalRunPages]);
 
   const handleChangePage = (offset: number) => {
     setItemPage((prev) => {
@@ -1803,24 +1991,88 @@ const ClusterDetailView = ({
           <h2>{cluster.name} · 巡检记录</h2>
           {clusterRuns.length > 0 && (
             <div className="card-actions">
-              <span className="selection-hint">
-                已选 {selectedRunIds.length} / {clusterRuns.length}
-              </span>
-              <button
-                type="button"
-                className="secondary"
-                onClick={handleToggleAllClusterRuns}
-              >
-                {allRunsSelected ? "取消全选" : "全选"}
-              </button>
-              <button
-                type="button"
-                className="secondary danger"
-                onClick={handleDeleteSelectedClusterRuns}
-                disabled={selectedRunIds.length === 0}
-              >
-                删除
-              </button>
+              <div className="card-actions-group">
+                <span className="selection-hint">
+                  已选 {selectedRunIds.length} / {clusterRuns.length}
+                </span>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={handleToggleAllClusterRuns}
+                >
+                  {allRunsSelected ? "取消全选" : "全选"}
+                </button>
+                <button
+                  type="button"
+                  className="secondary danger"
+                  onClick={handleDeleteSelectedClusterRuns}
+                  disabled={selectedRunIds.length === 0}
+                >
+                  删除选中
+                </button>
+              </div>
+              <div className="card-actions-group table-pagination">
+                <label className="page-size-control">
+                  每页
+                  <select
+                    className="page-size-select"
+                    value={runPageSize}
+                    onChange={(event) =>
+                      handleRunPageSizeChange(Number(event.target.value))
+                    }
+                  >
+                    {RUN_PAGE_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <span className="page-indicator">
+                  第 {runPage} / {totalRunPages} 页
+                </span>
+                <button
+                  type="button"
+                  className="pagination-nav"
+                  onClick={() => handleRunPageChange(-1)}
+                  disabled={runPage <= 1}
+                >
+                  上一页
+                </button>
+                <button
+                  type="button"
+                  className="pagination-nav"
+                  onClick={() => handleRunPageChange(1)}
+                  disabled={runPage >= totalRunPages}
+                >
+                  下一页
+                </button>
+                <div className="page-jump">
+                  <input
+                    type="number"
+                    min={1}
+                    max={totalRunPages}
+                    value={runPageInput}
+                    onChange={(event) => setRunPageInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        handleRunPageJump();
+                      }
+                    }}
+                    className="page-jump-input"
+                    placeholder="页码"
+                  />
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={handleRunPageJump}
+                    disabled={totalRunPages === 0}
+                  >
+                    跳转
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -1844,7 +2096,7 @@ const ClusterDetailView = ({
               </tr>
             </thead>
             <tbody>
-              {clusterRuns.map((run) => {
+              {pagedClusterRuns.map((run) => {
                 const runSlug = runDisplayIds[run.id] ?? String(run.id);
                 const isSelected = selectedRunIds.includes(run.id);
                 return (
