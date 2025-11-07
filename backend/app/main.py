@@ -76,12 +76,17 @@ def _register_run_execution(
                 return
             _ACTIVE_RUN_FUTURES.pop(run_id, None)
             _ACTIVE_RUN_CONTROLS.pop(run_id, None)
+        logger.info("Inspection run %s worker completed.", run_id)
         db = SessionLocal()
         try:
             run = crud.get_inspection_run(db, run_id)
             if run and run.status not in {"running", "paused"}:
                 with _RUN_EXECUTION_LOCK:
                     _RUN_ITEM_CACHE.pop(run_id, None)
+                    logger.debug(
+                        "Inspection run %s cache cleared after completion.",
+                        run_id,
+                    )
         finally:
             db.close()
 
@@ -112,6 +117,11 @@ def _submit_run_execution(run_id: int, item_ids: List[int]) -> None:
         list(item_ids),
         control,
     )
+    logger.info(
+        "Inspection run %s scheduled with %d items.",
+        run_id,
+        len(item_ids),
+    )
     _register_run_execution(run_id, list(item_ids), control, future)
 
 
@@ -119,16 +129,26 @@ def _pause_run_execution(run_id: int) -> None:
     control = _get_run_control(run_id)
     if control:
         control.pause_event.clear()
+        logger.info("Inspection run %s paused (worker waiting).", run_id)
 
 
 def _resume_run_execution(run_id: int) -> bool:
     control = _get_run_control(run_id)
     future = _get_run_future(run_id)
     if not control or not future:
+        logger.warning(
+            "Inspection run %s resume requested without active worker.",
+            run_id,
+        )
         return False
     if future.done():
+        logger.info(
+            "Inspection run %s worker already finished before resume.",
+            run_id,
+        )
         return False
     control.pause_event.set()
+    logger.info("Inspection run %s resumed on existing worker.", run_id)
     return True
 
 
@@ -137,6 +157,7 @@ def _cancel_run_execution(run_id: int) -> None:
     if control:
         control.cancel_event.set()
         control.pause_event.set()
+        logger.info("Inspection run %s received cancellation request.", run_id)
 
 
 def _normalise_cluster_name(name: str | None) -> str:
@@ -236,6 +257,12 @@ def _execute_inspection_run_async(
         if processed_count > total_items:
             processed_count = total_items
         remaining_items = items[processed_count:]
+        logger.info(
+            "Inspection run %s worker active: %d/%d items already processed.",
+            run_id,
+            processed_count,
+            total_items,
+        )
 
         prom_client: Optional[PrometheusClient] = None
         if cluster.prometheus_url:
@@ -363,6 +390,7 @@ def _execute_inspection_run_async(
             entity_id=run.id,
             description="Attached PDF report to inspection run.",
         )
+        logger.info("Inspection run %s completed with status %s.", run_id, overall_status)
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception("Inspection run %s failed during execution.", run_id)
         db.rollback()
