@@ -9,6 +9,9 @@ from typing import List, Optional
 from uuid import uuid4
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
+import os
+import shutil
+import subprocess
 import yaml
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -314,6 +317,37 @@ def _sanitize_optional_text(value: str | None) -> str | None:
     return sanitized[:2000]
 
 
+def _fetch_server_version_with_kubectl(kubeconfig_path: str) -> Optional[str]:
+    if shutil.which("kubectl") is None:
+        return None
+    env = os.environ.copy()
+    env["KUBECONFIG"] = kubeconfig_path
+    command = "kubectl version | grep Server | awk '{print $3}'"
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            text=True,
+            timeout=CONNECTION_TEST_READ_TIMEOUT,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        logger.warning("执行 kubectl version 命令失败: %s", exc)
+        return None
+    if result.returncode != 0:
+        logger.warning(
+            "kubectl version 命令返回非零退出码(%s): %s",
+            result.returncode,
+            result.stderr.strip(),
+        )
+        return None
+    output = result.stdout.strip()
+    return output or None
+
+
 def _test_cluster_connection(kubeconfig_path: str) -> tuple[str, str]:
     if not k8s_config or not k8s_client:
         return (
@@ -331,13 +365,15 @@ def _test_cluster_connection(kubeconfig_path: str) -> tuple[str, str]:
                 read=CONNECTION_TEST_READ_TIMEOUT,
             )
 
-        version_api = k8s_client.VersionApi(api_client)
-        version_info = version_api.get_code(
-            _request_timeout=CONNECTION_TEST_READ_TIMEOUT
-        )
-        git_version = (version_info.git_version or "").strip()
+        git_version = _fetch_server_version_with_kubectl(kubeconfig_path) or ""
         if not git_version:
-            git_version = f"{version_info.major}.{version_info.minor}".strip()
+            version_api = k8s_client.VersionApi(api_client)
+            version_info = version_api.get_code(
+                _request_timeout=CONNECTION_TEST_READ_TIMEOUT
+            )
+            git_version = (version_info.git_version or "").strip()
+            if not git_version:
+                git_version = f"{version_info.major}.{version_info.minor}".strip()
 
         core_api = k8s_client.CoreV1Api(api_client)
         nodes = core_api.list_node(
@@ -345,6 +381,8 @@ def _test_cluster_connection(kubeconfig_path: str) -> tuple[str, str]:
             _preload_content=True,
         )
         node_count = len(nodes.items)
+        if not git_version:
+            git_version = "unknown"
         detail = f"Server version {git_version}; nodes {node_count}."
         return "connected", detail
 

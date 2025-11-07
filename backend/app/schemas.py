@@ -1,9 +1,46 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+import json
+import re
+from typing import Any, Dict, List, Optional, Tuple
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, computed_field
+
+
+def _extract_connection_meta(
+    message: Optional[str],
+) -> Tuple[Optional[str], Optional[int]]:
+    if not message:
+        return None, None
+
+    # 尝试解析 JSON 格式: {"version": "...", "node_count": 8}
+    try:
+        payload = json.loads(message)
+        if isinstance(payload, dict):
+            version = payload.get("version") or payload.get("kubernetes_version")
+            if version:
+                version = str(version).strip() or None
+            node_value = payload.get("node_count") or payload.get("nodes")
+            if isinstance(node_value, str):
+                node_value = node_value.strip()
+                node_value = int(node_value) if node_value.isdigit() else None
+            elif isinstance(node_value, (int, float)):
+                node_value = int(node_value)
+            else:
+                node_value = None
+            return version, node_value
+    except Exception:
+        pass
+
+    # 匹配 "Server version v1.30.14; nodes 8." 类型字符串
+    version_match = re.search(
+        r"Server\s+version\s+([^\s;]+)", message, flags=re.IGNORECASE
+    )
+    nodes_match = re.search(r"nodes?\s+(\d+)", message, flags=re.IGNORECASE)
+    version = version_match.group(1).strip() if version_match else None
+    node_count = int(nodes_match.group(1)) if nodes_match else None
+    return version, node_count
 
 
 class ClusterConfigOut(BaseModel):
@@ -18,6 +55,18 @@ class ClusterConfigOut(BaseModel):
     last_checked_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
+
+    @computed_field(return_type=Optional[str])
+    @property
+    def kubernetes_version(self) -> Optional[str]:
+        version, _ = _extract_connection_meta(self.connection_message)
+        return version
+
+    @computed_field(return_type=Optional[int])
+    @property
+    def node_count(self) -> Optional[int]:
+        _, node_count = _extract_connection_meta(self.connection_message)
+        return node_count
 
 
 class ClusterUpdate(BaseModel):

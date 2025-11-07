@@ -899,7 +899,7 @@ const OverviewView = ({
                 onClick={handleDeleteSelectedClusters}
                 disabled={selectedClusterIds.length === 0}
               >
-                删除选中
+                删除
               </button>
             </div>
           )}
@@ -931,6 +931,19 @@ const OverviewView = ({
                 const isTesting = Boolean(testingClusterIds[cluster.id]);
                 const isSelected = selectedClusterIds.includes(cluster.id);
                 const handleNavigate = () => navigate(`/clusters/${displayId}`);
+                const versionLabel =
+                  cluster.kubernetes_version &&
+                  cluster.kubernetes_version.trim().length > 0
+                    ? cluster.kubernetes_version.trim()
+                    : null;
+                const nodeCountLabel =
+                  typeof cluster.node_count === "number"
+                    ? String(cluster.node_count)
+                    : null;
+                const summaryText =
+                  versionLabel || nodeCountLabel
+                    ? `版本 ${versionLabel ?? "未知"} · 节点数 ${nodeCountLabel ?? "未知"}`
+                    : cluster.connection_message || "未校验";
                 return (
                   <div
                     key={cluster.id}
@@ -996,9 +1009,9 @@ const OverviewView = ({
                       </span>
                       <span
                         className="cluster-status-message"
-                        title={cluster.connection_message || "未校验"}
+                        title={summaryText}
                       >
-                        {cluster.connection_message || "未校验"}
+                        {summaryText}
                       </span>
                     </div>
                     {cluster.last_checked_at && (
@@ -1286,7 +1299,7 @@ const HistoryView = ({
                 onClick={handleDeleteSelectedRuns}
                 disabled={selectedRunIds.length === 0}
               >
-                删除选中
+                删除
               </button>
             </>
           )}
@@ -1591,6 +1604,15 @@ const ClusterDetailView = ({
     clusterSlug ??
     getClusterDisplayId(clusterDisplayIds, cluster.id, cluster);
 
+  const versionLabel =
+    cluster.kubernetes_version && cluster.kubernetes_version.trim().length > 0
+      ? cluster.kubernetes_version.trim()
+      : "未知";
+  const nodeCountLabel =
+    typeof cluster.node_count === "number"
+      ? String(cluster.node_count)
+      : "未知";
+
   const handleToggleItem = (id: number) => {
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
@@ -1670,8 +1692,12 @@ const ClusterDetailView = ({
               </span>
             </div>
             <div>
-              <strong>连接说明: </strong>
-              {cluster.connection_message || "尚未校验连接"}
+              <strong>集群版本: </strong>
+              {versionLabel}
+            </div>
+            <div>
+              <strong>节点数: </strong>
+              {nodeCountLabel}
             </div>
             <div>
               <strong>最近校验: </strong>
@@ -1793,7 +1819,7 @@ const ClusterDetailView = ({
                 onClick={handleDeleteSelectedClusterRuns}
                 disabled={selectedRunIds.length === 0}
               >
-                删除选中
+                删除
               </button>
             </div>
           )}
@@ -2740,7 +2766,7 @@ const InspectionSettingsPanel = ({
                 onClick={handleDeleteSelectedItems}
                 disabled={selectedItemIds.length === 0 || submitting}
               >
-                删除选中
+                删除
               </button>
             </div>
           )}
