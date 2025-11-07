@@ -899,7 +899,7 @@ const OverviewView = ({
                 onClick={handleDeleteSelectedClusters}
                 disabled={selectedClusterIds.length === 0}
               >
-                删除选中
+                删除
               </button>
             </div>
           )}
@@ -1299,7 +1299,7 @@ const HistoryView = ({
                 onClick={handleDeleteSelectedRuns}
                 disabled={selectedRunIds.length === 0}
               >
-                删除选中
+                删除
               </button>
             </>
           )}
@@ -1819,7 +1819,7 @@ const ClusterDetailView = ({
                 onClick={handleDeleteSelectedClusterRuns}
                 disabled={selectedRunIds.length === 0}
               >
-                删除选中
+                删除
               </button>
             </div>
           )}
@@ -2766,7 +2766,7 @@ const InspectionSettingsPanel = ({
                 onClick={handleDeleteSelectedItems}
                 disabled={selectedItemIds.length === 0 || submitting}
               >
-                删除选中
+                删除
               </button>
             </div>
           )}
