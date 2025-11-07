@@ -3998,20 +3998,30 @@ const backgroundLocation =
           prev.map((item) => (item.id === updated.id ? updated : item))
         );
         const statusMeta = getClusterStatusMeta(updated.connection_status);
+        const versionLabel =
+          updated.kubernetes_version && updated.kubernetes_version.trim().length > 0
+            ? updated.kubernetes_version.trim()
+            : "未知";
+        const nodeCountLabel =
+          typeof updated.node_count === "number"
+            ? String(updated.node_count)
+            : "未知";
         let noticeType: NoticeType = "success";
-        if (updated.connection_status === "warning") {
-          noticeType = "warning";
-        } else if (updated.connection_status === "failed") {
-          noticeType = "error";
+        let noticeMessage: string;
+        if (updated.connection_status === "connected") {
+          noticeMessage = `集群(${updated.name}) 连接成功，版本：${versionLabel}，节点数：${nodeCountLabel}`;
+        } else {
+          if (updated.connection_status === "warning") {
+            noticeType = "warning";
+          } else if (updated.connection_status === "failed") {
+            noticeType = "error";
+          }
+          const detailMessage = updated.connection_message
+            ? `，详情：${updated.connection_message}`
+            : "";
+          noticeMessage = `集群(${updated.name}) ${statusMeta.label}${detailMessage}`;
         }
-        const detailMessage = updated.connection_message
-          ? `，详情：${updated.connection_message}`
-          : "";
-        showClusterNotice(
-          currentNoticeScope,
-          `集群(${updated.name}) ${statusMeta.label}${detailMessage}`,
-          noticeType
-        );
+        showClusterNotice(currentNoticeScope, noticeMessage, noticeType);
         logWithTimestamp(
           "info",
           "集群连接测试完成: %s -> %s",
