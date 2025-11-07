@@ -325,7 +325,12 @@ body {
 }
 
 .table-pagination {
-  gap: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 16px;
+  flex-wrap: nowrap;
 }
 
 .page-size-control {
