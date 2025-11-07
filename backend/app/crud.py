@@ -338,6 +338,67 @@ def update_inspection_run_progress(
     return run
 
 
+def pause_inspection_run(
+    db: Session,
+    run: models.InspectionRun,
+) -> models.InspectionRun:
+    run.status = "paused"
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    log_action(
+        db,
+        action="update",
+        entity_type="inspection_run",
+        entity_id=run.id,
+        description="Paused inspection run.",
+    )
+    return run
+
+
+def resume_inspection_run(
+    db: Session,
+    run: models.InspectionRun,
+) -> models.InspectionRun:
+    run.status = "running"
+    run.completed_at = None
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    log_action(
+        db,
+        action="update",
+        entity_type="inspection_run",
+        entity_id=run.id,
+        description="Resumed inspection run.",
+    )
+    return run
+
+
+def cancel_inspection_run(
+    db: Session,
+    run: models.InspectionRun,
+    reason: Optional[str] = None,
+) -> models.InspectionRun:
+    run.status = "cancelled"
+    run.completed_at = datetime.utcnow()
+    if reason:
+        run.summary = reason[:500]
+    elif not run.summary:
+        run.summary = "巡检已取消"
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    log_action(
+        db,
+        action="update",
+        entity_type="inspection_run",
+        entity_id=run.id,
+        description="Cancelled inspection run.",
+    )
+    return run
+
+
 def list_inspection_runs(db: Session) -> List[models.InspectionRun]:
     return (
         db.query(models.InspectionRun)

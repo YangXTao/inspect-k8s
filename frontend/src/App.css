@@ -827,6 +827,24 @@ th {
   color: #1d4ed8;
 }
 
+.status-pill.paused {
+  background: #e2e8f0;
+  color: #1f2937;
+}
+
+.status-pill.cancelled {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.status-progress.paused .status-circle-value {
+  stroke: #64748b;
+}
+
+.status-progress.cancelled .status-circle-value {
+  stroke: #ef4444;
+}
+
 .status-progress {
   display: flex;
   align-items: center;
@@ -1396,6 +1414,17 @@ th {
   gap: 8px;
   font-size: 13px;
   color: #475569;
+}
+
+.inspection-summary-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.inspection-summary-status .status-progress {
+  margin: 0;
 }
 
 .detail-actions {

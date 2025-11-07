@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -66,13 +67,14 @@ def _build_run_display_id(db: Session, run: models.InspectionRun) -> str:
 def _calculate_run_progress(run: models.InspectionRun) -> tuple[int, int, int]:
     total_items = run.total_items or 0
     processed_items = run.processed_items or 0
+    active_statuses = {"running", "paused", "cancelled"}
     if total_items > 0:
         processed_items = max(0, min(processed_items, total_items))
-        if run.status != "running":
+        if run.status not in active_statuses:
             processed_items = max(processed_items, total_items)
         progress = int((processed_items / total_items) * 100)
     else:
-        progress = 0 if run.status == "running" else 100
+        progress = 0 if run.status in active_statuses else 100
     progress = max(0, min(progress, 100))
     return total_items, processed_items, progress
 
@@ -138,6 +140,26 @@ def _execute_inspection_run_async(run_id: int, item_ids: List[int]) -> None:
         status_counter = {"passed": 0, "warning": 0, "failed": 0}
 
         for index, item in enumerate(items, start=1):
+            while True:
+                try:
+                    db.refresh(run)
+                except Exception:
+                    refreshed = crud.get_inspection_run(db, run_id)
+                    if not refreshed:
+                        logger.info("Inspection run %s no longer exists, aborting execution.", run_id)
+                        return
+                    run = refreshed
+                if run.status == "paused":
+                    time.sleep(1.0)
+                    continue
+                if run.status != "running":
+                    logger.info(
+                        "Inspection run %s interrupted with status %s.",
+                        run_id,
+                        run.status,
+                    )
+                    return
+                break
             status, detail, suggestion = dispatch_checks(
                 item.check_type, context, item.config
             )
@@ -974,6 +996,57 @@ def get_inspection_run(run_id: int, db: Session = Depends(get_db)):
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
     return _serialize_run(run)
+
+
+@app.post(
+    "/inspection-runs/{run_id}/pause",
+    response_model=schemas.InspectionRunOut,
+)
+def pause_inspection_run(run_id: int, db: Session = Depends(get_db)):
+    run = crud.get_inspection_run(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Inspection run not found.")
+    if run.status != "running":
+        raise HTTPException(status_code=400, detail="仅可暂停进行中的巡检。")
+    crud.pause_inspection_run(db, run)
+    refreshed = crud.get_inspection_run(db, run_id)
+    if not refreshed:
+        raise HTTPException(status_code=404, detail="Inspection run not found.")
+    return _serialize_run(refreshed)
+
+
+@app.post(
+    "/inspection-runs/{run_id}/resume",
+    response_model=schemas.InspectionRunOut,
+)
+def resume_inspection_run(run_id: int, db: Session = Depends(get_db)):
+    run = crud.get_inspection_run(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Inspection run not found.")
+    if run.status != "paused":
+        raise HTTPException(status_code=400, detail="仅可恢复已暂停的巡检。")
+    crud.resume_inspection_run(db, run)
+    refreshed = crud.get_inspection_run(db, run_id)
+    if not refreshed:
+        raise HTTPException(status_code=404, detail="Inspection run not found.")
+    return _serialize_run(refreshed)
+
+
+@app.post(
+    "/inspection-runs/{run_id}/cancel",
+    response_model=schemas.InspectionRunOut,
+)
+def cancel_inspection_run(run_id: int, db: Session = Depends(get_db)):
+    run = crud.get_inspection_run(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Inspection run not found.")
+    if run.status not in {"running", "paused"}:
+        raise HTTPException(status_code=400, detail="仅可取消进行中或已暂停的巡检。")
+    crud.cancel_inspection_run(db, run)
+    refreshed = crud.get_inspection_run(db, run_id)
+    if not refreshed:
+        raise HTTPException(status_code=404, detail="Inspection run not found.")
+    return _serialize_run(refreshed)
 
 
 @app.delete("/inspection-runs/{run_id}", status_code=204)
