@@ -206,18 +206,6 @@ export function deleteInspectionRun(
   });
 }
 
-export function pauseInspectionRun(runId: number): Promise<InspectionRun> {
-  return request<InspectionRun>(`/inspection-runs/${runId}/pause`, {
-    method: "POST",
-  });
-}
-
-export function resumeInspectionRun(runId: number): Promise<InspectionRun> {
-  return request<InspectionRun>(`/inspection-runs/${runId}/resume`, {
-    method: "POST",
-  });
-}
-
 export function cancelInspectionRun(runId: number): Promise<InspectionRun> {
   return request<InspectionRun>(`/inspection-runs/${runId}/cancel`, {
     method: "POST",

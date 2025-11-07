@@ -34,8 +34,6 @@ import {
   registerCluster,
   updateCluster,
   testClusterConnection,
-  pauseInspectionRun,
-  resumeInspectionRun,
   cancelInspectionRun,
   createInspectionItem as apiCreateInspectionItem,
   updateInspectionItem as apiUpdateInspectionItem,
@@ -214,22 +212,6 @@ const isProgressInfoEqual = (
     previous.reportReady === next.reportReady
     );
   };
-
-const shouldKeepPollingRun = (
-  run: InspectionRun | null,
-  info: RunProgressInfo | null
-) => {
-  if (!run) {
-    return false;
-  }
-  if (run.status === "running" || run.status === "paused") {
-    return true;
-  }
-  if (!run.report_path && info) {
-    return info.pending > 0 || info.progress < 100;
-  }
-  return false;
-};
 
 const areRunListsEqual = (
   previous: InspectionRunListItem[] | undefined,
@@ -1260,8 +1242,6 @@ interface HistoryViewProps {
   onRefreshRuns: () => Promise<void>;
   onDeleteRun: (run: InspectionRunListItem) => Promise<void>;
   onDeleteRunsBulk: (runIds: number[]) => Promise<void>;
-  onPauseRun: (runId: number) => Promise<InspectionRun | null>;
-  onResumeRun: (runId: number) => Promise<InspectionRun | null>;
   onCancelRun: (run: InspectionRunListItem) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
@@ -1275,8 +1255,6 @@ const HistoryView = ({
   onRefreshRuns,
   onDeleteRun,
   onDeleteRunsBulk,
-  onPauseRun,
-  onResumeRun,
   onCancelRun,
   clusterDisplayIds,
   runDisplayIds,
@@ -1487,20 +1465,6 @@ const HistoryView = ({
                       </button>
                       {(run.status === "running" || run.status === "paused") && (
                         <button
-                          className="link-button"
-                          onClick={async () => {
-                            if (run.status === "running") {
-                              await onPauseRun(run.id);
-                            } else {
-                              await onResumeRun(run.id);
-                            }
-                          }}
-                        >
-                          {run.status === "running" ? "暂停" : "继续"}
-                        </button>
-                      )}
-                      {(run.status === "running" || run.status === "paused") && (
-                        <button
                           className="link-button danger"
                           onClick={async () => await onCancelRun(run)}
                         >
@@ -1617,8 +1581,6 @@ interface ClusterDetailProps {
   onStartInspection: (clusterId: number) => Promise<void>;
   onDeleteRun: (run: InspectionRunListItem) => Promise<void>;
   onDeleteRunsBulk: (runIds: number[]) => Promise<void>;
-  onPauseRun: (runId: number) => Promise<InspectionRun | null>;
-  onResumeRun: (runId: number) => Promise<InspectionRun | null>;
   onCancelRun: (run: InspectionRunListItem) => Promise<void>;
   onEditCluster: (cluster: ClusterConfig) => void;
   onDeleteCluster: (cluster: ClusterConfig) => Promise<void>;
@@ -1646,8 +1608,6 @@ const ClusterDetailView = ({
   onStartInspection,
   onDeleteRun,
   onDeleteRunsBulk,
-  onPauseRun,
-  onResumeRun,
   onCancelRun,
   onEditCluster,
   onDeleteCluster,
@@ -2148,21 +2108,6 @@ const ClusterDetailView = ({
                       </button>
                       {(run.status === "running" || run.status === "paused") && (
                         <button
-                          className="link-button"
-                          onClick={async (event) => {
-                            event.stopPropagation();
-                            if (run.status === "running") {
-                              await onPauseRun(run.id);
-                            } else {
-                              await onResumeRun(run.id);
-                            }
-                          }}
-                        >
-                          {run.status === "running" ? "暂停" : "继续"}
-                        </button>
-                      )}
-                      {(run.status === "running" || run.status === "paused") && (
-                        <button
                           className="link-button danger"
                           onClick={async (event) => {
                             event.stopPropagation();
@@ -2269,8 +2214,6 @@ interface RunDetailProps {
   items: InspectionItem[];
   runs: InspectionRunListItem[];
   onDeleteRun: (runId: number, redirectPath?: string) => Promise<void>;
-  onPauseRun: (runId: number) => Promise<InspectionRun | null>;
-  onResumeRun: (runId: number) => Promise<InspectionRun | null>;
   onCancelRun: (runId: number, redirectPath?: string) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
@@ -2284,8 +2227,6 @@ const RunDetailView = ({
   items,
   runs,
   onDeleteRun,
-  onPauseRun,
-  onResumeRun,
   onCancelRun,
   clusterDisplayIds,
   runDisplayIds,
@@ -2466,17 +2407,22 @@ const RunDetailView = ({
     [run]
   );
 
-  const shouldPollRun = useMemo(
-    () => shouldKeepPollingRun(run, progressInfo),
-    [run, progressInfo]
-  );
-
   useEffect(() => {
-    if (!run?.id || !shouldPollRun) {
+    if (!run?.id || run.status !== "running") {
       return;
     }
     let cancelled = false;
-    let timer: number | null = null;
+    let timeoutId: number | null = null;
+
+    const scheduleNext = (delay: number) => {
+      if (cancelled) {
+        return;
+      }
+      timeoutId = window.setTimeout(() => {
+        timeoutId = null;
+        void poll();
+      }, delay);
+    };
 
     const poll = async () => {
       try {
@@ -2484,28 +2430,23 @@ const RunDetailView = ({
         if (cancelled) {
           return;
         }
-        const nextInfo = buildRunProgressInfo(refreshed);
         setRun((previous) => {
-          if (!previous) {
+          if (!previous || previous.id !== refreshed.id) {
             return refreshed;
           }
-          if (previous.id !== refreshed.id) {
+          if (hasRunStateChanged(previous, refreshed)) {
             return refreshed;
           }
           const prevInfo = buildRunProgressInfo(previous);
-          if (
-            hasRunStateChanged(previous, refreshed) ||
-            !isProgressInfoEqual(prevInfo, nextInfo)
-          ) {
+          const nextInfo = buildRunProgressInfo(refreshed);
+          if (!isProgressInfoEqual(prevInfo, nextInfo)) {
             return refreshed;
           }
           return previous;
         });
         setError(null);
-        if (!cancelled && shouldKeepPollingRun(refreshed, nextInfo)) {
-          timer = window.setTimeout(() => {
-            void poll();
-          }, 600);
+        if (refreshed.status === "running") {
+          scheduleNext(800);
         }
       } catch (err) {
         if (cancelled) {
@@ -2515,48 +2456,20 @@ const RunDetailView = ({
           err instanceof Error ? err.message : "获取巡检详情失败";
         logWithTimestamp("error", "获取巡检详情失败: %s", message);
         setError(message);
-        timer = window.setTimeout(() => {
-          void poll();
-        }, 2000);
+        scheduleNext(2000);
       }
     };
 
-    timer = window.setTimeout(() => {
-      void poll();
-    }, 400);
+    scheduleNext(400);
 
     return () => {
       cancelled = true;
-      if (timer !== null) {
-        window.clearTimeout(timer);
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run?.id, shouldPollRun]);
-
-  const handleToggleRunState = useCallback(async () => {
-    if (!run) {
-      return;
-    }
-    const action =
-      run.status === "running" ? onPauseRun : onResumeRun;
-    const updated = await action(run.id);
-    if (updated) {
-      setRun(updated);
-      return;
-    }
-    setLoading(true);
-    try {
-      const refreshed = await getInspectionRun(run.id);
-      setRun(refreshed);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "获取巡检详情失败";
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
-  }, [run, onPauseRun, onResumeRun, getInspectionRun]);
+  }, [run?.id, run?.status]);
 
   const handleCancelRunDetail = useCallback(() => {
     if (!run) {
@@ -2624,23 +2537,14 @@ const RunDetailView = ({
               下载报告
             </button>
           ) : null}
-          {run && (run.status === "running" || run.status === "paused") ? (
-            <>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => void handleToggleRunState()}
-              >
-                {run.status === "running" ? "暂停" : "继续"}
-              </button>
-              <button
-                type="button"
-                className="secondary danger"
-                onClick={handleCancelRunDetail}
-              >
-                取消
-              </button>
-            </>
+          {run ? (
+            <button
+              type="button"
+              className="secondary danger"
+              onClick={handleCancelRunDetail}
+            >
+              取消
+            </button>
           ) : null}
       </div>
     </div>
@@ -4366,44 +4270,6 @@ const backgroundLocation =
   [selectedItemIds, operator, refreshRuns, refreshClusters]
 );
 
-  const handlePauseRun = useCallback(
-    async (runId: number): Promise<InspectionRun | null> => {
-      try {
-        logWithTimestamp("info", "暂停巡检记录: %s", runId);
-        const updated = await pauseInspectionRun(runId);
-        await refreshRuns();
-        showClusterNotice(currentNoticeScope, "巡检已暂停", "success");
-        return updated;
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "暂停巡检失败";
-        logWithTimestamp("error", "暂停巡检失败: %s", message);
-        showClusterNotice(currentNoticeScope, message, "error");
-        return null;
-      }
-    },
-    [refreshRuns, showClusterNotice, currentNoticeScope]
-  );
-
-  const handleResumeRun = useCallback(
-    async (runId: number): Promise<InspectionRun | null> => {
-      try {
-        logWithTimestamp("info", "恢复巡检记录: %s", runId);
-        const updated = await resumeInspectionRun(runId);
-        await refreshRuns();
-        showClusterNotice(currentNoticeScope, "巡检已恢复", "success");
-        return updated;
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "恢复巡检失败";
-        logWithTimestamp("error", "恢复巡检失败: %s", message);
-        showClusterNotice(currentNoticeScope, message, "error");
-        return null;
-      }
-    },
-    [refreshRuns, showClusterNotice, currentNoticeScope]
-  );
-
   const handleDeleteClustersBulk = useCallback(
     (clusterIds: number[]): Promise<void> => {
       const targets = clusters.filter((cluster) =>
@@ -5112,8 +4978,6 @@ const backgroundLocation =
                 onDeleteRunsBulk={(ids) =>
                   handleDeleteRunsBulk(ids, "history")
                 }
-                onPauseRun={handlePauseRun}
-                onResumeRun={handleResumeRun}
                 onCancelRun={handleCancelRun}
                 clusterDisplayIds={clusterDisplayIds}
                 runDisplayIds={runDisplayIds}
@@ -5146,8 +5010,6 @@ const backgroundLocation =
                 onDeleteRunsBulk={(ids) =>
                   handleDeleteRunsBulk(ids, "clusterDetail")
                 }
-                onPauseRun={handlePauseRun}
-                onResumeRun={handleResumeRun}
                 onCancelRun={handleCancelRun}
                 onEditCluster={handleEditCluster}
                 onDeleteCluster={handleDeleteCluster}
@@ -5166,8 +5028,6 @@ const backgroundLocation =
                   items={sortedItems}
                   runs={runs}
                   onDeleteRun={handleDeleteRunById}
-                onPauseRun={handlePauseRun}
-                onResumeRun={handleResumeRun}
                 onCancelRun={handleCancelRunById}
                 clusterDisplayIds={clusterDisplayIds}
                 runDisplayIds={runDisplayIds}
