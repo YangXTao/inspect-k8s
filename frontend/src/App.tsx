@@ -1590,8 +1590,37 @@ interface ClusterDetailProps {
   testingClusterIds: Record<number, boolean>;
 }
 
-const ClusterDetailView = ({
-  clusters,
+interface ClusterDetailContentProps {
+  cluster: ClusterConfig;
+  clusterSlug: string;
+  items: InspectionItem[];
+  runs: InspectionRunListItem[];
+  selectedIds: number[];
+  setSelectedIds: (updater: (prev: number[]) => number[]) => void;
+  operator: string;
+  setOperator: (value: string) => void;
+  inspectionLoading: boolean;
+  notice: string | null;
+  error: string | null;
+  clusterNotice: string | null;
+  clusterNoticeType: NoticeType;
+  clusterNoticeScope: NoticeScope | null;
+  clusterError: string | null;
+  onStartInspection: (clusterId: number) => Promise<void>;
+  onDeleteRun: (run: InspectionRunListItem) => Promise<void>;
+  onDeleteRunsBulk: (runIds: number[]) => Promise<void>;
+  onCancelRun: (run: InspectionRunListItem) => Promise<void>;
+  onEditCluster: (cluster: ClusterConfig) => void;
+  onDeleteCluster: (cluster: ClusterConfig) => Promise<void>;
+  clusterDisplayIds: Record<number, string>;
+  runDisplayIds: Record<number, string>;
+  onTestClusterConnection: (clusterId: number) => Promise<void>;
+  testingClusterIds: Record<number, boolean>;
+}
+
+const ClusterDetailContent = ({
+  cluster,
+  clusterSlug,
   items,
   runs,
   selectedIds,
@@ -1615,52 +1644,20 @@ const ClusterDetailView = ({
   runDisplayIds,
   onTestClusterConnection,
   testingClusterIds,
-}: ClusterDetailProps) => {
-  const { clusterKey } = useParams<{ clusterKey?: string }>();
+}: ClusterDetailContentProps) => {
   const navigate = useNavigate();
 
-  const numericId = useMemo(() => {
-    if (!clusterKey) {
-      return Number.NaN;
-    }
-    const decoded = decodeClusterKeyToId(
-      clusterKey,
-      clusterDisplayIds,
-      clusters
-    );
-    return decoded ?? Number.NaN;
-  }, [clusterKey, clusterDisplayIds, clusters]);
+  const shouldShowNotice =
+    notice && noticeType && clusterNoticeScope === "clusterDetail";
 
   useEffect(() => {
     setSelectedIds(() => []);
-  }, [numericId, setSelectedIds]);
+  }, [cluster.id, setSelectedIds]);
 
-  const isNumericInvalid = Number.isNaN(numericId);
-
-  const cluster = useMemo(() => {
-    if (Number.isNaN(numericId)) {
-      return null;
-    }
-    return clusters.find((item) => item.id === numericId) ?? null;
-  }, [clusters, numericId]);
-
-  const clusterSlug = useMemo(() => {
-    if (Number.isNaN(numericId)) {
-      return null;
-    }
-    return getClusterDisplayId(
-      clusterDisplayIds,
-      numericId,
-      cluster ?? undefined
-    );
-  }, [clusterDisplayIds, cluster, numericId]);
-
-  const clusterRuns = useMemo(() => {
-    if (!cluster) {
-      return [];
-    }
-    return runs.filter((run) => run.cluster_id === cluster.id);
-  }, [runs, cluster]);
+  const clusterRuns = useMemo(
+    () => runs.filter((run) => run.cluster_id === cluster.id),
+    [runs, cluster.id]
+  );
 
   const [runPageSize, setRunPageSize] = useState<number>(
     RUN_PAGE_SIZE_OPTIONS[0]
@@ -1671,7 +1668,7 @@ const ClusterDetailView = ({
   useEffect(() => {
     setRunPage(1);
     setRunPageInput("");
-  }, [numericId]);
+  }, [cluster.id]);
 
   useEffect(() => {
     setRunPage(1);
@@ -1706,7 +1703,7 @@ const ClusterDetailView = ({
 
   useEffect(() => {
     setSelectedRunIds([]);
-  }, [numericId]);
+  }, [cluster.id]);
 
   const allRunsSelected =
     clusterRuns.length > 0 && selectedRunIds.length === clusterRuns.length;
@@ -1743,7 +1740,7 @@ const ClusterDetailView = ({
 
   useEffect(() => {
     setItemPage(0);
-  }, [numericId]);
+  }, [cluster.id]);
 
   const totalItemPages = useMemo(
     () => Math.max(1, Math.ceil(items.length / PAGE_SIZE)),
@@ -1768,28 +1765,6 @@ const ClusterDetailView = ({
       ),
     [items, itemPage]
   );
-
-  if (isNumericInvalid) {
-    return (
-      <div className="detail-empty">
-        <p>集群信息加载中...</p>
-        <button className="secondary" onClick={() => navigate("/")}>
-          返回集群列表
-        </button>
-      </div>
-    );
-  }
-
-  if (!cluster) {
-    return (
-      <div className="detail-empty">
-        <p>未找到集群。</p>
-        <button className="secondary" onClick={() => navigate("/")}>
-          返回集群列表
-        </button>
-      </div>
-    );
-  }
 
   const statusMeta = getClusterStatusMeta(cluster.connection_status);
   const isTesting = Boolean(testingClusterIds[cluster.id]);
@@ -2011,16 +1986,16 @@ const ClusterDetailView = ({
             </div>
           )}
           <div className="detail-actions">
-            <button className="secondary" onClick={handleToggleAll}>
-              {selectedIds.length === items.length ? "清除选择" : "全选"}
-            </button>
-            <button
-              className="primary"
-              onClick={() => onStartInspection(cluster.id)}
-              disabled={inspectionLoading}
-            >
-              {inspectionLoading ? "巡检中..." : "开始巡检"}
-            </button>
+      <button className="secondary" onClick={handleToggleAll}>
+        {selectedIds.length === items.length ? "清除选择" : "全选"}
+      </button>
+      <button
+        className="primary"
+        onClick={() => onStartInspection(cluster.id)}
+        disabled={inspectionLoading}
+      >
+        {inspectionLoading ? "巡检中..." : "开始巡检"}
+      </button>
           </div>
         </div>
       </section>
@@ -2206,6 +2181,125 @@ const ClusterDetailView = ({
         )}
       </section>
     </>
+  );
+};
+
+const ClusterDetailView = ({
+  clusters,
+  items,
+  runs,
+  selectedIds,
+  setSelectedIds,
+  operator,
+  setOperator,
+  inspectionLoading,
+  notice,
+  error,
+  clusterNotice,
+  clusterNoticeType,
+  clusterNoticeScope,
+  clusterError,
+  onStartInspection,
+  onDeleteRun,
+  onDeleteRunsBulk,
+  onCancelRun,
+  onEditCluster,
+  onDeleteCluster,
+  clusterDisplayIds,
+  runDisplayIds,
+  onTestClusterConnection,
+  testingClusterIds,
+}: ClusterDetailProps) => {
+  const { clusterKey } = useParams<{ clusterKey?: string }>();
+  const navigate = useNavigate();
+
+  const numericId = useMemo(() => {
+    if (!clusterKey) {
+      return Number.NaN;
+    }
+    const decoded = decodeClusterKeyToId(
+      clusterKey,
+      clusterDisplayIds,
+      clusters
+    );
+    return decoded ?? Number.NaN;
+  }, [clusterKey, clusterDisplayIds, clusters]);
+
+  useEffect(() => {
+    setSelectedIds(() => []);
+  }, [numericId, setSelectedIds]);
+
+  if (Number.isNaN(numericId)) {
+    return (
+      <div className="detail-empty">
+        <p>集群信息加载中...</p>
+        <button className="secondary" onClick={() => navigate("/")}>
+          返回集群列表
+        </button>
+      </div>
+    );
+  }
+
+  const cluster = useMemo(
+    () => clusters.find((item) => item.id === numericId) ?? null,
+    [clusters, numericId]
+  );
+
+  if (!cluster) {
+    if (clusters.length === 0) {
+      return (
+        <div className="detail-empty">
+          <p>集群信息加载中...</p>
+          <button className="secondary" onClick={() => navigate("/")}>
+            返回集群列表
+          </button>
+        </div>
+      );
+    }
+    return (
+      <div className="detail-empty">
+        <p>未找到集群。</p>
+        <button className="secondary" onClick={() => navigate("/")}>
+          返回集群列表
+        </button>
+      </div>
+    );
+  }
+
+  const clusterSlug = getClusterDisplayId(
+    clusterDisplayIds,
+    cluster.id,
+    cluster
+  );
+
+  return (
+    <ClusterDetailContent
+      cluster={cluster}
+      clusterSlug={clusterSlug}
+      items={items}
+      runs={runs}
+      selectedIds={selectedIds}
+      setSelectedIds={setSelectedIds}
+      operator={operator}
+      setOperator={setOperator}
+      inspectionLoading={inspectionLoading}
+      notice={notice}
+      error={error}
+      clusterNotice={clusterNotice}
+      clusterNoticeType={clusterNoticeType}
+      clusterNoticeScope={clusterNoticeScope}
+      clusterError={clusterError}
+      onStartInspection={onStartInspection}
+      onDeleteRun={onDeleteRun}
+      onDeleteRunsBulk={onDeleteRunsBulk}
+      onCancelRun={onCancelRun}
+      onEditCluster={onEditCluster}
+      onDeleteCluster={onDeleteCluster}
+      clusterDisplayIds={clusterDisplayIds}
+      runDisplayIds={runDisplayIds}
+      onTestClusterConnection={onTestClusterConnection}
+      testingClusterIds={testingClusterIds}
+    />
   );
 };
 
