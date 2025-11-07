@@ -215,6 +215,22 @@ const isProgressInfoEqual = (
     );
   };
 
+const shouldKeepPollingRun = (
+  run: InspectionRun | null,
+  info: RunProgressInfo | null
+) => {
+  if (!run) {
+    return false;
+  }
+  if (run.status === "running" || run.status === "paused") {
+    return true;
+  }
+  if (!run.report_path && info) {
+    return info.pending > 0 || info.progress < 100;
+  }
+  return false;
+};
+
 const areRunListsEqual = (
   previous: InspectionRunListItem[] | undefined,
   next: InspectionRunListItem[]
@@ -2333,9 +2349,25 @@ const RunDetailView = ({
     clusterSlug ?? (clusterKey ? `/clusters/${clusterKey}` : "/");
 
   const isClusterIdInvalid = Number.isNaN(numericClusterId);
-  const isRunIdInvalid = Number.isNaN(numericRunId);
+  const isDisplayLookupReady = useMemo(() => {
+    if (!runKey) {
+      return false;
+    }
+    if (!Number.isNaN(Number(runKey))) {
+      return true;
+    }
+    if (runs.length === 0) {
+      return false;
+    }
+    return Object.keys(runDisplayIds).length > 0;
+  }, [runKey, runs.length, runDisplayIds]);
+  const isRunIdInvalid =
+    Number.isNaN(numericRunId) && isDisplayLookupReady;
 
   useEffect(() => {
+    if (!isDisplayLookupReady) {
+      return;
+    }
     if (isRunIdInvalid) {
       setRun(null);
       setLoading(false);
@@ -2345,7 +2377,6 @@ const RunDetailView = ({
     }
     setError(null);
     setLoading(true);
-    setError(null);
     const runLabel = runDisplayIds[numericRunId] ?? numericRunId;
     logWithTimestamp("info", "开始获取巡检详情: %s", runLabel);
     let cancelled = false;
@@ -2374,7 +2405,7 @@ const RunDetailView = ({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [numericRunId, isRunIdInvalid]);
+  }, [numericRunId, isRunIdInvalid, isDisplayLookupReady]);
 
 
   const resolvedClusterSlug =
@@ -2435,42 +2466,73 @@ const RunDetailView = ({
     [run]
   );
 
+  const shouldPollRun = useMemo(
+    () => shouldKeepPollingRun(run, progressInfo),
+    [run, progressInfo]
+  );
+
   useEffect(() => {
-    if (!run || runs.length === 0) {
+    if (!run?.id || !shouldPollRun) {
       return;
     }
-    const latest = runs.find((item) => item.id === run.id);
-    if (!latest) {
-      return;
-    }
-    const clampedProgress = clampProgress(latest.progress);
-    setRun((previous) => {
-      if (!previous || previous.id !== latest.id) {
-        return previous;
+    let cancelled = false;
+    let timer: number | null = null;
+
+    const poll = async () => {
+      try {
+        const refreshed = await getInspectionRun(run.id);
+        if (cancelled) {
+          return;
+        }
+        const nextInfo = buildRunProgressInfo(refreshed);
+        setRun((previous) => {
+          if (!previous) {
+            return refreshed;
+          }
+          if (previous.id !== refreshed.id) {
+            return refreshed;
+          }
+          const prevInfo = buildRunProgressInfo(previous);
+          if (
+            hasRunStateChanged(previous, refreshed) ||
+            !isProgressInfoEqual(prevInfo, nextInfo)
+          ) {
+            return refreshed;
+          }
+          return previous;
+        });
+        setError(null);
+        if (!cancelled && shouldKeepPollingRun(refreshed, nextInfo)) {
+          timer = window.setTimeout(() => {
+            void poll();
+          }, 600);
+        }
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+        const message =
+          err instanceof Error ? err.message : "获取巡检详情失败";
+        logWithTimestamp("error", "获取巡检详情失败: %s", message);
+        setError(message);
+        timer = window.setTimeout(() => {
+          void poll();
+        }, 2000);
       }
-      const shouldUpdate =
-        previous.status !== latest.status ||
-        previous.summary !== latest.summary ||
-        previous.report_path !== latest.report_path ||
-        previous.total_items !== latest.total_items ||
-        previous.processed_items !== latest.processed_items ||
-        previous.progress !== clampedProgress ||
-        previous.completed_at !== latest.completed_at;
-      if (!shouldUpdate) {
-        return previous;
+    };
+
+    timer = window.setTimeout(() => {
+      void poll();
+    }, 400);
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) {
+        window.clearTimeout(timer);
       }
-      return {
-        ...previous,
-        status: latest.status,
-        summary: latest.summary ?? previous.summary,
-        report_path: latest.report_path ?? previous.report_path,
-        total_items: latest.total_items,
-        processed_items: latest.processed_items,
-        progress: clampedProgress,
-        completed_at: latest.completed_at ?? previous.completed_at,
-      };
-    });
-  }, [runs, run?.id]);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run?.id, shouldPollRun]);
 
   const handleToggleRunState = useCallback(async () => {
     if (!run) {
