@@ -1573,6 +1573,7 @@ interface ClusterDetailProps {
   setOperator: (value: string) => void;
   inspectionLoading: boolean;
   notice: string | null;
+  noticeType: NoticeType | null;
   error: string | null;
   clusterNotice: string | null;
   clusterNoticeType: NoticeType;
@@ -1601,6 +1602,7 @@ interface ClusterDetailContentProps {
   setOperator: (value: string) => void;
   inspectionLoading: boolean;
   notice: string | null;
+  noticeType: NoticeType | null;
   error: string | null;
   clusterNotice: string | null;
   clusterNoticeType: NoticeType;
@@ -1629,6 +1631,7 @@ const ClusterDetailContent = ({
   setOperator,
   inspectionLoading,
   notice,
+  noticeType,
   error,
   clusterNotice,
   clusterNoticeType,
@@ -2194,6 +2197,7 @@ const ClusterDetailView = ({
   setOperator,
   inspectionLoading,
   notice,
+  noticeType,
   error,
   clusterNotice,
   clusterNoticeType,
@@ -2284,6 +2288,7 @@ const ClusterDetailView = ({
       setOperator={setOperator}
       inspectionLoading={inspectionLoading}
       notice={notice}
+      noticeType={noticeType}
       error={error}
       clusterNotice={clusterNotice}
       clusterNoticeType={clusterNoticeType}
