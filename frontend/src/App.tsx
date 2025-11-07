@@ -148,7 +148,11 @@ const hasRunStateChanged = (
   if (
     previous.status !== next.status ||
     previous.report_path !== next.report_path ||
-    previous.summary !== next.summary
+    previous.summary !== next.summary ||
+    previous.completed_at !== next.completed_at ||
+    previous.total_items !== next.total_items ||
+    previous.processed_items !== next.processed_items ||
+    previous.progress !== next.progress
   ) {
     return true;
   }
@@ -208,7 +212,23 @@ const isProgressInfoEqual = (
     previous.total === next.total &&
     previous.pending === next.pending &&
     previous.reportReady === next.reportReady
-  );
+    );
+  };
+
+const shouldKeepPollingRun = (
+  run: InspectionRun | null,
+  info: RunProgressInfo | null
+) => {
+  if (!run) {
+    return false;
+  }
+  if (run.status === "running" || run.status === "paused") {
+    return true;
+  }
+  if (!run.report_path && info) {
+    return info.pending > 0 || info.progress < 100;
+  }
+  return false;
 };
 
 const areRunListsEqual = (
@@ -2424,6 +2444,79 @@ const RunDetailView = ({
       });
   }, [run, itemOrderMap]);
 
+  const progressInfo = useMemo(
+    () => (run ? buildRunProgressInfo(run) : null),
+    [run]
+  );
+
+  const shouldPollRun = useMemo(
+    () => shouldKeepPollingRun(run, progressInfo),
+    [run, progressInfo]
+  );
+
+  useEffect(() => {
+    if (!run?.id || !shouldPollRun) {
+      return;
+    }
+    let cancelled = false;
+    let timer: number | null = null;
+
+    const poll = async () => {
+      try {
+        const refreshed = await getInspectionRun(run.id);
+        if (cancelled) {
+          return;
+        }
+        const nextInfo = buildRunProgressInfo(refreshed);
+        setRun((previous) => {
+          if (!previous) {
+            return refreshed;
+          }
+          if (previous.id !== refreshed.id) {
+            return refreshed;
+          }
+          const prevInfo = buildRunProgressInfo(previous);
+          if (
+            hasRunStateChanged(previous, refreshed) ||
+            !isProgressInfoEqual(prevInfo, nextInfo)
+          ) {
+            return refreshed;
+          }
+          return previous;
+        });
+        setError(null);
+        if (!cancelled && shouldKeepPollingRun(refreshed, nextInfo)) {
+          timer = window.setTimeout(() => {
+            void poll();
+          }, 600);
+        }
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+        const message =
+          err instanceof Error ? err.message : "获取巡检详情失败";
+        logWithTimestamp("error", "获取巡检详情失败: %s", message);
+        setError(message);
+        timer = window.setTimeout(() => {
+          void poll();
+        }, 2000);
+      }
+    };
+
+    timer = window.setTimeout(() => {
+      void poll();
+    }, 400);
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run?.id, shouldPollRun]);
+
   const handleToggleRunState = useCallback(async () => {
     if (!run) {
       return;
@@ -2572,12 +2665,17 @@ const RunDetailView = ({
                 </div>
                 <div className="inspection-summary-status">
                   <strong>状态: </strong>
-                  {renderRunStatusBadge(run.status, run.progress)}
+                  {renderRunStatusBadge(
+                    run.status,
+                    progressInfo?.progress ?? run.progress
+                  )}
                 </div>
                 <div>
                   <strong>进度: </strong>
-                  {run.total_items > 0
-                    ? `${run.processed_items} / ${run.total_items}`
+                  {progressInfo
+                    ? progressInfo.total > 0
+                      ? `${progressInfo.processed} / ${progressInfo.total}`
+                      : "-"
                     : "-"}
                 </div>
             <div>
