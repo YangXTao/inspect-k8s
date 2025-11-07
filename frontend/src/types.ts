@@ -22,7 +22,13 @@ export type ClusterConfig = {
   updated_at: string;
 };
 
-export type InspectionRunStatus = "running" | "passed" | "warning" | "failed";
+export type InspectionRunStatus =
+  | "running"
+  | "paused"
+  | "cancelled"
+  | "passed"
+  | "warning"
+  | "failed";
 
 export type InspectionResult = {
   id: number;

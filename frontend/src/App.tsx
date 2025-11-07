@@ -34,6 +34,9 @@ import {
   registerCluster,
   updateCluster,
   testClusterConnection,
+  pauseInspectionRun,
+  resumeInspectionRun,
+  cancelInspectionRun,
   createInspectionItem as apiCreateInspectionItem,
   updateInspectionItem as apiUpdateInspectionItem,
   deleteInspectionItem as apiDeleteInspectionItem,
@@ -97,6 +100,10 @@ const statusClass = (status: string) => {
       return "status-pill danger";
     case "running":
       return "status-pill running";
+    case "paused":
+      return "status-pill paused";
+    case "cancelled":
+      return "status-pill cancelled";
     default:
       return "status-pill";
   }
@@ -106,6 +113,10 @@ const formatRunStatusLabel = (status: InspectionRunStatus) => {
   switch (status) {
     case "running":
       return "巡检中";
+    case "paused":
+      return "暂停中";
+    case "cancelled":
+      return "已取消";
     case "passed":
       return "Passed";
     case "warning":
@@ -231,6 +242,7 @@ const isRunStillProcessing = (
   if (info) {
     return (
       info.status === "running" ||
+      info.status === "paused" ||
       (!info.reportReady && info.progress >= 100)
     );
   }
@@ -240,6 +252,7 @@ const isRunStillProcessing = (
   const progress = clampProgress(run.progress);
   return (
     run.status === "running" ||
+    run.status === "paused" ||
     (!run.report_path && progress >= 100)
   );
 };
@@ -270,10 +283,20 @@ const renderRunStatusBadge = (
   status: InspectionRunStatus,
   progress?: number
 ) => {
-  if (status === "running") {
+  if (status === "running" || status === "paused" || status === "cancelled") {
     const clamped = clampProgress(progress);
+    const progressClassName = [
+      "status-progress status-progress-circle",
+      status === "paused"
+        ? "paused"
+        : status === "cancelled"
+        ? "cancelled"
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" ");
     return (
-      <div className="status-progress status-progress-circle">
+      <div className={progressClassName}>
         <div className="status-circle">
           <svg viewBox="0 0 40 40">
             <circle className="status-circle-bg" cx="20" cy="20" r={STATUS_CIRCLE_RADIUS} />
@@ -1217,6 +1240,9 @@ interface HistoryViewProps {
   onRefreshRuns: () => Promise<void>;
   onDeleteRun: (run: InspectionRunListItem) => Promise<void>;
   onDeleteRunsBulk: (runIds: number[]) => Promise<void>;
+  onPauseRun: (runId: number) => Promise<InspectionRun | null>;
+  onResumeRun: (runId: number) => Promise<InspectionRun | null>;
+  onCancelRun: (run: InspectionRunListItem) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
   notice?: string | null;
@@ -1229,6 +1255,9 @@ const HistoryView = ({
   onRefreshRuns,
   onDeleteRun,
   onDeleteRunsBulk,
+  onPauseRun,
+  onResumeRun,
+  onCancelRun,
   clusterDisplayIds,
   runDisplayIds,
   notice,
@@ -1436,6 +1465,28 @@ const HistoryView = ({
                       >
                         查看详情
                       </button>
+                      {(run.status === "running" || run.status === "paused") && (
+                        <button
+                          className="link-button"
+                          onClick={async () => {
+                            if (run.status === "running") {
+                              await onPauseRun(run.id);
+                            } else {
+                              await onResumeRun(run.id);
+                            }
+                          }}
+                        >
+                          {run.status === "running" ? "暂停" : "继续"}
+                        </button>
+                      )}
+                      {(run.status === "running" || run.status === "paused") && (
+                        <button
+                          className="link-button danger"
+                          onClick={async () => await onCancelRun(run)}
+                        >
+                          取消
+                        </button>
+                      )}
                       {run.report_path && (
                         <a
                           className="link-button"
@@ -1546,6 +1597,9 @@ interface ClusterDetailProps {
   onStartInspection: (clusterId: number) => Promise<void>;
   onDeleteRun: (run: InspectionRunListItem) => Promise<void>;
   onDeleteRunsBulk: (runIds: number[]) => Promise<void>;
+  onPauseRun: (runId: number) => Promise<InspectionRun | null>;
+  onResumeRun: (runId: number) => Promise<InspectionRun | null>;
+  onCancelRun: (run: InspectionRunListItem) => Promise<void>;
   onEditCluster: (cluster: ClusterConfig) => void;
   onDeleteCluster: (cluster: ClusterConfig) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
@@ -1572,6 +1626,9 @@ const ClusterDetailView = ({
   onStartInspection,
   onDeleteRun,
   onDeleteRunsBulk,
+  onPauseRun,
+  onResumeRun,
+  onCancelRun,
   onEditCluster,
   onDeleteCluster,
   clusterDisplayIds,
@@ -2069,6 +2126,32 @@ const ClusterDetailView = ({
                       >
                         查看详情
                       </button>
+                      {(run.status === "running" || run.status === "paused") && (
+                        <button
+                          className="link-button"
+                          onClick={async (event) => {
+                            event.stopPropagation();
+                            if (run.status === "running") {
+                              await onPauseRun(run.id);
+                            } else {
+                              await onResumeRun(run.id);
+                            }
+                          }}
+                        >
+                          {run.status === "running" ? "暂停" : "继续"}
+                        </button>
+                      )}
+                      {(run.status === "running" || run.status === "paused") && (
+                        <button
+                          className="link-button danger"
+                          onClick={async (event) => {
+                            event.stopPropagation();
+                            await onCancelRun(run);
+                          }}
+                        >
+                          取消
+                        </button>
+                      )}
                       {run.report_path && (
                         <a
                           className="link-button"
@@ -2165,6 +2248,9 @@ interface RunDetailProps {
   clusters: ClusterConfig[];
   items: InspectionItem[];
   onDeleteRun: (runId: number, redirectPath?: string) => Promise<void>;
+  onPauseRun: (runId: number) => Promise<InspectionRun | null>;
+  onResumeRun: (runId: number) => Promise<InspectionRun | null>;
+  onCancelRun: (runId: number, redirectPath?: string) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
   notice?: string | null;
@@ -2176,6 +2262,9 @@ const RunDetailView = ({
   clusters,
   items,
   onDeleteRun,
+  onPauseRun,
+  onResumeRun,
+  onCancelRun,
   clusterDisplayIds,
   runDisplayIds,
   notice,
@@ -2248,6 +2337,7 @@ const RunDetailView = ({
       logWithTimestamp("error", "巡检编号无效: %s", runKey ?? "");
       return;
     }
+    setError(null);
     setLoading(true);
     setError(null);
     const runLabel = runDisplayIds[numericRunId] ?? numericRunId;
@@ -2334,6 +2424,37 @@ const RunDetailView = ({
       });
   }, [run, itemOrderMap]);
 
+  const handleToggleRunState = useCallback(async () => {
+    if (!run) {
+      return;
+    }
+    const action =
+      run.status === "running" ? onPauseRun : onResumeRun;
+    const updated = await action(run.id);
+    if (updated) {
+      setRun(updated);
+      return;
+    }
+    setLoading(true);
+    try {
+      const refreshed = await getInspectionRun(run.id);
+      setRun(refreshed);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "获取巡检详情失败";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }, [run, onPauseRun, onResumeRun, getInspectionRun]);
+
+  const handleCancelRunDetail = useCallback(() => {
+    if (!run) {
+      return;
+    }
+    void onCancelRun(run.id, clusterPath);
+  }, [run, onCancelRun, clusterPath]);
+
   if (isClusterIdInvalid) {
     return (
       <div className="detail-empty">
@@ -2393,6 +2514,24 @@ const RunDetailView = ({
               下载报告
             </button>
           ) : null}
+          {run && (run.status === "running" || run.status === "paused") ? (
+            <>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => void handleToggleRunState()}
+              >
+                {run.status === "running" ? "暂停" : "继续"}
+              </button>
+              <button
+                type="button"
+                className="secondary danger"
+                onClick={handleCancelRunDetail}
+              >
+                取消
+              </button>
+            </>
+          ) : null}
       </div>
     </div>
 
@@ -2430,6 +2569,16 @@ const RunDetailView = ({
                 <div>
                   <strong>巡检人: </strong>
                   {run.operator || "-"}
+                </div>
+                <div className="inspection-summary-status">
+                  <strong>状态: </strong>
+                  {renderRunStatusBadge(run.status, run.progress)}
+                </div>
+                <div>
+                  <strong>进度: </strong>
+                  {run.total_items > 0
+                    ? `${run.processed_items} / ${run.total_items}`
+                    : "-"}
                 </div>
             <div>
               <strong>开始时间: </strong>
@@ -3797,6 +3946,7 @@ const backgroundLocation =
       runs.some(
         (run) =>
           run.status === "running" ||
+          run.status === "paused" ||
           (!run.report_path && run.progress >= 100)
       ),
     [runs]
@@ -3817,6 +3967,7 @@ const backgroundLocation =
         data?.some(
           (run) =>
             run.status === "running" ||
+            run.status === "paused" ||
             (!run.report_path && run.progress >= 100)
         ) ?? false;
       if (shouldContinue && !cancelled) {
@@ -4100,6 +4251,44 @@ const backgroundLocation =
   [selectedItemIds, operator, refreshRuns, refreshClusters]
 );
 
+  const handlePauseRun = useCallback(
+    async (runId: number): Promise<InspectionRun | null> => {
+      try {
+        logWithTimestamp("info", "暂停巡检记录: %s", runId);
+        const updated = await pauseInspectionRun(runId);
+        await refreshRuns();
+        showClusterNotice(currentNoticeScope, "巡检已暂停", "success");
+        return updated;
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "暂停巡检失败";
+        logWithTimestamp("error", "暂停巡检失败: %s", message);
+        showClusterNotice(currentNoticeScope, message, "error");
+        return null;
+      }
+    },
+    [refreshRuns, showClusterNotice, currentNoticeScope]
+  );
+
+  const handleResumeRun = useCallback(
+    async (runId: number): Promise<InspectionRun | null> => {
+      try {
+        logWithTimestamp("info", "恢复巡检记录: %s", runId);
+        const updated = await resumeInspectionRun(runId);
+        await refreshRuns();
+        showClusterNotice(currentNoticeScope, "巡检已恢复", "success");
+        return updated;
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "恢复巡检失败";
+        logWithTimestamp("error", "恢复巡检失败: %s", message);
+        showClusterNotice(currentNoticeScope, message, "error");
+        return null;
+      }
+    },
+    [refreshRuns, showClusterNotice, currentNoticeScope]
+  );
+
   const handleDeleteClustersBulk = useCallback(
     (clusterIds: number[]): Promise<void> => {
       const targets = clusters.filter((cluster) =>
@@ -4294,6 +4483,77 @@ const backgroundLocation =
             const message =
               err instanceof Error ? err.message : "删除巡检记录失败";
             logWithTimestamp("error", "删除巡检记录失败: %s", message);
+            showClusterNotice(currentNoticeScope, message, "error");
+            throw err instanceof Error ? err : new Error(message);
+          }
+        },
+      });
+      return Promise.resolve();
+    },
+    [
+      runDisplayIds,
+      refreshRuns,
+      refreshClusters,
+      navigate,
+      currentNoticeScope,
+      showClusterNotice,
+    ]
+  );
+
+  const handleCancelRun = useCallback(
+    (run: InspectionRunListItem): Promise<void> => {
+      const displayId = runDisplayIds[run.id] ?? String(run.id);
+      setConfirmState({
+        title: "取消巡检",
+        message: `确认取消巡检记录(${displayId})？已产生的巡检结果将被保留。`,
+        confirmLabel: "确认取消",
+        variant: "danger",
+        onConfirm: async () => {
+          try {
+            logWithTimestamp("info", "取消巡检记录: %s", run.id);
+            await cancelInspectionRun(run.id);
+            await refreshRuns();
+            await refreshClusters();
+            showClusterNotice(currentNoticeScope, "巡检已取消", "warning");
+          } catch (err) {
+            const message =
+              err instanceof Error ? err.message : "取消巡检失败";
+            logWithTimestamp("error", "取消巡检失败: %s", message);
+            showClusterNotice(currentNoticeScope, message, "error");
+            throw err instanceof Error ? err : new Error(message);
+          }
+        },
+      });
+      return Promise.resolve();
+    },
+    [runDisplayIds, refreshRuns, refreshClusters, currentNoticeScope, showClusterNotice]
+  );
+
+  const handleCancelRunById = useCallback(
+    (runId: number, redirectPath?: string): Promise<void> => {
+      const displayId = runDisplayIds[runId] ?? String(runId);
+      setConfirmState({
+        title: "取消巡检",
+        message: `确认取消巡检记录(${displayId})？已产生的巡检结果将被保留。`,
+        confirmLabel: "确认取消",
+        variant: "danger",
+        onConfirm: async () => {
+          try {
+            logWithTimestamp("info", "取消巡检记录: %s", runId);
+            await cancelInspectionRun(runId);
+            await refreshRuns();
+            await refreshClusters();
+            const targetScope = redirectPath
+              ? resolveNoticeScope(redirectPath)
+              : currentNoticeScope;
+            showClusterNotice(targetScope, "巡检已取消", "warning");
+            if (redirectPath) {
+              navigate(redirectPath, { replace: true });
+            }
+          } catch (err) {
+            const message =
+              err instanceof Error ? err.message : "取消巡检失败";
+            logWithTimestamp("error", "取消巡检失败: %s", message);
             showClusterNotice(currentNoticeScope, message, "error");
             throw err instanceof Error ? err : new Error(message);
           }
@@ -4737,6 +4997,9 @@ const backgroundLocation =
                 onDeleteRunsBulk={(ids) =>
                   handleDeleteRunsBulk(ids, "history")
                 }
+                onPauseRun={handlePauseRun}
+                onResumeRun={handleResumeRun}
+                onCancelRun={handleCancelRun}
                 clusterDisplayIds={clusterDisplayIds}
                 runDisplayIds={runDisplayIds}
                 notice={clusterNotice}
@@ -4768,6 +5031,9 @@ const backgroundLocation =
                 onDeleteRunsBulk={(ids) =>
                   handleDeleteRunsBulk(ids, "clusterDetail")
                 }
+                onPauseRun={handlePauseRun}
+                onResumeRun={handleResumeRun}
+                onCancelRun={handleCancelRun}
                 onEditCluster={handleEditCluster}
                 onDeleteCluster={handleDeleteCluster}
                 clusterDisplayIds={clusterDisplayIds}
@@ -4784,6 +5050,9 @@ const backgroundLocation =
                 clusters={clusters}
                 items={sortedItems}
                 onDeleteRun={handleDeleteRunById}
+                onPauseRun={handlePauseRun}
+                onResumeRun={handleResumeRun}
+                onCancelRun={handleCancelRunById}
                 clusterDisplayIds={clusterDisplayIds}
                 runDisplayIds={runDisplayIds}
                 notice={clusterNotice}
