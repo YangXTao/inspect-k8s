@@ -15,6 +15,8 @@ export type ClusterConfig = {
   contexts: string[];
   connection_status: "connected" | "failed" | "warning" | "unknown";
   connection_message?: string | null;
+  kubernetes_version?: string | null;
+  node_count?: number | null;
   last_checked_at?: string | null;
   created_at: string;
   updated_at: string;
