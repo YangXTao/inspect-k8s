@@ -35,6 +35,8 @@ import {
   updateCluster,
   testClusterConnection,
   cancelInspectionRun,
+  getLicenseStatus,
+  uploadLicense,
   createInspectionItem as apiCreateInspectionItem,
   updateInspectionItem as apiUpdateInspectionItem,
   deleteInspectionItem as apiDeleteInspectionItem,
@@ -49,11 +51,23 @@ import {
   InspectionRun,
   InspectionRunListItem,
   InspectionRunStatus,
+  LicenseStatus,
 } from "./types";
 
 type NoticeType = "success" | "warning" | "error" | null;
 type ConfirmVariant = "primary" | "danger";
 type NoticeScope = "overview" | "clusterDetail" | "history" | "runDetail";
+
+type LicenseCapabilities = {
+  loading: boolean;
+  valid: boolean;
+  reason: string | null;
+  features: string[];
+  canManageClusters: boolean;
+  canRunInspections: boolean;
+  canDownloadReports: boolean;
+  status: LicenseStatus | null;
+};
 
 interface ConfirmDialogOption {
   id: string;
@@ -689,6 +703,7 @@ interface OverviewProps {
   clusterDisplayIds: Record<number, string>;
   onTestClusterConnection: (clusterId: number) => Promise<void>;
   testingClusterIds: Record<number, boolean>;
+  license: LicenseCapabilities;
 }
 
 const OverviewView = ({
@@ -712,6 +727,7 @@ const OverviewView = ({
   clusterDisplayIds,
   onTestClusterConnection,
   testingClusterIds,
+  license,
 }: OverviewProps) => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -869,16 +885,23 @@ const OverviewView = ({
         <div className="header-actions">
           <div className="cluster-upload">
             <label>添加集群</label>
+            {!license.loading && !license.valid && (
+              <div className="feedback error">
+                {license.reason ?? "当前 License 无效，无法添加集群。"}
+              </div>
+            )}
             <input
               type="text"
               placeholder="自定义集群名称"
               value={clusterNameInput}
+              disabled={!license.canManageClusters}
               onChange={(event) => setClusterNameInput(event.target.value)}
             />
             <input
               type="text"
               placeholder="Prometheus 地址"
               value={clusterPromInput}
+              disabled={!license.canManageClusters}
               onChange={(event) => setClusterPromInput(event.target.value)}
             />
             <button
@@ -887,6 +910,7 @@ const OverviewView = ({
                 kubeconfigReady ? " ready" : ""
               }`}
               onClick={openKubeconfigModal}
+              disabled={!license.canManageClusters}
             >
               {kubeconfigReady ? "查看 / 更新 kubeconfig" : "导入 kubeconfig"}
             </button>
@@ -896,7 +920,7 @@ const OverviewView = ({
             <button
               className="secondary"
               onClick={() => void onUpload()}
-              disabled={clusterUploading}
+              disabled={clusterUploading || !license.canManageClusters}
             >
               {clusterUploading ? "上传中..." : "上传集群"}
             </button>
@@ -1248,6 +1272,7 @@ interface HistoryViewProps {
   notice?: string | null;
   noticeType?: NoticeType;
   noticeScope?: NoticeScope | null;
+  license: LicenseCapabilities;
 }
 
 const HistoryView = ({
@@ -1261,6 +1286,7 @@ const HistoryView = ({
   notice,
   noticeType,
   noticeScope,
+  license,
 }: HistoryViewProps) => {
   const navigate = useNavigate();
   const shouldShowNotice =
@@ -1401,6 +1427,11 @@ const HistoryView = ({
       {shouldShowNotice && (
         <div className={`feedback ${noticeType}`}>{notice}</div>
       )}
+      {!license.canDownloadReports && (
+        <div className="feedback warning">
+          {license.reason ?? "当前 License 不支持下载巡检报告。"}
+        </div>
+      )}
       {runs.length === 0 ? (
         <div className="placeholder">暂无巡检记录，请稍后再查看。</div>
       ) : (
@@ -1471,7 +1502,7 @@ const HistoryView = ({
                           取消
                         </button>
                       )}
-                      {run.report_path && (
+                      {license.canDownloadReports && run.report_path && (
                         <>
                           <a
                             className="link-button"
@@ -1599,6 +1630,7 @@ interface ClusterDetailProps {
   runDisplayIds: Record<number, string>;
   onTestClusterConnection: (clusterId: number) => Promise<void>;
   testingClusterIds: Record<number, boolean>;
+  license: LicenseCapabilities;
 }
 
 interface ClusterDetailContentProps {
@@ -1628,6 +1660,7 @@ interface ClusterDetailContentProps {
   runDisplayIds: Record<number, string>;
   onTestClusterConnection: (clusterId: number) => Promise<void>;
   testingClusterIds: Record<number, boolean>;
+  license: LicenseCapabilities;
 }
 
 const ClusterDetailContent = ({
@@ -1657,6 +1690,7 @@ const ClusterDetailContent = ({
   runDisplayIds,
   onTestClusterConnection,
   testingClusterIds,
+  license,
 }: ClusterDetailContentProps) => {
   const navigate = useNavigate();
 
@@ -2005,10 +2039,15 @@ const ClusterDetailContent = ({
       <button
         className="primary"
         onClick={() => onStartInspection(cluster.id)}
-        disabled={inspectionLoading}
+        disabled={inspectionLoading || !license.canRunInspections}
       >
         {inspectionLoading ? "巡检中..." : "开始巡检"}
       </button>
+      {!license.canRunInspections && (
+        <span className="card-caption">
+          {license.reason ?? "当前 License 不支持巡检功能。"}
+        </span>
+      )}
           </div>
         </div>
       </section>
@@ -2041,6 +2080,11 @@ const ClusterDetailContent = ({
             </div>
           )}
         </div>
+        {!license.canDownloadReports && (
+          <div className="feedback warning">
+            {license.reason ?? "当前 License 不支持下载巡检报告。"}
+          </div>
+        )}
         <div className="table-wrapper">
           <table>
             <thead>
@@ -2105,7 +2149,7 @@ const ClusterDetailContent = ({
                           取消
                         </button>
                       )}
-                      {run.report_path && (
+                      {license.canDownloadReports && run.report_path && (
                         <>
                           <a
                             className="link-button"
@@ -2233,6 +2277,7 @@ const ClusterDetailView = ({
   runDisplayIds,
   onTestClusterConnection,
   testingClusterIds,
+  license,
 }: ClusterDetailProps) => {
   const { clusterKey } = useParams<{ clusterKey?: string }>();
   const navigate = useNavigate();
@@ -2297,11 +2342,11 @@ const ClusterDetailView = ({
   );
 
   return (
-    <ClusterDetailContent
-      cluster={cluster}
-      clusterSlug={clusterSlug}
-      items={items}
-      runs={runs}
+      <ClusterDetailContent
+        cluster={cluster}
+        clusterSlug={clusterSlug}
+        items={items}
+        runs={runs}
       selectedIds={selectedIds}
       setSelectedIds={setSelectedIds}
       operator={operator}
@@ -2320,11 +2365,12 @@ const ClusterDetailView = ({
       onCancelRun={onCancelRun}
       onEditCluster={onEditCluster}
       onDeleteCluster={onDeleteCluster}
-      clusterDisplayIds={clusterDisplayIds}
-      runDisplayIds={runDisplayIds}
-      onTestClusterConnection={onTestClusterConnection}
-      testingClusterIds={testingClusterIds}
-    />
+        clusterDisplayIds={clusterDisplayIds}
+        runDisplayIds={runDisplayIds}
+        onTestClusterConnection={onTestClusterConnection}
+        testingClusterIds={testingClusterIds}
+        license={license}
+      />
   );
 };
 
@@ -2339,6 +2385,7 @@ interface RunDetailProps {
   notice?: string | null;
   noticeType?: NoticeType;
   noticeScope?: NoticeScope | null;
+  license: LicenseCapabilities;
 }
 
 const RunDetailView = ({
@@ -2352,6 +2399,7 @@ const RunDetailView = ({
   notice,
   noticeType,
   noticeScope,
+  license,
 }: RunDetailProps) => {
   const { clusterKey, runKey } = useParams<{
     clusterKey?: string;
@@ -2486,12 +2534,16 @@ const RunDetailView = ({
       if (!run?.report_path || !run?.id) {
         return;
       }
+      if (!license.canDownloadReports) {
+        setError(license.reason ?? "当前 License 不支持下载巡检报告。");
+        return;
+      }
       const url = getReportDownloadUrl(run.id, reportFormat);
       if (typeof window !== "undefined") {
         window.open(url, "_blank", "noopener,noreferrer");
       }
     },
-    [run]
+    [run, license.canDownloadReports, license.reason]
   );
 
   const itemOrderMap = useMemo(() => {
@@ -2727,7 +2779,7 @@ const RunDetailView = ({
           返回上一页
         </button>
         <div className="detail-header-actions">
-          {run?.report_path ? (
+          {run?.report_path && license.canDownloadReports ? (
             <>
               <button
                 type="button"
@@ -2759,6 +2811,12 @@ const RunDetailView = ({
 
     {shouldShowNotice && (
       <div className={`feedback ${noticeType}`}>{notice}</div>
+    )}
+
+    {!license.canDownloadReports && (
+      <p className="card-caption">
+        {license.reason ?? "当前 License 不支持下载巡检报告。"}
+      </p>
     )}
 
     {error && <div className="feedback error">{error}</div>}
@@ -3155,24 +3213,235 @@ const SettingsModal = ({
 
 const SettingsOverviewPanel = ({
   onOpenInspection,
+  onOpenLicense,
+  license,
 }: {
   onOpenInspection: () => void;
-}) => (
-  <div className="settings-overview">
-    <h4>快速开始</h4>
-    <p>
-      根据业务需求组合不同的巡检策略。请选择左侧的类别进入对应的配置页。
-    </p>
-    <div className="settings-overview-actions">
-      <button type="button" className="primary" onClick={onOpenInspection}>
-        管理巡检项
-      </button>
+  onOpenLicense: () => void;
+  license: LicenseCapabilities;
+}) => {
+  const featureLabelMap: Record<string, string> = {
+    clusters: "集群管理",
+    inspections: "巡检执行",
+    reports: "报告下载",
+  };
+  const featureSummary =
+    license.features.length > 0
+      ? license.features
+          .map((feature) => featureLabelMap[feature] ?? feature)
+          .join("、")
+      : "暂无功能";
+
+  return (
+    <div className="settings-overview">
+      <h4>快速开始</h4>
+      <p>
+        根据业务需求组合不同的巡检策略。请选择左侧的类别进入对应的配置页。
+      </p>
+      <div className="settings-overview-actions">
+        <button type="button" className="primary" onClick={onOpenInspection}>
+          管理巡检项
+        </button>
+        <button type="button" className="secondary" onClick={onOpenLicense}>
+          License 管理
+        </button>
+      </div>
+      <div className="settings-overview-license">
+        <h5>当前 License 状态</h5>
+        <p>
+          状态：
+          <strong>
+            {license.loading
+              ? "加载中..."
+              : license.valid
+              ? "已激活"
+              : "未激活"}
+          </strong>
+        </p>
+        {!license.valid && !license.loading && license.reason && (
+          <p>{license.reason}</p>
+        )}
+        {license.status?.expires_at && (
+          <p>到期时间：{formatDate(license.status.expires_at)}</p>
+        )}
+        <p>功能权限：{featureSummary}</p>
+      </div>
+      <p className="settings-overview-hint">
+        更多设置选项（通知策略、巡检计划等）即将开放，敬请期待。
+      </p>
     </div>
-    <p className="settings-overview-hint">
-      更多设置选项（通知策略、巡检计划等）即将开放，敬请期待。
-    </p>
-  </div>
-);
+  );
+};
+
+interface LicenseSettingsPanelProps {
+  status: LicenseCapabilities;
+  uploading: boolean;
+  onUpload: (file: File) => Promise<unknown>;
+  onRefresh: () => Promise<LicenseStatus | null>;
+}
+
+const LicenseSettingsPanel = ({
+  status,
+  uploading,
+  onUpload,
+  onRefresh,
+}: LicenseSettingsPanelProps) => {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const featureLabelMap: Record<string, string> = {
+    clusters: "集群管理",
+    inspections: "巡检执行",
+    reports: "报告下载",
+  };
+
+  const featureText =
+    status.features.length > 0
+      ? status.features
+          .map((feature) => featureLabelMap[feature] ?? feature)
+          .join("、")
+      : "暂无功能";
+
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    setSelectedFile(file);
+    setNotice(null);
+    setError(null);
+  };
+
+  const handleUploadClick = async () => {
+    if (!selectedFile) {
+      setError("请先选择 License 文件");
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    try {
+      await onUpload(selectedFile);
+      await onRefresh();
+      setNotice("License 上传成功");
+      setSelectedFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "上传 License 失败";
+      setError(message);
+    }
+  };
+
+  const handleRefreshClick = async () => {
+    setRefreshing(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const refreshed = await onRefresh();
+      if (refreshed?.valid) {
+        setNotice("License 状态已刷新。");
+      } else if (refreshed?.reason) {
+        setError(refreshed.reason);
+      } else if (status.reason) {
+        setError(status.reason);
+      } else {
+        setNotice("License 状态已刷新。");
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "刷新 License 状态失败";
+      setError(message);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  return (
+    <div className="settings-license-panel">
+      <h4>License 信息</h4>
+      <div className="license-status-card">
+        <p>
+          <strong>授权状态：</strong>
+          {status.loading
+            ? "加载中..."
+            : status.valid
+            ? "已激活"
+            : "未激活"}
+        </p>
+        {status.status?.licensee && (
+          <p>
+            <strong>授权给：</strong>
+            {status.status.licensee}
+          </p>
+        )}
+        {status.status?.product && (
+          <p>
+            <strong>产品：</strong>
+            {status.status.product}
+          </p>
+        )}
+        {status.status?.issued_at && (
+          <p>
+            <strong>签发时间：</strong>
+            {formatDate(status.status.issued_at)}
+          </p>
+        )}
+        {status.status?.expires_at && (
+          <p>
+            <strong>到期时间：</strong>
+            {formatDate(status.status.expires_at)}
+          </p>
+        )}
+        <p>
+          <strong>功能权限：</strong>
+          {featureText}
+        </p>
+        {!status.valid && status.reason && (
+          <p>
+            <strong>原因：</strong>
+            {status.reason}
+          </p>
+        )}
+      </div>
+      <div className="license-upload-section">
+        <label className="license-upload-label">
+          导入 License 文件
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json,.lic,.license"
+            onChange={handleFileChange}
+          />
+        </label>
+        {selectedFile && (
+          <p className="license-file-name">已选择：{selectedFile.name}</p>
+        )}
+        <div className="license-actions">
+          <button
+            type="button"
+            className="primary"
+            onClick={handleUploadClick}
+            disabled={uploading}
+          >
+            {uploading ? "上传中..." : "上传 License"}
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={handleRefreshClick}
+            disabled={refreshing || status.loading}
+          >
+            {refreshing ? "刷新中..." : "刷新状态"}
+          </button>
+        </div>
+      </div>
+      {notice && <div className="feedback success">{notice}</div>}
+      {error && <div className="feedback error">{error}</div>}
+    </div>
+  );
+};
 
 interface InspectionSettingsPanelProps {
   items: InspectionItem[];
@@ -4031,6 +4300,93 @@ const [clusterUploading, setClusterUploading] = useState(false);
   const [settingsTabId, setSettingsTabId] = useState<string>("overview");
   const previousSettingsPathRef = useRef<string>("/");
   const backgroundLocationRef = useRef<RouterLocation | null>(null);
+  const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
+  const [licenseError, setLicenseError] = useState<string | null>(null);
+  const [licenseLoading, setLicenseLoading] = useState(false);
+  const [licenseUploading, setLicenseUploading] = useState(false);
+
+  const licenseFeatureSet = useMemo(
+    () =>
+      new Set(
+        (licenseStatus?.features ?? []).map((feature) =>
+          feature.toLowerCase()
+        )
+      ),
+    [licenseStatus]
+  );
+  const licenseValid = licenseStatus?.valid ?? false;
+  const canManageClusters = licenseValid && licenseFeatureSet.has("clusters");
+  const canRunInspections =
+    licenseValid && licenseFeatureSet.has("inspections");
+  const canDownloadReports =
+    licenseValid && licenseFeatureSet.has("reports");
+  const licenseReason = licenseValid
+    ? null
+    : licenseStatus?.reason ?? licenseError ?? "当前 License 未生效或未安装。";
+
+  const licenseCapabilities = useMemo<LicenseCapabilities>(
+    () => ({
+      loading: licenseLoading,
+      valid: licenseValid,
+      reason: licenseReason,
+      features: licenseStatus?.features ?? [],
+      canManageClusters,
+      canRunInspections,
+      canDownloadReports,
+      status: licenseStatus,
+    }),
+    [
+      licenseLoading,
+      licenseValid,
+      licenseReason,
+      licenseStatus,
+      canManageClusters,
+      canRunInspections,
+      canDownloadReports,
+    ]
+  );
+
+  const refreshLicenseStatus = useCallback(async (): Promise<LicenseStatus | null> => {
+    setLicenseLoading(true);
+    try {
+      const status = await getLicenseStatus();
+      setLicenseStatus(status);
+      setLicenseError(null);
+      return status;
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "获取 License 状态失败";
+      setLicenseStatus(null);
+      setLicenseError(message);
+      return null;
+    } finally {
+      setLicenseLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshLicenseStatus();
+  }, [refreshLicenseStatus]);
+
+  const handleUploadLicenseFile = useCallback(
+    async (file: File) => {
+      setLicenseUploading(true);
+      try {
+        const status = await uploadLicense(file);
+        setLicenseStatus(status);
+        setLicenseError(null);
+        return status;
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "上传 License 失败";
+        setLicenseError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setLicenseUploading(false);
+      }
+    },
+    []
+  );
 
   const sortedItems = useMemo(
     () => items.slice().sort(compareInspectionItemByName),
@@ -4352,8 +4708,14 @@ const backgroundLocation =
   };
 
   const handleOpenKubeconfigModal = useCallback(() => {
+    if (!licenseCapabilities.canManageClusters) {
+      setClusterError(
+        licenseCapabilities.reason ?? "当前 License 不支持集群管理。"
+      );
+      return;
+    }
     setKubeconfigModalOpen(true);
-  }, []);
+  }, [licenseCapabilities, setClusterError]);
 
   const handleCloseKubeconfigModal = useCallback(() => {
     setKubeconfigModalOpen(false);
@@ -4403,6 +4765,12 @@ const backgroundLocation =
   }, []);
 
   const handleUploadCluster = useCallback(async () => {
+    if (!licenseCapabilities.canManageClusters) {
+      setClusterError(
+        licenseCapabilities.reason ?? "当前 License 不支持集群管理。"
+      );
+      return;
+    }
     const hasText = kubeconfigText.trim().length > 0;
     let fileToUpload: File | null = null;
 
@@ -4468,6 +4836,7 @@ const backgroundLocation =
     clearClusterNotice,
     currentNoticeScope,
     showClusterNotice,
+    licenseCapabilities,
   ]);
 
   const hasManualKubeconfig = useMemo(
@@ -4511,6 +4880,12 @@ const backgroundLocation =
 
   const handleStartInspection = useCallback(
     async (clusterId: number) => {
+      if (!licenseCapabilities.canRunInspections) {
+        setInspectionError(
+          licenseCapabilities.reason ?? "当前 License 不支持巡检功能。"
+        );
+        return;
+      }
       if (selectedItemIds.length === 0) {
         setInspectionError("请至少选择一个巡检项");
         return;
@@ -4549,7 +4924,7 @@ const backgroundLocation =
       setInspectionLoading(false);
     }
   },
-  [selectedItemIds, operator, refreshRuns, refreshClusters]
+  [selectedItemIds, operator, refreshRuns, refreshClusters, licenseCapabilities]
 );
 
   const handleDeleteClustersBulk = useCallback(
@@ -5053,6 +5428,8 @@ const backgroundLocation =
         render: ({ selectTab }) => (
           <SettingsOverviewPanel
             onOpenInspection={() => selectTab("inspection")}
+            onOpenLicense={() => selectTab("license")}
+            license={licenseCapabilities}
           />
         ),
       },
@@ -5074,6 +5451,18 @@ const backgroundLocation =
           />
         ),
       },
+      {
+        id: "license",
+        label: "License 管理",
+        render: () => (
+          <LicenseSettingsPanel
+            status={licenseCapabilities}
+            uploading={licenseUploading}
+            onUpload={handleUploadLicenseFile}
+            onRefresh={refreshLicenseStatus}
+          />
+        ),
+      },
     ],
     [
       sortedItems,
@@ -5085,6 +5474,10 @@ const backgroundLocation =
       handleDeleteInspectionItemsBulk,
       handleExportInspectionItems,
       handleImportInspectionItems,
+      licenseCapabilities,
+      licenseUploading,
+      handleUploadLicenseFile,
+      refreshLicenseStatus,
     ]
   );
 
@@ -5240,6 +5633,7 @@ const backgroundLocation =
       clusterDisplayIds={clusterDisplayIds}
       onTestClusterConnection={handleTestClusterConnection}
       testingClusterIds={testingClusterIds}
+      license={licenseCapabilities}
     />
   );
 
@@ -5266,6 +5660,7 @@ const backgroundLocation =
                 notice={clusterNotice}
                 noticeType={clusterNoticeType}
                 noticeScope={clusterNoticeScope}
+                license={licenseCapabilities}
               />
             }
           />
@@ -5299,6 +5694,7 @@ const backgroundLocation =
                 runDisplayIds={runDisplayIds}
                 onTestClusterConnection={handleTestClusterConnection}
                 testingClusterIds={testingClusterIds}
+                license={licenseCapabilities}
               />
             }
           />
@@ -5316,6 +5712,7 @@ const backgroundLocation =
                 notice={clusterNotice}
                 noticeType={clusterNoticeType}
                 noticeScope={clusterNoticeScope}
+                license={licenseCapabilities}
               />
             }
           />

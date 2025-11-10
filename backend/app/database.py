@@ -83,6 +83,7 @@ def ensure_runtime_directories() -> None:
     """Ensure directories for storing generated assets exist."""
     Path("reports").mkdir(exist_ok=True)
     Path("configs").mkdir(exist_ok=True)
+    Path("license").mkdir(exist_ok=True)
 
 
 def _ensure_cluster_schema() -> None:

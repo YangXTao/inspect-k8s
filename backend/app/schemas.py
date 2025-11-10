@@ -179,3 +179,14 @@ class InspectionItemsImportResult(BaseModel):
     created: int = Field(..., ge=0)
     updated: int = Field(..., ge=0)
     total: int = Field(..., ge=0)
+
+
+class LicenseStatusOut(BaseModel):
+    valid: bool
+    reason: Optional[str] = None
+    product: Optional[str] = None
+    licensee: Optional[str] = None
+    issued_at: Optional[datetime] = None
+    not_before: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    features: List[str] = Field(default_factory=list)
