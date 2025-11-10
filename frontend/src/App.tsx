@@ -37,6 +37,7 @@ import {
   cancelInspectionRun,
   getLicenseStatus,
   uploadLicense,
+  uploadLicenseText,
   createInspectionItem as apiCreateInspectionItem,
   updateInspectionItem as apiUpdateInspectionItem,
   deleteInspectionItem as apiDeleteInspectionItem,
@@ -3276,18 +3277,23 @@ const SettingsOverviewPanel = ({
 interface LicenseSettingsPanelProps {
   status: LicenseCapabilities;
   uploading: boolean;
+  textUploading: boolean;
   onUpload: (file: File) => Promise<unknown>;
+  onUploadText: (content: string) => Promise<unknown>;
   onRefresh: () => Promise<LicenseStatus | null>;
 }
 
 const LicenseSettingsPanel = ({
   status,
   uploading,
+  textUploading,
   onUpload,
+  onUploadText,
   onRefresh,
 }: LicenseSettingsPanelProps) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [licenseText, setLicenseText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -3334,6 +3340,26 @@ const LicenseSettingsPanel = ({
     }
   };
 
+  const handleImportText = async () => {
+    const trimmed = licenseText.trim();
+    if (!trimmed) {
+      setError("请粘贴加密或明文的 License 内容");
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    try {
+      await onUploadText(trimmed);
+      await onRefresh();
+      setNotice("License 文本导入成功");
+      setLicenseText("");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "导入 License 失败";
+      setError(message);
+    }
+  };
+
   const handleRefreshClick = async () => {
     setRefreshing(true);
     setError(null);
@@ -3372,7 +3398,7 @@ const LicenseSettingsPanel = ({
         </p>
         {status.status?.licensee && (
           <p>
-            <strong>授权给：</strong>
+            <strong>公司：</strong>
             {status.status.licensee}
           </p>
         )}
@@ -3434,6 +3460,33 @@ const LicenseSettingsPanel = ({
             disabled={refreshing || status.loading}
           >
             {refreshing ? "刷新中..." : "刷新状态"}
+          </button>
+        </div>
+      </div>
+      <div className="license-upload-section">
+        <label className="license-upload-label" htmlFor="license-text-content">
+          在线导入 License
+        </label>
+        <textarea
+          id="license-text-content"
+          className="license-textarea"
+          value={licenseText}
+          onChange={(event) => {
+            setLicenseText(event.target.value);
+            setError(null);
+            setNotice(null);
+          }}
+          placeholder="在此粘贴加密后的 License 内容，例如 ENC-LICENSE-V1:..."
+          rows={6}
+        />
+        <div className="license-actions">
+          <button
+            type="button"
+            className="primary"
+            onClick={handleImportText}
+            disabled={textUploading}
+          >
+            {textUploading ? "导入中..." : "导入 License 文本"}
           </button>
         </div>
       </div>
@@ -4304,6 +4357,7 @@ const [clusterUploading, setClusterUploading] = useState(false);
   const [licenseError, setLicenseError] = useState<string | null>(null);
   const [licenseLoading, setLicenseLoading] = useState(false);
   const [licenseUploading, setLicenseUploading] = useState(false);
+  const [licenseTextUploading, setLicenseTextUploading] = useState(false);
 
   const licenseFeatureSet = useMemo(
     () =>
@@ -4383,6 +4437,26 @@ const [clusterUploading, setClusterUploading] = useState(false);
         throw err instanceof Error ? err : new Error(message);
       } finally {
         setLicenseUploading(false);
+      }
+    },
+    []
+  );
+
+  const handleUploadLicenseText = useCallback(
+    async (content: string) => {
+      setLicenseTextUploading(true);
+      try {
+        const status = await uploadLicenseText(content);
+        setLicenseStatus(status);
+        setLicenseError(null);
+        return status;
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "导入 License 失败";
+        setLicenseError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setLicenseTextUploading(false);
       }
     },
     []
@@ -5458,7 +5532,9 @@ const backgroundLocation =
           <LicenseSettingsPanel
             status={licenseCapabilities}
             uploading={licenseUploading}
+            textUploading={licenseTextUploading}
             onUpload={handleUploadLicenseFile}
+            onUploadText={handleUploadLicenseText}
             onRefresh={refreshLicenseStatus}
           />
         ),
@@ -5476,7 +5552,9 @@ const backgroundLocation =
       handleImportInspectionItems,
       licenseCapabilities,
       licenseUploading,
+      licenseTextUploading,
       handleUploadLicenseFile,
+      handleUploadLicenseText,
       refreshLicenseStatus,
     ]
   );
