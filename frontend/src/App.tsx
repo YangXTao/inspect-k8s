@@ -2745,12 +2745,11 @@ const RunDetailView = ({
               </button>
             </>
           ) : null}
-          {run ? (
+          {canCancelRun ? (
             <button
               type="button"
               className="secondary danger"
               onClick={handleCancelRunDetail}
-              disabled={!canCancelRun}
             >
               取消
             </button>
