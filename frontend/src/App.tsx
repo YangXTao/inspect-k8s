@@ -21,6 +21,7 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
+import { Helmet } from "react-helmet";
 import type { Location as RouterLocation } from "history";
 import {
   createInspectionRun,
@@ -5730,6 +5731,10 @@ const backgroundLocation =
 
   return (
     <>
+      <Helmet>
+        <title>K8s Inspection</title>
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+      </Helmet>
       <TopNavigation onOpenSettings={handleOpenSettings} />
       <main className="app-shell">
         <Routes location={routesLocation}>
