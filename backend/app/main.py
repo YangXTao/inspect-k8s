@@ -1238,15 +1238,22 @@ def download_report(
         raise HTTPException(status_code=400, detail="Unsupported report format.")
 
     pdf_path = Path(run.report_path)
+    if not pdf_path.is_absolute():
+        pdf_path = Path.cwd() / pdf_path
+
     if requested_format == "md":
         display_id = _build_run_display_id(db, run)
-        markdown_path = pdf_path.with_suffix(".md")
-        generate_markdown_report(
-            run=run,
-            results=run.results,
-            display_id=display_id,
-            output_path=markdown_path,
+        markdown_path = Path(
+            generate_markdown_report(
+                run=run,
+                results=run.results,
+                display_id=display_id,
+            )
         )
+        if not markdown_path.is_absolute():
+            markdown_path = Path.cwd() / markdown_path
+        if not markdown_path.exists():
+            raise HTTPException(status_code=500, detail="Report file missing on server.")
         return FileResponse(
             markdown_path,
             media_type="text/markdown; charset=utf-8",
@@ -1260,12 +1267,3 @@ def download_report(
         media_type="application/pdf",
         filename=pdf_path.name,
     )
-
-
-
-
-
-
-
-
-
