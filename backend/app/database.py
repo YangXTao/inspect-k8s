@@ -5,8 +5,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from sqlalchemy import create_engine, text, inspect, event
-from sqlalchemy.orm import declarative_base, sessionmaker, Session
+from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
+
+from .license import ensure_license_directory
 
 DEFAULT_DATABASE_URL = "sqlite:///./inspection.db"
 
@@ -83,7 +85,7 @@ def ensure_runtime_directories() -> None:
     """Ensure directories for storing generated assets exist."""
     Path("reports").mkdir(exist_ok=True)
     Path("configs").mkdir(exist_ok=True)
-    Path("license").mkdir(exist_ok=True)
+    ensure_license_directory()
 
 
 def _ensure_cluster_schema() -> None:

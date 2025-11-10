@@ -7,7 +7,7 @@ import json
 import os
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Set
 
@@ -91,13 +91,29 @@ def _format_beijing(dt: datetime) -> str:
     return dt.astimezone(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def resolve_license_path() -> Path:
+    raw = os.getenv("LICENSE_FILE_PATH")
+    if raw:
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = (Path(__file__).resolve().parent.parent / candidate).resolve()
+    else:
+        base_dir = Path(__file__).resolve().parent.parent / "license"
+        candidate = base_dir / "license.json"
+    return candidate
+
+
+def ensure_license_directory() -> None:
+    path = resolve_license_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
 class LicenseManager:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._data: Optional[LicenseData] = None
         self._error: Optional[str] = "未安装 License"
-        license_path = os.getenv("LICENSE_FILE_PATH")
-        self.license_path = Path(license_path) if license_path else Path("license/license.json")
+        self.license_path = resolve_license_path()
 
     def reload(self) -> None:
         try:
