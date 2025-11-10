@@ -27,6 +27,20 @@ from reportlab.pdfbase.ttfonts import TTFont
 from .models import InspectionResult, InspectionRun
 from .schemas import _extract_connection_meta
 
+REPORTS_ROOT = Path("reports")
+PDF_REPORTS_DIR = REPORTS_ROOT / "pdf"
+MARKDOWN_REPORTS_DIR = REPORTS_ROOT / "md"
+
+
+def _prepare_output_path(default_dir: Path, filename: str, output_path: Optional[Path | str] = None) -> Path:
+    if output_path is None:
+        default_dir.mkdir(parents=True, exist_ok=True)
+        return default_dir / filename
+    path = Path(output_path)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _resolve_cst_timezone() -> timezone:
@@ -69,19 +83,10 @@ def generate_markdown_report(
     run: InspectionRun,
     results: Iterable[InspectionResult],
     display_id: Optional[str] = None,
-    output_path: Optional[Path] = None,
+    output_path: Optional[Path | str] = None,
 ) -> str:
-    reports_dir = Path("reports")
-    reports_dir.mkdir(exist_ok=True)
-
-    if output_path is None:
-        safe_name = _build_report_basename(display_id, run.id)
-        path = reports_dir / f"{safe_name}.md"
-    else:
-        path = Path(output_path)
-        if not path.is_absolute():
-            path = reports_dir / path
-    path.parent.mkdir(parents=True, exist_ok=True)
+    safe_name = _build_report_basename(display_id, run.id)
+    path = _prepare_output_path(MARKDOWN_REPORTS_DIR, f"{safe_name}.md", output_path)
 
     results_list = list(results)
     cluster_name, version_label, node_count_label = _get_cluster_meta(run)
@@ -162,15 +167,8 @@ def generate_pdf_report(
     display_id: str | None = None,
 ) -> str:
     """Generate a nicely formatted PDF inspection report and return the path."""
-    reports_dir = Path("reports")
-    reports_dir.mkdir(exist_ok=True)
-
-    if display_id:
-        safe_name = re.sub(r"[^A-Za-z0-9._-]", "-", display_id).strip("-_") or f"inspection-run-{run.id}"
-    else:
-        safe_name = f"inspection-run-{run.id}"
-
-    report_path = reports_dir / f"{safe_name}.pdf"
+    safe_name = _build_report_basename(display_id, run.id)
+    report_path = _prepare_output_path(PDF_REPORTS_DIR, f"{safe_name}.pdf")
 
     def _register_font_family() -> str:
         """Register a modern Sans Serif font with CJK support if available."""
