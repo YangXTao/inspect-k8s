@@ -80,3 +80,14 @@ export type InspectionItemsImportResult = {
   updated: number;
   total: number;
 };
+
+export type LicenseStatus = {
+  valid: boolean;
+  reason?: string | null;
+  product?: string | null;
+  licensee?: string | null;
+  issued_at?: string | null;
+  not_before?: string | null;
+  expires_at?: string | null;
+  features: string[];
+};

@@ -6,6 +6,7 @@ import {
   InspectionRunListItem,
   InspectionItemsExportPayload,
   InspectionItemsImportResult,
+  LicenseStatus,
 } from "./types";
 
 const API_BASE = appConfig.apiBaseUrl.replace(/\/$/, "");
@@ -219,5 +220,18 @@ export function deleteInspectionRun(
 export function cancelInspectionRun(runId: number): Promise<InspectionRun> {
   return request<InspectionRun>(`/inspection-runs/${runId}/cancel`, {
     method: "POST",
+  });
+}
+
+export function getLicenseStatus(): Promise<LicenseStatus> {
+  return request<LicenseStatus>("/license/status");
+}
+
+export function uploadLicense(file: File): Promise<LicenseStatus> {
+  const formData = new FormData();
+  formData.append("file", file, file.name || "license.json");
+  return request<LicenseStatus>("/license/upload", {
+    method: "POST",
+    body: formData,
   });
 }

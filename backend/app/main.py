@@ -7,7 +7,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 from uuid import uuid4
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
@@ -34,6 +34,7 @@ except Exception:  # pragma: no cover - optional dependency
 from . import crud, models, schemas
 from .database import SessionLocal, ensure_runtime_directories, init_db
 from .inspections import CheckContext, DEFAULT_CHECKS, dispatch_checks
+from .license import LicenseError, license_manager
 from .pdf import generate_markdown_report, generate_pdf_report
 from .prometheus import PrometheusClient
 
@@ -623,6 +624,7 @@ def _log_connection_status(cluster_name: str, status: str, message: Optional[str
 @app.on_event("startup")
 def on_startup() -> None:
     ensure_runtime_directories()
+    license_manager.reload()
     init_db()
     with SessionLocal() as db:
         _seed_defaults(db)
@@ -631,6 +633,33 @@ def on_startup() -> None:
 @app.get("/health")
 def health_check() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/license/status", response_model=schemas.LicenseStatusOut)
+def get_license_status() -> schemas.LicenseStatusOut:
+    status = license_manager.status()
+    return schemas.LicenseStatusOut(**status)
+
+
+@app.post("/license/upload", response_model=schemas.LicenseStatusOut)
+async def upload_license(file: UploadFile = File(...)) -> schemas.LicenseStatusOut:
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="上传的 License 文件为空")
+    try:
+        status = license_manager.import_bytes(payload)
+    except LicenseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return schemas.LicenseStatusOut(**status)
+
+
+def require_license_dependency(*features: str) -> Callable[[], None]:
+    def _dependency() -> None:
+        try:
+            license_manager.require(features)
+        except LicenseError as exc:
+            raise HTTPException(status_code=403, detail=str(exc))
+    return _dependency
 
 
 def _present_cluster(
@@ -656,6 +685,7 @@ async def register_cluster(
     name: str | None = Form(None),
     prometheus_url: str | None = Form(None),
     db: Session = Depends(get_db),
+    _license_guard: None = Depends(require_license_dependency("clusters")),
 ):
     data = await file.read()
     if not data:
@@ -1119,7 +1149,9 @@ def _serialize_run_list(run: models.InspectionRun) -> schemas.InspectionRunListO
 
 @app.post("/inspection-runs", response_model=schemas.InspectionRunOut, status_code=201)
 def trigger_inspection(
-    run_in: schemas.InspectionRunCreate, db: Session = Depends(get_db)
+    run_in: schemas.InspectionRunCreate,
+    db: Session = Depends(get_db),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
     if not run_in.item_ids:
         raise HTTPException(status_code=400, detail="No inspection items selected.")
@@ -1229,6 +1261,7 @@ def download_report(
         description="下载格式，支持 pdf 或 md",
     ),
     db: Session = Depends(get_db),
+    _license_guard: None = Depends(require_license_dependency("reports")),
 ):
     run = crud.get_inspection_run(db, run_id)
     if not run or not run.report_path:
