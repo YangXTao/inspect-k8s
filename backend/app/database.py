@@ -83,7 +83,7 @@ def get_session() -> Session:
 
 def ensure_runtime_directories() -> None:
     """Ensure directories for storing generated assets exist."""
-    base = Path("backend/data")
+    base = Path("data")
     (base / "reports").mkdir(parents=True, exist_ok=True)
     (base / "configs").mkdir(parents=True, exist_ok=True)
     ensure_license_directory()

@@ -25,6 +25,8 @@ spec:
               value: <MYSQL_PASSWORD>
             - name: MYSQL_DATABASE
               value: <MYSQL_DATABASE>
+            - name: LICENSE_SECRET
+              value: <LICENSE_SECRET>
           image: <NAME>:<image-tag>
           imagePullPolicy: Always
           name: backend
@@ -38,4 +40,4 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: backup-data
+            claimName: backend-data
