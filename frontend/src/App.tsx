@@ -3343,7 +3343,7 @@ const LicenseSettingsPanel = ({
   const handleImportText = async () => {
     const trimmed = licenseText.trim();
     if (!trimmed) {
-      setError("请粘贴加密或明文的 License 内容");
+      setError("请粘贴 License 内容");
       return;
     }
     setError(null);
@@ -3383,6 +3383,19 @@ const LicenseSettingsPanel = ({
       setRefreshing(false);
     }
   };
+
+  useEffect(() => {
+    if (!notice && !error) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setNotice(null);
+      setError(null);
+    }, 5000);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [notice, error]);
 
   return (
     <div className="settings-license-panel">
@@ -3476,7 +3489,7 @@ const LicenseSettingsPanel = ({
             setError(null);
             setNotice(null);
           }}
-          placeholder="在此粘贴加密后的 License 内容，例如 ENC-LICENSE-V1:..."
+          placeholder="在此粘贴 License 内容，例如 ENC-LICENSE-V1:..."
           rows={6}
         />
         <div className="license-actions">
