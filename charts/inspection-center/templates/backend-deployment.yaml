@@ -34,9 +34,10 @@ spec:
           ports:
             - containerPort: {{ .Values.backend.service.targetPort }}
               name: http
+          volumeMounts:
+            - name: backend-data
+              mountPath: {{ .Values.backend.persistence.mountPath | default "/app/data" }}
           env:
-            - name: API_BASE_URL
-              value: {{ .Values.frontend.env.apiBaseUrl | quote }}
             {{- $secretName := include "inspection-center.licenseSecretName" . }}
             {{- if $secretName }}
             - name: LICENSE_SECRET
@@ -52,6 +53,10 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+            {{- range $key, $value := .Values.backend.database.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
           {{- if .Values.backend.extraEnvFrom }}
           envFrom:
             {{- toYaml .Values.backend.extraEnvFrom | nindent 12 }}
@@ -64,3 +69,11 @@ spec:
         {{- toYaml .Values.backend.tolerations | nindent 8 }}
       affinity:
         {{- toYaml .Values.backend.affinity | nindent 8 }}
+      volumes:
+        - name: backend-data
+          {{- if .Values.backend.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.backend.persistence.existingClaim | default (printf "%s-backend-data" (include "inspection-center.fullname" .)) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
