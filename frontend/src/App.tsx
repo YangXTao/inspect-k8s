@@ -2524,6 +2524,76 @@ const RunDetailView = ({
       });
   }, [run, itemOrderMap]);
 
+  const [resultPageSize, setResultPageSize] = useState<number>(
+    RUN_PAGE_SIZE_OPTIONS[0]
+  );
+  const [resultPage, setResultPage] = useState(1);
+  const [resultPageInput, setResultPageInput] = useState("");
+
+  useEffect(() => {
+    setResultPage(1);
+    setResultPageInput("");
+  }, [resultPageSize]);
+
+  useEffect(() => {
+    setResultPage(1);
+    setResultPageInput("");
+  }, [run?.id]);
+
+  const totalResultPages = useMemo(
+    () =>
+      Math.max(
+        1,
+        Math.ceil(orderedResults.length / Math.max(resultPageSize, 1))
+      ),
+    [orderedResults.length, resultPageSize]
+  );
+
+  useEffect(() => {
+    setResultPage((prev) => Math.min(Math.max(prev, 1), totalResultPages));
+  }, [totalResultPages]);
+
+  const paginatedResults = useMemo(() => {
+    if (orderedResults.length === 0) {
+      return [];
+    }
+    const start = (resultPage - 1) * resultPageSize;
+    return orderedResults.slice(start, start + resultPageSize);
+  }, [orderedResults, resultPage, resultPageSize]);
+
+  const handleResultPageChange = useCallback(
+    (offset: number) => {
+      setResultPage((prev) => {
+        const next = prev + offset;
+        if (next < 1) {
+          return 1;
+        }
+        if (next > totalResultPages) {
+          return totalResultPages;
+        }
+        return next;
+      });
+    },
+    [totalResultPages]
+  );
+
+  const handleResultPageSizeChange = useCallback((value: number) => {
+    setResultPageSize(value);
+  }, []);
+
+  const handleResultPageJump = useCallback(() => {
+    const trimmed = resultPageInput.trim();
+    if (!trimmed) {
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isNaN(parsed) && Number.isInteger(parsed)) {
+      const target = Math.min(Math.max(parsed, 1), totalResultPages);
+      setResultPage(target);
+    }
+    setResultPageInput("");
+  }, [resultPageInput, totalResultPages]);
+
   const progressInfo = useMemo(
     () => (run ? buildRunProgressInfo(run) : null),
     [run]
@@ -2776,7 +2846,7 @@ const RunDetailView = ({
                       <td colSpan={4}>暂无巡检结果</td>
                     </tr>
                   ) : (
-                    orderedResults.map((result: InspectionResult) => (
+                    paginatedResults.map((result: InspectionResult) => (
                       <tr key={result.id}>
                         <td>{result.item_name}</td>
                         <td>
@@ -2792,6 +2862,70 @@ const RunDetailView = ({
                 </tbody>
               </table>
             </div>
+            {orderedResults.length > 0 && (
+              <div className="table-pagination">
+                <label className="page-size-control">
+                  每页
+                  <select
+                    className="page-size-select"
+                    value={resultPageSize}
+                    onChange={(event) =>
+                      handleResultPageSizeChange(Number(event.target.value))
+                    }
+                  >
+                    {RUN_PAGE_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <span className="page-indicator">
+                  第 {resultPage} / {totalResultPages} 页
+                </span>
+                <button
+                  type="button"
+                  className="pagination-nav"
+                  onClick={() => handleResultPageChange(-1)}
+                  disabled={resultPage <= 1}
+                >
+                  上一页
+                </button>
+                <button
+                  type="button"
+                  className="pagination-nav"
+                  onClick={() => handleResultPageChange(1)}
+                  disabled={resultPage >= totalResultPages}
+                >
+                  下一页
+                </button>
+                <div className="page-jump">
+                  <input
+                    type="number"
+                    min={1}
+                    max={totalResultPages}
+                    value={resultPageInput}
+                    onChange={(event) => setResultPageInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        handleResultPageJump();
+                      }
+                    }}
+                    className="page-jump-input"
+                    placeholder="页码"
+                  />
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={handleResultPageJump}
+                    disabled={orderedResults.length === 0}
+                  >
+                    跳转
+                  </button>
+                </div>
+              </div>
+            )}
           </section>
         </>
       )}
