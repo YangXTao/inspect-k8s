@@ -108,8 +108,18 @@ export function getInspectionRun(runId: number): Promise<InspectionRun> {
   return request<InspectionRun>(`/inspection-runs/${runId}`);
 }
 
-export function getReportDownloadUrl(runId: number): string {
-  return `${API_BASE}/inspection-runs/${runId}/report`;
+export function getReportDownloadUrl(
+  runId: number,
+  format: "pdf" | "md" = "pdf"
+): string {
+  const params = new URLSearchParams();
+  if (format !== "pdf") {
+    params.set("format", format);
+  }
+  const query = params.toString();
+  return `${API_BASE}/inspection-runs/${runId}/report${
+    query ? `?${query}` : ""
+  }`;
 }
 
 export function getClusters(): Promise<ClusterConfig[]> {

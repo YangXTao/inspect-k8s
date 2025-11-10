@@ -1472,14 +1472,24 @@ const HistoryView = ({
                         </button>
                       )}
                       {run.report_path && (
-                        <a
-                          className="link-button"
-                          href={getReportDownloadUrl(run.id)}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          下载报告
-                        </a>
+                        <>
+                          <a
+                            className="link-button"
+                            href={getReportDownloadUrl(run.id, "pdf")}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            下载PDF
+                          </a>
+                          <a
+                            className="link-button"
+                            href={getReportDownloadUrl(run.id, "md")}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            下载Markdown
+                          </a>
+                        </>
                       )}
                       <button
                         className="link-button danger"
@@ -2096,14 +2106,24 @@ const ClusterDetailContent = ({
                         </button>
                       )}
                       {run.report_path && (
-                        <a
-                          className="link-button"
-                          href={getReportDownloadUrl(run.id)}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          下载报告
-                        </a>
+                        <>
+                          <a
+                            className="link-button"
+                            href={getReportDownloadUrl(run.id, "pdf")}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            下载PDF
+                          </a>
+                          <a
+                            className="link-button"
+                            href={getReportDownloadUrl(run.id, "md")}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            下载Markdown
+                          </a>
+                        </>
                       )}
                       <button
                         className="link-button danger"
@@ -2461,15 +2481,18 @@ const RunDetailView = ({
       ).padStart(2, "0")}`;
   const runDisplayId = runDisplayIds[numericRunId] ?? fallbackRunDisplayId;
 
-  const handleDownloadReport = useCallback(() => {
-    if (!run?.report_path || !run?.id) {
-      return;
-    }
-    const url = getReportDownloadUrl(run.id);
-    if (typeof window !== "undefined") {
-      window.open(url, "_blank", "noopener,noreferrer");
-    }
-  }, [run]);
+  const handleDownloadReport = useCallback(
+    (reportFormat: "pdf" | "md" = "pdf") => {
+      if (!run?.report_path || !run?.id) {
+        return;
+      }
+      const url = getReportDownloadUrl(run.id, reportFormat);
+      if (typeof window !== "undefined") {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    },
+    [run]
+  );
 
   const itemOrderMap = useMemo(() => {
     const map = new Map<number, number>();
@@ -2635,13 +2658,22 @@ const RunDetailView = ({
         </button>
         <div className="detail-header-actions">
           {run?.report_path ? (
-            <button
-              type="button"
-              className="secondary"
-              onClick={handleDownloadReport}
-            >
-              下载报告
-            </button>
+            <>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => handleDownloadReport("pdf")}
+              >
+                下载PDF
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => handleDownloadReport("md")}
+              >
+                下载Markdown
+              </button>
+            </>
           ) : null}
           {run ? (
             <button

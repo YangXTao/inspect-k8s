@@ -8,7 +8,7 @@ try:
 except Exception:
     ZoneInfo = None  # type: ignore
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional, Tuple
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -25,6 +25,7 @@ from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfbase.ttfonts import TTFont
 
 from .models import InspectionResult, InspectionRun
+from .schemas import _extract_connection_meta
 
 
 
@@ -35,6 +36,123 @@ def _resolve_cst_timezone() -> timezone:
         except Exception:
             pass
     return timezone(timedelta(hours=8))
+
+
+def _format_dt(value: Optional[datetime]) -> str:
+    if value is None:
+        return "未记录"
+    tz = _resolve_cst_timezone()
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    localized = value.astimezone(tz)
+    return f"{localized.strftime('%Y-%m-%d %H:%M:%S')} 中国标准时间"
+
+
+def _build_report_basename(display_id: Optional[str], run_id: int) -> str:
+    if display_id:
+        return re.sub(r"[^A-Za-z0-9._-]", "-", display_id).strip("-_") or f"inspection-run-{run_id}"
+    return f"inspection-run-{run_id}"
+
+
+def _get_cluster_meta(run: InspectionRun) -> Tuple[str, str, str]:
+    cluster = getattr(run, "cluster", None)
+    cluster_name = getattr(cluster, "name", None) or "未知集群"
+    connection_message = getattr(cluster, "connection_message", None)
+    version, node_count = _extract_connection_meta(connection_message)
+    version_label = version or "未知"
+    node_count_label = str(node_count) if node_count is not None else "未知"
+    return cluster_name, version_label, node_count_label
+
+
+def generate_markdown_report(
+    *,
+    run: InspectionRun,
+    results: Iterable[InspectionResult],
+    display_id: Optional[str] = None,
+    output_path: Optional[Path] = None,
+) -> str:
+    reports_dir = Path("reports")
+    reports_dir.mkdir(exist_ok=True)
+
+    if output_path is None:
+        safe_name = _build_report_basename(display_id, run.id)
+        path = reports_dir / f"{safe_name}.md"
+    else:
+        path = Path(output_path)
+        if not path.is_absolute():
+            path = reports_dir / path
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    results_list = list(results)
+    cluster_name, version_label, node_count_label = _get_cluster_meta(run)
+
+    total_checks = len(results_list)
+    passed_count = sum(1 for item in results_list if item.status.lower() == "passed")
+    warning_count = sum(1 for item in results_list if item.status.lower() == "warning")
+    failed_count = sum(1 for item in results_list if item.status.lower() == "failed")
+
+    def _sanitize(text: str | None) -> str:
+        if not text:
+            return "-"
+        return (
+            str(text)
+            .replace("|", r"\|")
+            .replace("\r\n", "<br/>")
+            .replace("\n", "<br/>")
+            .strip()
+        )
+
+    display_label = str(display_id or run.id)
+    lines: list[str] = []
+    lines.append(f"# {cluster_name} 巡检报告")
+    lines.append("")
+    lines.append("| 项目 | 内容 |")
+    lines.append("| --- | --- |")
+    lines.append(f"| 巡检编号 | {display_label} |")
+    lines.append(f"| 巡检人 | {_sanitize(run.operator) if run.operator else '未填写'} |")
+    lines.append(f"| 目标集群 | {cluster_name} |")
+    lines.append(f"| 集群版本 | {version_label} |")
+    lines.append(f"| 节点数量 | {node_count_label} |")
+    lines.append(f"| 巡检开始时间 | {_format_dt(run.created_at)} |")
+    lines.append(f"| 巡检完成时间 | {_format_dt(run.completed_at or datetime.utcnow())} |")
+    lines.append("")
+
+    lines.append("## 巡检概览")
+    lines.append("")
+    lines.append("| 项目 | 数量 |")
+    lines.append("| --- | --- |")
+    lines.append(f"| 检查项总数 | {total_checks} |")
+    lines.append(f"| 通过项 | {passed_count} |")
+    lines.append(f"| 告警项 | {warning_count} |")
+    lines.append(f"| 失败项 | {failed_count} |")
+    lines.append("")
+
+    summary_text = (run.summary or "").strip() or "暂无巡检摘要。"
+    lines.append("## 巡检摘要")
+    lines.append("")
+    lines.append(summary_text.replace("\r\n", "\n"))
+    lines.append("")
+
+    lines.append("## 巡检明细")
+    lines.append("")
+    lines.append("| 巡检项 | 状态 | 详情 | 建议 |")
+    lines.append("| --- | --- | --- | --- |")
+    status_labels = {
+        "passed": "通过",
+        "warning": "告警",
+        "failed": "失败",
+    }
+    for item in results_list:
+        status = item.status.lower()
+        status_label = status_labels.get(status, item.status)
+        item_name = _sanitize(item.item.name if item.item else item.item_name_cached or "巡检项已删除")
+        detail = _sanitize(item.detail)
+        suggestion = _sanitize(item.suggestion)
+        lines.append(f"| {item_name} | {status_label} | {detail} | {suggestion} |")
+
+    content = "\n".join(lines).strip() + "\n"
+    path.write_text(content, encoding="utf-8")
+    return str(path)
 
 def generate_pdf_report(
     *,
@@ -209,19 +327,22 @@ def generate_pdf_report(
         return f"{localized.strftime('%Y-%m-%d %H:%M:%S')} 中国标准时间"
 
     results_list = list(results)
+    cluster_name, version_label, node_count_label = _get_cluster_meta(run)
     total_checks = len(results_list)
     passed_count = sum(1 for item in results_list if item.status.lower() == "passed")
     warning_count = sum(1 for item in results_list if item.status.lower() == "warning")
     failed_count = sum(1 for item in results_list if item.status.lower() == "failed")
 
     story: list[object] = []
-    story.append(Paragraph("Kubernetes 巡检报告", styles["Title"]))
+    story.append(Paragraph(f"{cluster_name} 巡检报告", styles["Title"]))
     story.append(Spacer(1, 10))
 
     meta_rows = [
         ("巡检编号", str(display_id or run.id)),
         ("巡检人", run.operator or "未填写"),
-        ("目标集群", getattr(run.cluster, "name", "未配置")),
+        ("目标集群", cluster_name),
+        ("集群版本", version_label),
+        ("节点数量", node_count_label),
         ("巡检开始时间", format_dt(run.created_at)),
         ("巡检完成时间", format_dt(run.completed_at or datetime.utcnow())),
     ]

@@ -34,7 +34,7 @@ except Exception:  # pragma: no cover - optional dependency
 from . import crud, models, schemas
 from .database import SessionLocal, ensure_runtime_directories, init_db
 from .inspections import CheckContext, DEFAULT_CHECKS, dispatch_checks
-from .pdf import generate_pdf_report
+from .pdf import generate_markdown_report, generate_pdf_report
 from .prometheus import PrometheusClient
 
 logger = logging.getLogger(__name__)
@@ -1222,17 +1222,43 @@ def delete_inspection_run(
 
 
 @app.get("/inspection-runs/{run_id}/report")
-def download_report(run_id: int, db: Session = Depends(get_db)):
+def download_report(
+    run_id: int,
+    format: str = Query(
+        "pdf",
+        description="下载格式，支持 pdf 或 md",
+    ),
+    db: Session = Depends(get_db),
+):
     run = crud.get_inspection_run(db, run_id)
     if not run or not run.report_path:
         raise HTTPException(status_code=404, detail="Report not found.")
-    path = Path(run.report_path)
-    if not path.exists():
+    requested_format = (format or "pdf").lower()
+    if requested_format not in {"pdf", "md"}:
+        raise HTTPException(status_code=400, detail="Unsupported report format.")
+
+    pdf_path = Path(run.report_path)
+    if requested_format == "md":
+        display_id = _build_run_display_id(db, run)
+        markdown_path = pdf_path.with_suffix(".md")
+        generate_markdown_report(
+            run=run,
+            results=run.results,
+            display_id=display_id,
+            output_path=markdown_path,
+        )
+        return FileResponse(
+            markdown_path,
+            media_type="text/markdown; charset=utf-8",
+            filename=markdown_path.name,
+        )
+
+    if not pdf_path.exists():
         raise HTTPException(status_code=404, detail="Report file missing on server.")
     return FileResponse(
-        path,
+        pdf_path,
         media_type="application/pdf",
-        filename=path.name,
+        filename=pdf_path.name,
     )
 
 
