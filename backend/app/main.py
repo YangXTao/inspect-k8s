@@ -482,10 +482,29 @@ def _store_kubeconfig(data: bytes, original_name: str | None = None) -> str:
 def _remove_file_safely(path: str | Path | None) -> None:
     if not path:
         return
+    candidate = Path(path)
     try:
-        Path(path).unlink(missing_ok=True)
+        candidate.unlink(missing_ok=True)
     except Exception:
         pass
+
+    counterpart_paths: list[Path] = []
+    suffix = candidate.suffix.lower()
+    stem = candidate.stem
+    if suffix == ".pdf":
+        counterpart_paths.append(candidate.with_suffix(".md"))
+        if candidate.parent.name == "pdf":
+            counterpart_paths.append(candidate.parent.parent / "md" / f"{stem}.md")
+    elif suffix == ".md":
+        counterpart_paths.append(candidate.with_suffix(".pdf"))
+        if candidate.parent.name == "md":
+            counterpart_paths.append(candidate.parent.parent / "pdf" / f"{stem}.pdf")
+
+    for counterpart in counterpart_paths:
+        try:
+            counterpart.unlink(missing_ok=True)
+        except Exception:
+            continue
 
 
 def _sanitize_message(message: str | None) -> str | None:

@@ -7,7 +7,7 @@ import json
 import os
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Set
 
@@ -84,6 +84,13 @@ class LicenseData:
     raw: Dict[str, Any]
 
 
+BEIJING_TZ = timezone(timedelta(hours=8))
+
+
+def _format_beijing(dt: datetime) -> str:
+    return dt.astimezone(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+
 class LicenseManager:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -147,7 +154,7 @@ class LicenseManager:
         if data.not_before and now < data.not_before:
             return {
                 "valid": False,
-                "reason": f"License 尚未生效，将于 {data.not_before.isoformat()} 生效",
+                "reason": f"License 尚未生效，将于 {_format_beijing(data.not_before)} 生效",
                 "product": data.product or None,
                 "licensee": data.licensee or None,
                 "issued_at": data.issued_at,
@@ -158,7 +165,7 @@ class LicenseManager:
         if now > data.expires_at:
             return {
                 "valid": False,
-                "reason": f"License 已于 {data.expires_at.isoformat()} 过期",
+                "reason": f"License 已于 {_format_beijing(data.expires_at)} 过期",
                 "product": data.product or None,
                 "licensee": data.licensee or None,
                 "issued_at": data.issued_at,
@@ -282,9 +289,9 @@ class LicenseManager:
 
         now = datetime.now(timezone.utc)
         if not_before and now < not_before:
-            raise LicenseError(f"License 尚未生效，将于 {not_before.isoformat()} 生效")
+            raise LicenseError(f"License 尚未生效，将于 {_format_beijing(not_before)} 生效")
         if now > expires_at:
-            raise LicenseError(f"License 已于 {expires_at.isoformat()} 过期")
+            raise LicenseError(f"License 已于 {_format_beijing(expires_at)} 过期")
 
         return LicenseData(
             licensee=licensee,
