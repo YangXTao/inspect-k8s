@@ -27,7 +27,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from .models import InspectionResult, InspectionRun
 from .schemas import _extract_connection_meta
 
-REPORTS_ROOT = Path("reports")
+REPORTS_ROOT = Path("backend/data/reports")
 PDF_REPORTS_DIR = REPORTS_ROOT / "pdf"
 MARKDOWN_REPORTS_DIR = REPORTS_ROOT / "md"
 

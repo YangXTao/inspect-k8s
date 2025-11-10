@@ -1,0 +1,62 @@
+replicaCount:
+  backend: 1
+  frontend: 1
+
+image:
+  backend:
+    repository: your-registry.example.com/inspection-backend
+    tag: latest
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: your-registry.example.com/inspection-frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  name: ""
+
+licenseSecret:
+  create: false
+  name: ""
+  key: LICENSE_SECRET
+  value: ""
+
+backend:
+  service:
+    type: ClusterIP
+    port: 8000
+    targetPort: 8000
+  resources: {}
+  env:
+    # 例如: MYSQL_HOST, MYSQL_USER 等
+    existing: {}
+  extraEnvFrom: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+frontend:
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 80
+  resources: {}
+  env:
+    apiBaseUrl: "http://inspection-backend:8000"
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: inspection.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []

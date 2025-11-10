@@ -98,7 +98,7 @@ def resolve_license_path() -> Path:
         if not candidate.is_absolute():
             candidate = (Path(__file__).resolve().parent.parent / candidate).resolve()
     else:
-        base_dir = Path(__file__).resolve().parent.parent / "license"
+        base_dir = Path(__file__).resolve().parent.parent / "data" / "license"
         candidate = base_dir / "license.json"
     return candidate
 

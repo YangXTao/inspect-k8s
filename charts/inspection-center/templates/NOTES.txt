@@ -1,0 +1,17 @@
+1. 获取访问地址：
+{{- if .Values.ingress.enabled }}
+  已启用 Ingress，可通过以下域名访问：
+  {{- range .Values.ingress.hosts }}
+    - http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+  {{- end }}
+{{- else if eq .Values.frontend.service.type "LoadBalancer" }}
+  前端 Service（LoadBalancer）创建完成后，可通过 `kubectl get svc {{ include "inspection-center.fullname" . }}-frontend` 获取外部地址。
+{{- else }}
+  前端 Service 使用 ClusterIP，可通过端口转发访问：
+    kubectl port-forward svc/{{ include "inspection-center.fullname" . }}-frontend 8080:{{ .Values.frontend.service.port }}
+  然后打开 http://127.0.0.1:8080
+{{- end }}
+
+2. License 配置：
+  - 缺省情况下 Chart 会引用已有的 Secret。请在 values.yaml 中设置 `licenseSecret.name` 与 `licenseSecret.key`。
+  - 若想随 Chart 一起创建 Secret，可将 `licenseSecret.create` 设置为 true，并填入 `licenseSecret.value`。

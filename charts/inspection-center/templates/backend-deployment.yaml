@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "inspection-center.fullname" . }}-backend
+  labels:
+    app.kubernetes.io/name: {{ include "inspection-center.name" . }}
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount.backend }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "inspection-center.name" . }}
+      app.kubernetes.io/component: backend
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "inspection-center.name" . }}
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ include "inspection-center.serviceAccountName" . }}
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range .Values.imagePullSecrets }}
+        - name: {{ . }}
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: backend
+          image: "{{ .Values.image.backend.repository }}:{{ .Values.image.backend.tag }}"
+          imagePullPolicy: {{ .Values.image.backend.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.backend.service.targetPort }}
+              name: http
+          env:
+            - name: API_BASE_URL
+              value: {{ .Values.frontend.env.apiBaseUrl | quote }}
+            {{- $secretName := include "inspection-center.licenseSecretName" . }}
+            {{- if $secretName }}
+            - name: LICENSE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: {{ .Values.licenseSecret.key }}
+            {{- else if .Values.licenseSecret.value }}
+            - name: LICENSE_SECRET
+              value: {{ .Values.licenseSecret.value | quote }}
+            {{- end }}
+            {{- range $key, $value := .Values.backend.env.existing }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- if .Values.backend.extraEnvFrom }}
+          envFrom:
+            {{- toYaml .Values.backend.extraEnvFrom | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+      nodeSelector:
+        {{- toYaml .Values.backend.nodeSelector | nindent 8 }}
+      tolerations:
+        {{- toYaml .Values.backend.tolerations | nindent 8 }}
+      affinity:
+        {{- toYaml .Values.backend.affinity | nindent 8 }}
