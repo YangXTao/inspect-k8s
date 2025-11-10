@@ -1,0 +1,6 @@
+apiVersion: v2
+name: inspection-center
+description: "Helm chart for the Kubernetes 巡检中心应用（后端 + 前端）"
+type: application
+version: 0.1.0
+appVersion: "0.3.0"

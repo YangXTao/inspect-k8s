@@ -474,7 +474,7 @@ def _store_kubeconfig(data: bytes, original_name: str | None = None) -> str:
     if original_name:
         suffix = Path(original_name).suffix or suffix
     filename = f"cluster-{uuid4().hex}{suffix}"
-    path = Path("configs") / filename
+    path = Path("backend/data/configs") / filename
     path.write_bytes(data)
     return str(path)
 
