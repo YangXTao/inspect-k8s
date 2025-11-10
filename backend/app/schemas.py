@@ -190,3 +190,7 @@ class LicenseStatusOut(BaseModel):
     not_before: Optional[datetime] = None
     expires_at: Optional[datetime] = None
     features: List[str] = Field(default_factory=list)
+
+
+class LicenseImportPayload(BaseModel):
+    content: str = Field(..., min_length=1, description="加密或明文 License 内容")

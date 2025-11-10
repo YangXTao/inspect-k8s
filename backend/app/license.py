@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -106,7 +107,15 @@ class LicenseManager:
             return
 
         try:
-            data = self._parse_bytes(payload)
+            text = payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            with self._lock:
+                self._data = None
+                self._error = f"License 文件编码错误: {exc}"
+            return
+
+        try:
+            data = self._parse_text(text)
         except LicenseError as exc:
             with self._lock:
                 self._data = None
@@ -179,36 +188,82 @@ class LicenseManager:
         if missing:
             raise LicenseError(f"当前 License 不包含功能: {', '.join(missing)}")
 
-    def import_bytes(self, payload: bytes) -> Dict[str, Any]:
-        data = self._parse_bytes(payload)
+    def import_bytes(self, payload: bytes | str) -> Dict[str, Any]:
+        text, data = self._parse_payload(payload)
         self.license_path.parent.mkdir(parents=True, exist_ok=True)
-        self.license_path.write_bytes(payload)
+        self.license_path.write_text(text, encoding="utf-8")
         with self._lock:
             self._data = data
             self._error = None
         return self.status()
 
-    def _parse_bytes(self, payload: bytes) -> LicenseData:
+    def _parse_payload(self, payload: bytes | str) -> tuple[str, LicenseData]:
+        if isinstance(payload, bytes):
+            try:
+                text = payload.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise LicenseError("License 文件必须为 UTF-8 编码") from exc
+        else:
+            text = str(payload)
+        data = self._parse_text(text)
+        return text.strip(), data
+
+    def _parse_text(self, text: str) -> LicenseData:
+        stripped = text.strip()
+        if not stripped:
+            raise LicenseError("License 文件为空")
+        secret = os.getenv("LICENSE_SECRET")
+        if not secret:
+            raise LicenseError("服务器未配置 LICENSE_SECRET，无法验证 License")
+        data = self._decode_to_dict(stripped, secret)
+        return self._validate_dict(data, secret)
+
+    def _decode_to_dict(self, text: str, secret: str) -> Dict[str, Any]:
+        prefix = "ENC-LICENSE-V1:"
+        if text.startswith(prefix):
+            return self._parse_encrypted_payload(text[len(prefix) :], secret)
         try:
-            text = payload.decode("utf-8")
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return self._parse_encrypted_payload(text, secret)
+
+    def _parse_encrypted_payload(self, payload: str, secret: str) -> Dict[str, Any]:
+        padded = payload + "=" * (-len(payload) % 4)
+        try:
+            raw = base64.urlsafe_b64decode(padded.encode("utf-8"))
+        except Exception as exc:
+            raise LicenseError("加密 License 内容格式无效") from exc
+        if len(raw) <= 16:
+            raise LicenseError("加密 License 内容损坏")
+        salt = raw[:16]
+        cipher = raw[16:]
+        if not cipher:
+            raise LicenseError("加密 License 内容损坏")
+        key = hashlib.pbkdf2_hmac(
+            "sha256",
+            secret.encode("utf-8"),
+            salt,
+            200_000,
+            dklen=len(cipher),
+        )
+        plaintext_bytes = bytes(a ^ b for a, b in zip(cipher, key))
+        try:
+            decoded = plaintext_bytes.decode("utf-8")
         except UnicodeDecodeError as exc:
-            raise LicenseError("License 文件必须为 UTF-8 编码") from exc
-
+            raise LicenseError("加密 License 解密失败") from exc
         try:
-            data = json.loads(text)
+            data = json.loads(decoded)
         except json.JSONDecodeError as exc:
-            raise LicenseError("License 文件解析失败") from exc
+            raise LicenseError("加密 License 内容解析失败") from exc
+        return data
 
+    def _validate_dict(self, data: Dict[str, Any], secret: str) -> LicenseData:
         if not isinstance(data, dict):
             raise LicenseError("License 文件格式无效")
 
         signature = data.get("signature")
         if not isinstance(signature, str) or not signature.strip():
             raise LicenseError("License 缺少签名")
-
-        secret = os.getenv("LICENSE_SECRET")
-        if not secret:
-            raise LicenseError("服务器未配置 LICENSE_SECRET，无法验证 License")
 
         expected = _expected_signature(data, secret)
         if not hmac.compare_digest(signature.strip(), expected):
@@ -243,4 +298,3 @@ class LicenseManager:
 
 
 license_manager = LicenseManager()
-

@@ -235,3 +235,10 @@ export function uploadLicense(file: File): Promise<LicenseStatus> {
     body: formData,
   });
 }
+
+export function uploadLicenseText(content: string): Promise<LicenseStatus> {
+  return request<LicenseStatus>("/license/import-text", {
+    method: "POST",
+    body: JSON.stringify({ content }),
+  });
+}

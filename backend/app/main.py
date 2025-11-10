@@ -653,6 +653,15 @@ async def upload_license(file: UploadFile = File(...)) -> schemas.LicenseStatusO
     return schemas.LicenseStatusOut(**status)
 
 
+@app.post("/license/import-text", response_model=schemas.LicenseStatusOut)
+def upload_license_text(payload: schemas.LicenseImportPayload) -> schemas.LicenseStatusOut:
+    try:
+        status = license_manager.import_bytes(payload.content)
+    except LicenseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return schemas.LicenseStatusOut(**status)
+
+
 def require_license_dependency(*features: str) -> Callable[[], None]:
     def _dependency() -> None:
         try:
