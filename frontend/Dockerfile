@@ -3,7 +3,7 @@ WORKDIR /frontend
 COPY package*.json ./
 RUN npm ci
 COPY . .
-RUN npm run build
+RUN npm install react-helmet@6.1.0 && npm run build
 
 FROM 192.168.10.51/base/nginx:1.27-alpine
 WORKDIR /etc/nginx
