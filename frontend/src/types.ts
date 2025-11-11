@@ -32,10 +32,12 @@ export type InspectionRunStatus =
   | "warning"
   | "failed";
 
+export type InspectionResultStatus = "passed" | "warning" | "failed";
+
 export type InspectionResult = {
   id: number;
   item_id: number | null;
-  status: "passed" | "warning" | "failed";
+  status: InspectionResultStatus;
   detail?: string;
   suggestion?: string;
   item_name: string;

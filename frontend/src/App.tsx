@@ -50,6 +50,7 @@ import {
   ClusterConfig,
   InspectionItem,
   InspectionResult,
+  InspectionResultStatus,
   InspectionRun,
   InspectionRunListItem,
   InspectionRunStatus,
@@ -2600,28 +2601,58 @@ const RunDetailView = ({
   useEffect(() => {
     setResultPage(1);
     setResultPageInput("");
+    setResultFilterQuery("");
+    setResultFilterStatus("all");
   }, [run?.id]);
 
   const totalResultPages = useMemo(
     () =>
       Math.max(
         1,
-        Math.ceil(orderedResults.length / Math.max(resultPageSize, 1))
+        Math.ceil(filteredResults.length / Math.max(resultPageSize, 1))
       ),
-    [orderedResults.length, resultPageSize]
+    [filteredResults.length, resultPageSize]
   );
 
   useEffect(() => {
     setResultPage((prev) => Math.min(Math.max(prev, 1), totalResultPages));
   }, [totalResultPages]);
 
-  const paginatedResults = useMemo(() => {
+  type InspectionResultStatusFilter = InspectionResultStatus | "all";
+
+  const [resultFilterQuery, setResultFilterQuery] = useState("");
+  const [resultFilterStatus, setResultFilterStatus] =
+    useState<InspectionResultStatusFilter>("all");
+
+  const filteredResults = useMemo(() => {
     if (orderedResults.length === 0) {
       return [];
     }
+    const query = resultFilterQuery.trim().toLowerCase();
+    const byStatus =
+      resultFilterStatus === "all"
+        ? orderedResults
+        : orderedResults.filter((item) => item.status === resultFilterStatus);
+    if (!query) {
+      return byStatus;
+    }
+    return byStatus.filter((item) => {
+      const name = item.item_name?.toLowerCase() ?? "";
+      const detail = item.detail?.toLowerCase() ?? "";
+      const suggestion = item.suggestion?.toLowerCase() ?? "";
+      return (
+        name.includes(query) || detail.includes(query) || suggestion.includes(query)
+      );
+    });
+  }, [orderedResults, resultFilterQuery, resultFilterStatus]);
+
+  const paginatedResults = useMemo(() => {
+    if (filteredResults.length === 0) {
+      return [];
+    }
     const start = (resultPage - 1) * resultPageSize;
-    return orderedResults.slice(start, start + resultPageSize);
-  }, [orderedResults, resultPage, resultPageSize]);
+    return filteredResults.slice(start, start + resultPageSize);
+  }, [filteredResults, resultPage, resultPageSize]);
 
   const handleResultPageChange = useCallback(
     (offset: number) => {
@@ -2896,6 +2927,28 @@ const RunDetailView = ({
           <section className="card history">
             <div className="card-header">
               <h2>巡检结果</h2>
+            </div>
+            <div className="inspection-results-toolbar">
+              <div />
+              <div className="inspection-results-filters">
+                <input
+                  type="text"
+                  placeholder="按名称、详情或建议搜索"
+                  value={resultFilterQuery}
+                  onChange={(event) => setResultFilterQuery(event.target.value)}
+                />
+                <select
+                  value={resultFilterStatus}
+                  onChange={(event) =>
+                    setResultFilterStatus(event.target.value as InspectionResultStatusFilter)
+                  }
+                >
+                  <option value="all">全部状态</option>
+                  <option value="passed">通过</option>
+                  <option value="warning">告警</option>
+                  <option value="failed">失败</option>
+                </select>
+              </div>
             </div>
             <div className="table-wrapper">
               <table>
