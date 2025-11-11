@@ -25,6 +25,20 @@ licenseSecret:
   value: ""
 
 backend:
+  persistence:
+    enabled: true
+    existingClaim: ""
+    storageClassName: ""
+    size: 5Gi
+    accessMode: ReadWriteOnce
+    mountPath: /app/data
+  database:
+    env:
+      MYSQL_HOST: ""
+      MYSQL_PORT: "3306"
+      MYSQL_USER: ""
+      MYSQL_PASSWORD: ""
+      MYSQL_DATABASE: ""
   service:
     type: ClusterIP
     port: 8000
@@ -40,9 +54,10 @@ backend:
 
 frontend:
   service:
-    type: ClusterIP
+    type: NodePort
     port: 80
     targetPort: 80
+    nodePort: 30080
   resources: {}
   env:
     apiBaseUrl: "http://inspection-backend:8000"
