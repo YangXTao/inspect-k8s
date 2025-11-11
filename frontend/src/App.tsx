@@ -3441,10 +3441,10 @@ const LicenseSettingsPanel = ({
       </div>
       <div className="license-upload-section">
         <p className="card-caption">
-          支持上传 License 文件或直接粘贴密文，两种方式任选其一。
+          支持上传License文件或直接粘贴License内容。
         </p>
         <label className="license-upload-label">
-          选择 License 文件（可选）
+          选择 License 文件
           <input
             ref={fileInputRef}
             type="file"
@@ -3456,7 +3456,7 @@ const LicenseSettingsPanel = ({
           <p className="license-file-name">已选择：{selectedFile.name}</p>
         )}
         <label className="license-upload-label" htmlFor="license-text-content">
-          或粘贴加密/明文 License 内容
+          或粘贴 License 内容
         </label>
         <textarea
           id="license-text-content"
@@ -5717,7 +5717,7 @@ const backgroundLocation =
   return (
     <>
       <Helmet>
-        <title>K8s Inspection</title>
+        <title>K8s Inspection Center</title>
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
       </Helmet>
       <TopNavigation onOpenSettings={handleOpenSettings} />
