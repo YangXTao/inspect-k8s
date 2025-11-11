@@ -215,6 +215,9 @@ def generate_pdf_report(
 
     base_font = _register_font_family()
 
+    results_list = list(results)
+    cluster_name, version_label, node_count_label = _get_cluster_meta(run)
+
     doc = SimpleDocTemplate(
         str(report_path),
         pagesize=A4,
@@ -223,6 +226,8 @@ def generate_pdf_report(
         topMargin=36,
         bottomMargin=36,
     )
+    doc.title = f"{cluster_name} 巡检报告"
+    doc.author = cluster_name
     styles = getSampleStyleSheet()
     styles["Title"].fontName = base_font
     styles["Title"].fontSize = 23
@@ -324,8 +329,6 @@ def generate_pdf_report(
         localized = value.astimezone(tz)
         return f"{localized.strftime('%Y-%m-%d %H:%M:%S')} 中国标准时间"
 
-    results_list = list(results)
-    cluster_name, version_label, node_count_label = _get_cluster_meta(run)
     total_checks = len(results_list)
     passed_count = sum(1 for item in results_list if item.status.lower() == "passed")
     warning_count = sum(1 for item in results_list if item.status.lower() == "warning")

@@ -521,16 +521,17 @@ def _sanitize_message(message: str | None) -> str | None:
 
 
 def _sanitize_optional_text(value: str | None) -> str | None:
-    if not value:
+    if value is None:
         return None
-    collapsed = re.sub(r"\s+", " ", value).strip()
-    try:
-        sanitized = collapsed.encode("ascii", errors="ignore").decode("ascii").strip()
-    except Exception:
-        sanitized = ""
-    if not sanitized:
+    normalized = value.replace("\r\n", "\n")
+    normalized = re.sub(r"[^\S\n]+", " ", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    normalized = normalized.strip()
+    if not normalized:
         return None
-    return sanitized[:2000]
+    if len(normalized) > 2000:
+        normalized = normalized[:2000]
+    return normalized
 
 
 def _fetch_server_version_with_kubectl(kubeconfig_path: str) -> Optional[str]:
