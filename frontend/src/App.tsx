@@ -106,6 +106,10 @@ const BEIJING_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
 
 const statusClass = (status: string) => {
   switch (status) {
+    case "completed":
+      return "status-pill success";
+    case "incomplete":
+      return "status-pill danger";
     case "passed":
       return "status-pill success";
     case "warning":
@@ -131,12 +135,16 @@ const formatRunStatusLabel = (status: InspectionRunStatus) => {
       return "暂停中";
     case "cancelled":
       return "已取消";
+    case "completed":
+      return "已完成";
+    case "incomplete":
+      return "未完成";
     case "passed":
-      return "Passed";
-    case "warning":
-      return "Warning";
+      return "已通过";
     case "failed":
-      return "Failed";
+      return "执行失败";
+    case "warning":
+      return "存在告警";
     default:
       return status;
   }

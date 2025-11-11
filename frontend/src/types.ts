@@ -26,6 +26,8 @@ export type InspectionRunStatus =
   | "running"
   | "paused"
   | "cancelled"
+  | "completed"
+  | "incomplete"
   | "passed"
   | "warning"
   | "failed";
