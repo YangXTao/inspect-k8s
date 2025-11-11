@@ -56,7 +56,7 @@ spec:
           {{- if .Values.backend.persistence.enabled }}
             {{- if and .Values.backend.persistence.create (not .Values.backend.persistence.existingClaim) }}
           persistentVolumeClaim:
-            claimName: {{ default .Values.backend.persistence.name (printf "%s-backend-data" (include "inspection-center.fullname" .)) }}
+            claimName: backend-data
             {{- else if .Values.backend.persistence.existingClaim }}
           persistentVolumeClaim:
             claimName: {{ .Values.backend.persistence.existingClaim }}
