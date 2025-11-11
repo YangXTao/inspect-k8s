@@ -352,16 +352,48 @@ def _execute_inspection_run_async(
             logger.info("Inspection run %s has been cancelled before finalization.", run_id)
             return
 
-        overall_status = "passed"
-        if status_counter.get("failed", 0) > 0:
-            overall_status = "failed"
-        elif status_counter.get("warning", 0) > 0:
-            overall_status = "warning"
-
-        summary = (
-            f"Cluster {cluster.name} -> passed: {status_counter['passed']}, "
-            f"warning: {status_counter['warning']}, failed: {status_counter['failed']}."
+        processed_total = (
+            status_counter.get("passed", 0)
+            + status_counter.get("warning", 0)
+            + status_counter.get("failed", 0)
         )
+        total_items = len(items)
+
+        if total_items <= 0:
+            overall_status = "completed"
+            summary = "巡检完成：未配置任何检查项。"
+        elif processed_total < total_items:
+            overall_status = "incomplete"
+            summary = (
+                f"巡检未完成：仅处理 {processed_total}/{total_items} 项，"
+                "请核查巡检项配置与执行日志。"
+            )
+        else:
+            has_alerts = (
+                status_counter.get("warning", 0) > 0
+                or status_counter.get("failed", 0) > 0
+            )
+            if has_alerts:
+                overall_status = "completed"
+                summary = (
+                    f"巡检完成，但存在告警：通过 {status_counter.get('passed', 0)} 项，"
+                    f"告警 {status_counter.get('warning', 0)} 项，"
+                    f"失败 {status_counter.get('failed', 0)} 项。"
+                )
+            else:
+                overall_status = "completed"
+                summary = (
+                    f"巡检完成：通过 {status_counter.get('passed', 0)} 项，"
+                    f"告警 {status_counter.get('warning', 0)} 项，"
+                    f"失败 {status_counter.get('failed', 0)} 项。"
+                )
+
+        final_processed = processed_total
+        if total_items > 0:
+            final_processed = min(processed_total, total_items)
+        if overall_status == "completed":
+            final_processed = total_items
+        final_processed = max(final_processed, run.processed_items or 0)
 
         run = crud.finalize_inspection_run(
             db,
@@ -369,7 +401,7 @@ def _execute_inspection_run_async(
             status=overall_status,
             summary=summary,
             report_path=None,
-            processed_items=run.total_items or len(items),
+            processed_items=final_processed,
         )
 
         run = crud.get_inspection_run(db, run.id)
@@ -391,7 +423,7 @@ def _execute_inspection_run_async(
             entity_id=run.id,
             description="Attached PDF report to inspection run.",
         )
-        logger.info("Inspection run %s completed with status %s.", run_id, overall_status)
+        logger.info("Inspection run %s finalized with status %s.", run_id, overall_status)
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception("Inspection run %s failed during execution.", run_id)
         db.rollback()
@@ -402,10 +434,10 @@ def _execute_inspection_run_async(
             crud.finalize_inspection_run(
                 db,
                 run=run,
-                status="failed",
+                status="incomplete",
                 summary=summary[:500],
                 report_path=None,
-                processed_items=run.total_items or len(item_ids),
+                processed_items=run.processed_items or 0,
             )
     finally:
         db.close()
