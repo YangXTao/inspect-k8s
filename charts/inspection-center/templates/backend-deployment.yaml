@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/component: backend
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
-  replicas: {{ .Values.replicaCount.backend }}
+  replicas: {{ .Values.backend.replicaCount }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "inspection-center.name" . }}
@@ -29,38 +29,20 @@ spec:
       {{- end }}
       containers:
         - name: backend
-          image: "{{ .Values.image.backend.repository }}:{{ .Values.image.backend.tag }}"
-          imagePullPolicy: {{ .Values.image.backend.pullPolicy }}
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.backend.service.targetPort }}
               name: http
+              protocol: TCP
+          env:
+            {{- range .Values.backend.env }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
           volumeMounts:
             - name: backend-data
-              mountPath: {{ .Values.backend.persistence.mountPath | default "/app/data" }}
-          env:
-            {{- $secretName := include "inspection-center.licenseSecretName" . }}
-            {{- if $secretName }}
-            - name: LICENSE_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $secretName }}
-                  key: {{ .Values.licenseSecret.key }}
-            {{- else if .Values.licenseSecret.value }}
-            - name: LICENSE_SECRET
-              value: {{ .Values.licenseSecret.value | quote }}
-            {{- end }}
-            {{- range $key, $value := .Values.backend.env.existing }}
-            - name: {{ $key }}
-              value: {{ $value | quote }}
-            {{- end }}
-            {{- range $key, $value := .Values.backend.database.env }}
-            - name: {{ $key }}
-              value: {{ $value | quote }}
-            {{- end }}
-          {{- if .Values.backend.extraEnvFrom }}
-          envFrom:
-            {{- toYaml .Values.backend.extraEnvFrom | nindent 12 }}
-          {{- end }}
+              mountPath: {{ .Values.backend.persistence.mountPath }}
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}
       nodeSelector:
@@ -72,8 +54,15 @@ spec:
       volumes:
         - name: backend-data
           {{- if .Values.backend.persistence.enabled }}
+            {{- if and .Values.backend.persistence.create (not .Values.backend.persistence.existingClaim) }}
           persistentVolumeClaim:
-            claimName: {{ .Values.backend.persistence.existingClaim | default (printf "%s-backend-data" (include "inspection-center.fullname" .)) }}
+            claimName: {{ default .Values.backend.persistence.name (printf "%s-backend-data" (include "inspection-center.fullname" .)) }}
+            {{- else if .Values.backend.persistence.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.backend.persistence.existingClaim }}
+            {{- else }}
+          emptyDir: {}
+            {{- end }}
           {{- else }}
           emptyDir: {}
           {{- end }}

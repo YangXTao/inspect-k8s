@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/component: frontend
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
-  type: NodePort
+  type: {{ .Values.frontend.service.type | default "NodePort" }}
   selector:
     app.kubernetes.io/name: {{ include "inspection-center.name" . }}
     app.kubernetes.io/component: frontend
@@ -16,4 +16,6 @@ spec:
     - name: http
       port: {{ .Values.frontend.service.port }}
       targetPort: {{ .Values.frontend.service.targetPort }}
+      {{- if eq (.Values.frontend.service.type | default "NodePort") "NodePort" }}
       nodePort: {{ .Values.frontend.service.nodePort | default 0 }}
+      {{- end }}

@@ -14,15 +14,3 @@
   {{- default "default" .Values.serviceAccount.name -}}
 {{- end -}}
 {{- end -}}
-
-{{- define "inspection-center.licenseSecretName" -}}
-{{- if .Values.licenseSecret.create -}}
-  {{- default (printf "%s-license" (include "inspection-center.fullname" .)) .Values.licenseSecret.name -}}
-{{- else -}}
-  {{- if .Values.licenseSecret.name -}}
-    {{- .Values.licenseSecret.name -}}
-  {{- else -}}
-    {{- "" -}}
-  {{- end -}}
-{{- end -}}
-{{- end -}}

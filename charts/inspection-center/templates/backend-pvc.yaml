@@ -1,17 +1,21 @@
-{{- if and .Values.backend.persistence.enabled (not .Values.backend.persistence.existingClaim) }}
+{{- if and .Values.backend.persistence.enabled .Values.backend.persistence.create }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ .Values.backend.persistence.existingClaim | default (printf "%s-backend-data" (include "inspection-center.fullname" .)) }}
+  name: {{ default (printf "%s-backend-data" (include "inspection-center.fullname" .)) .Values.backend.persistence.name }}
   labels:
     app.kubernetes.io/name: {{ include "inspection-center.name" . }}
     app.kubernetes.io/component: backend
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   accessModes:
-    - {{ .Values.backend.persistence.accessMode }}
+    {{- range .Values.backend.persistence.accessModes }}
+    - {{ . }}
+    {{- end }}
   resources:
     requests:
       storage: {{ .Values.backend.persistence.size }}
+  {{- if .Values.backend.persistence.storageClassName }}
   storageClassName: {{ .Values.backend.persistence.storageClassName | quote }}
+  {{- end }}
 {{- end }}
