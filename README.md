@@ -1,68 +1,84 @@
 # Kubernetes 巡检中心
 
-面向多集群环境的巡检与报告平台：后端基于 FastAPI，前端基于 React/Vite，可对 Kubernetes 集群进行连接校验、巡检项执行以及报告生成，并支持以 Markdown/PDF 导出结果。
+面向多集群环境的巡检与报告平台，采用 **FastAPI**（后端）与 **React/Vite**（前端）双模块架构，底层数据持久化与报告文件统一存放在 `/app/data`。系统主要功能包括：
 
-## 功能速览
+- **集群管理**：上传 kubeconfig 即可注册集群，自动检测版本、节点数量与连接状态。
+- **巡检执行**：支持命令类与 PromQL 类巡检项，任务完成后生成 Markdown/PDF 报告。
+- **报告归档**：自动保存巡检报告，可下载 PDF/Markdown，也可联动删除。
+- **License 控制**：通过加密 License 启用集群管理、巡检执行与报告下载三大能力。
 
-- **多集群管理**：上传 kubeconfig 即可注册集群，自动校验连接并展示版本、节点信息。
-- **巡检任务**：支持自定义巡检项（命令或 PromQL），运行结果会生成 Markdown/PDF 报告。
-- **License 管控**：通过加密 License 启用集群管理、巡检执行与报告下载等能力。
-- **Helm 支持**：仓库内提供 Helm Chart，可一键部署前后端组件。
+> 默认镜像统一为 `zhisuan/k8s-inspection:v0.1.0`，镜像内部已包含前后端组件与静态资源。
 
-## Docker 镜像
-
-示例命令（根据实际仓库调整镜像地址/Tag）：
+## 使用 Docker 运行
 
 ```bash
-# 构建基础镜像
-docker build -t your-registry/inspection-backend:latest -f backend/Dockerfile .
-docker build -t your-registry/inspection-frontend:latest -f frontend/Dockerfile .
+# 1. 启动容器（建议映射数据目录）
+docker run -d --name k8s-inspection \
+  -p 8080:8080 \
+  -v $(pwd)/data:/app/data \
+  -e LICENSE_SECRET=demo-secret \
+  -e MYSQL_HOST=192.168.10.184 \
+  -e MYSQL_PORT=3306 \
+  -e MYSQL_USER=root \
+  -e MYSQL_PASSWORD=root \
+  -e MYSQL_DATABASE=demo \
+  zhisuan/k8s-inspection:v0.1.0
 
-# 推送到镜像仓库
-docker push your-registry/inspection-backend:latest
-docker push your-registry/inspection-frontend:latest
+# 2. 浏览器访问
+http://localhost:8080
 ```
 
-> 后端镜像默认在 `/app/data` 下保存数据库、kubeconfig 与报告文件；记得在运行容器时挂载或持久化该目录。
+说明：
+- `/app/data` 挂载目录用于保存数据库、上传的 kubeconfig、巡检报告等运行时数据。
+- 如需使用外部数据库，请配置 `MYSQL_*` 环境变量；若不配置，应用将默认使用 SQLite。
+- License 可通过 UI 上传或在环境变量中直接注入 `LICENSE_SECRET`。
 
-## Helm 部署
+## 使用 Helm 部署
 
-Charts 目录内已准备 `inspection-center` Chart，可直接安装：
+官方 Chart 仓库：`https://helm.com/zs-k8s-inspection`
 
 ```bash
-# 可选：自定义配置
+# 添加仓库并更新索引
+helm repo add zs-k8s-inspection https://helm.com/zs-k8s-inspection
+helm repo update
+
+# 自定义配置（可选）
 cat > my-values.yaml <<'EOF'
 backend:
   image:
-    repository: your-registry/inspection-backend
-    tag: v1.0.0
+    repository: zhisuan/k8s-inspection
+    tag: v0.1.0
+    pullPolicy: Always
   env:
     - name: MYSQL_HOST
-      value: mysql.example.com
+      value: 192.168.10.184
+    - name: MYSQL_PORT
+      value: "3306"
     - name: MYSQL_USER
-      value: demo
+      value: root
     - name: MYSQL_PASSWORD
-      value: s3cret
+      value: root
     - name: MYSQL_DATABASE
-      value: inspection
+      value: demo
     - name: LICENSE_SECRET
       value: demo-secret
+  persistence:
+    storageClassName: local-path
+    size: 10Gi
 frontend:
-  image:
-    repository: your-registry/inspection-frontend
-    tag: v1.0.0
   service:
-    nodePort: 32080
+    nodePort: 30001
 EOF
 
-# 安装
-helm install inspection charts/inspection-center -f my-values.yaml \
-  --set backend.persistence.storageClassName=fast-ssd \
-  --set backend.persistence.size=20Gi
+# 安装到目标命名空间
+helm install inspection zs-k8s-inspection/inspection-center \
+  -n inspect --create-namespace \
+  -f my-values.yaml
 ```
 
-- 后端默认会创建名为 `backend-data` 的 PVC，并挂载到 `/app/data`。
-- 前端 Service 为 NodePort，默认分配端口 `30001`，可通过 `--set frontend.service.nodePort=<port>` 调整。
-- License 直接在 `backend.env` 中设置 `LICENSE_SECRET`，或使用 `--set backend.env[4].value=xxx` 覆盖。
+部署完成后：
+- 后端 Pod 挂载 PVC `backend-data` 到 `/app/data`，确保报告、数据库与上传文件持久化。
+- 前端 Service 默认以 NodePort 方式暴露（`30001`），可按需结合 Ingress/LoadBalancer 对外提供访问。
+- 通过 `kubectl port-forward -n inspect svc/inspection-inspection-center-frontend 8080:80` 可快速调试。
 
-安装完成后，可结合 Ingress/LoadBalancer 暴露前端服务，也可使用 `kubectl port-forward svc/inspection-inspection-center-frontend 8080:80` 临时访问。祝巡检顺利！
+至此，即可通过浏览器访问集群巡检中心，上传 License 后即可开始注册集群、执行巡检并生成报告。祝巡检顺利！
