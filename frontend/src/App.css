@@ -810,6 +810,8 @@ th {
   background: #e2e8f0;
   color: #1e293b;
   font-size: 12px;
+  white-space: nowrap;
+  flex-wrap: nowrap;
 }
 
 .status-pill.success {

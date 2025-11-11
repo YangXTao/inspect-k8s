@@ -319,7 +319,7 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> T
     suggestion = config.get("suggestion_on_success") or ""
 
     if fail_threshold_value is not None and _compare(float(aggregate_value), fail_threshold_value, comparison):
-        status = CHECK_STATUS_FAILED
+        status = CHECK_STATUS_WARNING
         suggestion = config.get("suggestion_on_fail") or suggestion
     elif warn_threshold_value is not None and _compare(float(aggregate_value), warn_threshold_value, comparison):
         status = CHECK_STATUS_WARNING
@@ -394,19 +394,7 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> T
 
     matches_to_show: List[Dict[str, object]]
     headline: str
-    if status == CHECK_STATUS_FAILED and fail_matches:
-        matches_to_show = fail_matches
-        headline = (
-            f"命中告警阈值（{comparison} {_threshold_label(fail_threshold_value, fail_threshold_raw)}）的样本共 "
-            f"{len(fail_matches)} 条，展示前 {min(len(fail_matches), max_rows)} 条："
-        )
-    elif status == CHECK_STATUS_WARNING and warn_matches:
-        matches_to_show = warn_matches
-        headline = (
-            f"命中预警阈值（{comparison} {_threshold_label(warn_threshold_value, warn_threshold_raw)}）的样本共 "
-            f"{len(warn_matches)} 条，展示前 {min(len(warn_matches), max_rows)} 条："
-        )
-    elif fail_matches:
+    if fail_matches:
         matches_to_show = fail_matches
         headline = (
             f"检测到 {len(fail_matches)} 条满足告警阈值（{comparison} {_threshold_label(fail_threshold_value, fail_threshold_raw)}）的样本，"
