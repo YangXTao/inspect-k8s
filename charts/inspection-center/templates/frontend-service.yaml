@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "inspection-center.fullname" . }}-frontend
+  name: frontend-Nodeport
   labels:
     app.kubernetes.io/name: {{ include "inspection-center.name" . }}
     app.kubernetes.io/component: frontend
