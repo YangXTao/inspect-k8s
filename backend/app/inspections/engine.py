@@ -416,9 +416,6 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> T
             headline = "未获得可展示的样本。"
 
     lines = [detail_prefix.strip()]
-    if headline:
-        lines.append(headline.strip())
-
     for entry in matches_to_show[:max_rows]:
         metric = entry.get("metric") if isinstance(entry, dict) else {}
         value = entry.get("value", 0.0) if isinstance(entry, dict) else 0.0
