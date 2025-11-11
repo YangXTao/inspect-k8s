@@ -35,13 +35,9 @@ spec:
               name: http
               protocol: TCP
           env:
-            {{- range $item := .Values.frontend.env }}
-            {{- if and $item (kindIs "map" $item) (hasKey $item "name") }}
-            - name: {{ $item.name }}
-              value: {{ default "" $item.value | quote }}
-            {{- else }}
-            {{- fail (printf "frontend.env 中存在无效项: %v（需要 name / value）" $item) }}
-            {{- end }}
+            {{- range $name, $value := .Values.frontend.env }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
             {{- end }}
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}

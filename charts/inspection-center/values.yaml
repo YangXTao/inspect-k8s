@@ -11,18 +11,12 @@ backend:
     tag: dev-v0.1.53
     pullPolicy: Always
   env:
-    - name: MYSQL_HOST
-      value: 192.168.10.184
-    - name: MYSQL_PORT
-      value: "3306"
-    - name: MYSQL_USER
-      value: root
-    - name: MYSQL_PASSWORD
-      value: root
-    - name: MYSQL_DATABASE
-      value: demo
-    - name: LICENSE_SECRET
-      value: demo-secret
+    MYSQL_HOST: 192.168.10.184
+    MYSQL_PORT: "3306"
+    MYSQL_USER: root
+    MYSQL_PASSWORD: root
+    MYSQL_DATABASE: demo
+    LICENSE_SECRET: demo-secret
   persistence:
     enabled: true
     create: true
@@ -49,8 +43,7 @@ frontend:
     tag: dev-v0.1.53
     pullPolicy: Always
   env:
-    - name: API_SERVER
-      value: http://backend:8000
+    API_SERVER: http://backend:8000
   service:
     type: NodePort
     port: 80
