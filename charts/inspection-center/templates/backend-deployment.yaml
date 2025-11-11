@@ -36,13 +36,9 @@ spec:
               name: http
               protocol: TCP
           env:
-            {{- range $item := .Values.backend.env }}
-            {{- if and $item (kindIs "map" $item) (hasKey $item "name") }}
-            - name: {{ $item.name }}
-              value: {{ default "" $item.value | quote }}
-            {{- else }}
-            {{- fail (printf "backend.env 中存在无效项: %v（需要 name / value）" $item) }}
-            {{- end }}
+            {{- range $name, $value := .Values.backend.env }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
             {{- end }}
           volumeMounts:
             - name: backend-data
