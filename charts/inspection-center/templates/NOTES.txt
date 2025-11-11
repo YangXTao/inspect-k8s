@@ -13,5 +13,4 @@
 {{- end }}
 
 2. License 配置：
-  - 缺省情况下 Chart 会引用已有的 Secret。请在 values.yaml 中设置 `licenseSecret.name` 与 `licenseSecret.key`。
-  - 若想随 Chart 一起创建 Secret，可将 `licenseSecret.create` 设置为 true，并填入 `licenseSecret.value`。
+  - 直接在 values.yaml 中的 `backend.env` 写入 `LICENSE_SECRET`，或通过 `--set backend.env[5].value=...` 覆盖。

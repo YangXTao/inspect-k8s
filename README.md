@@ -32,26 +32,27 @@ Charts 目录内已准备 `inspection-center` Chart，可直接安装：
 ```bash
 # 可选：自定义配置
 cat > my-values.yaml <<'EOF'
-image:
-  backend:
+backend:
+  image:
     repository: your-registry/inspection-backend
     tag: v1.0.0
-  frontend:
+  env:
+    - name: MYSQL_HOST
+      value: mysql.example.com
+    - name: MYSQL_USER
+      value: demo
+    - name: MYSQL_PASSWORD
+      value: s3cret
+    - name: MYSQL_DATABASE
+      value: inspection
+    - name: LICENSE_SECRET
+      value: demo-secret
+frontend:
+  image:
     repository: your-registry/inspection-frontend
     tag: v1.0.0
-backend:
-  database:
-    env:
-      MYSQL_HOST: mysql.example.com
-      MYSQL_USER: demo
-      MYSQL_PASSWORD: s3cret
-      MYSQL_DATABASE: inspection
-frontend:
   service:
-    nodePort: 32080  # 如果想固定 NodePort，可以覆盖默认值
-licenseSecret:
-  create: true
-  value: demo-secret
+    nodePort: 32080
 EOF
 
 # 安装
@@ -61,7 +62,7 @@ helm install inspection charts/inspection-center -f my-values.yaml \
 ```
 
 - 后端默认会创建名为 `backend-data` 的 PVC，并挂载到 `/app/data`。
-- 前端 Service 为 NodePort，默认分配端口 `30080`，可通过 `--set frontend.service.nodePort=<port>` 调整。
-- License 可以通过预先创建的 Secret 注入：`--set licenseSecret.create=false --set licenseSecret.name=my-license-secret`。
+- 前端 Service 为 NodePort，默认分配端口 `30001`，可通过 `--set frontend.service.nodePort=<port>` 调整。
+- License 直接在 `backend.env` 中设置 `LICENSE_SECRET`，或使用 `--set backend.env[4].value=xxx` 覆盖。
 
 安装完成后，可结合 Ingress/LoadBalancer 暴露前端服务，也可使用 `kubectl port-forward svc/inspection-inspection-center-frontend 8080:80` 临时访问。祝巡检顺利！

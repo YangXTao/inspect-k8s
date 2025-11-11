@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/component: frontend
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
-  replicas: {{ .Values.replicaCount.frontend }}
+  replicas: {{ .Values.frontend.replicaCount }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "inspection-center.name" . }}
@@ -28,14 +28,17 @@ spec:
       {{- end }}
       containers:
         - name: frontend
-          image: "{{ .Values.image.frontend.repository }}:{{ .Values.image.frontend.tag }}"
-          imagePullPolicy: {{ .Values.image.frontend.pullPolicy }}
+          image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
+          imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.frontend.service.targetPort }}
               name: http
+              protocol: TCP
           env:
-            - name: VITE_API_BASE_URL
-              value: {{ .Values.frontend.env.apiBaseUrl | quote }}
+            {{- range .Values.frontend.env }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
       nodeSelector:

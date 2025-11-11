@@ -3320,40 +3320,34 @@ const LicenseSettingsPanel = ({
   };
 
   const handleUploadClick = async () => {
-    if (!selectedFile) {
-      setError("请先选择 License 文件");
-      return;
-    }
-    setError(null);
-    setNotice(null);
-    try {
-      await onUpload(selectedFile);
-      await onRefresh();
-      setNotice("License 上传成功");
-      setSelectedFile(null);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "上传 License 失败";
-      setError(message);
-    }
-  };
-
-  const handleImportText = async () => {
+    const file = selectedFile;
     const trimmed = licenseText.trim();
-    if (!trimmed) {
-      setError("请粘贴 License 内容");
+    if (!file && !trimmed) {
+      setError("请先选择文件或粘贴 License 内容");
       return;
     }
     setError(null);
     setNotice(null);
     try {
-      await onUploadText(trimmed);
+      if (file) {
+        await onUpload(file);
+        setSelectedFile(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+      }
+      if (trimmed) {
+        await onUploadText(trimmed);
+        setLicenseText("");
+      }
       await onRefresh();
-      setNotice("License 文本导入成功");
-      setLicenseText("");
+      if (file && trimmed) {
+        setNotice("License 文件与文本已全部导入");
+      } else if (file) {
+        setNotice("License 上传成功");
+      } else {
+        setNotice("License 文本导入成功");
+      }
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "导入 License 失败";
@@ -3446,8 +3440,11 @@ const LicenseSettingsPanel = ({
         )}
       </div>
       <div className="license-upload-section">
+        <p className="card-caption">
+          支持上传 License 文件或直接粘贴密文，两种方式任选其一。
+        </p>
         <label className="license-upload-label">
-          导入 License 文件
+          选择 License 文件（可选）
           <input
             ref={fileInputRef}
             type="file"
@@ -3458,28 +3455,8 @@ const LicenseSettingsPanel = ({
         {selectedFile && (
           <p className="license-file-name">已选择：{selectedFile.name}</p>
         )}
-        <div className="license-actions">
-          <button
-            type="button"
-            className="primary"
-            onClick={handleUploadClick}
-            disabled={uploading}
-          >
-            {uploading ? "上传中..." : "上传 License"}
-          </button>
-          <button
-            type="button"
-            className="secondary"
-            onClick={handleRefreshClick}
-            disabled={refreshing || status.loading}
-          >
-            {refreshing ? "刷新中..." : "刷新状态"}
-          </button>
-        </div>
-      </div>
-      <div className="license-upload-section">
         <label className="license-upload-label" htmlFor="license-text-content">
-          在线导入 License
+          或粘贴加密/明文 License 内容
         </label>
         <textarea
           id="license-text-content"
@@ -3491,16 +3468,24 @@ const LicenseSettingsPanel = ({
             setNotice(null);
           }}
           placeholder="在此粘贴 License 内容，例如 ENC-LICENSE-V1:..."
-          rows={6}
+          rows={5}
         />
         <div className="license-actions">
           <button
             type="button"
             className="primary"
-            onClick={handleImportText}
-            disabled={textUploading}
+            onClick={handleUploadClick}
+            disabled={uploading || textUploading}
           >
-            {textUploading ? "导入中..." : "导入 License 文本"}
+            {uploading || textUploading ? "导入中..." : "导入 License"}
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={handleRefreshClick}
+            disabled={refreshing || status.loading}
+          >
+            {refreshing ? "刷新中..." : "刷新状态"}
           </button>
         </div>
       </div>
