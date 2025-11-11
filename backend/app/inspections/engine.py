@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import shlex
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, Tuple
+from typing import Callable, Dict, Iterable, List, Tuple
 
 from ..prometheus import PrometheusClient
 
@@ -201,6 +201,60 @@ def _aggregate_values(values: list[float], mode: str) -> float:
     return max(values)
 
 
+def _format_metric_identity(metric: Dict[str, object]) -> str:
+    if not isinstance(metric, dict):
+        return "sample"
+
+    namespace = str(metric.get("namespace") or metric.get("ns") or "").strip()
+    pod = str(metric.get("pod") or metric.get("pod_name") or "").strip()
+    container = str(metric.get("container") or metric.get("container_name") or "").strip()
+    instance = str(metric.get("instance") or metric.get("node") or "").strip()
+
+    if namespace and pod:
+        base = f"{namespace}/{pod}"
+    elif pod:
+        base = pod
+    elif instance:
+        base = instance
+    else:
+        base = str(metric.get("__name__") or "sample")
+
+    if container:
+        base = f"{base}:{container}"
+
+    extra_labels: List[str] = []
+    for key in sorted(metric):
+        if key in {
+            "__name__",
+            "namespace",
+            "ns",
+            "pod",
+            "pod_name",
+            "container",
+            "container_name",
+            "instance",
+            "node",
+            "job",
+        }:
+            continue
+        value = metric.get(key)
+        if value in (None, "", "-"):
+            continue
+        extra_labels.append(f"{key}={value}")
+
+    if extra_labels:
+        return f"{base} ({', '.join(extra_labels)})"
+    return base
+
+
+def _format_numeric_value(value: float) -> str:
+    formatted = f"{value:.4f}"
+    formatted = formatted.rstrip("0").rstrip(".")
+    if not formatted:
+        formatted = "0"
+    return formatted
+
+
 def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> Tuple[str, str, str]:
     if not isinstance(config, dict):
         return (
@@ -224,11 +278,20 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> T
         suggestion = config.get("suggestion_on_error") or "Check Prometheus endpoint availability."
         return CHECK_STATUS_WARNING, message, suggestion
 
-    values = []
+    samples: List[Dict[str, object]] = []
+    values: List[float] = []
     for sample in results or []:
         value = PrometheusClient.extract_value(sample)
-        if value is not None:
-            values.append(value)
+        if value is None:
+            continue
+        metric_raw = sample.get("metric")
+        metric_dict: Dict[str, object]
+        if isinstance(metric_raw, dict):
+            metric_dict = metric_raw
+        else:
+            metric_dict = {}
+        samples.append({"metric": metric_dict, "value": value})
+        values.append(value)
 
     if not values:
         empty_status = config.get("status_if_empty", CHECK_STATUS_WARNING)
@@ -240,28 +303,140 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> T
     aggregate_value = _aggregate_values(values, aggregate_mode)
 
     comparison = str(config.get("comparison", ">=")).strip()
-    fail_threshold = config.get("fail_threshold")
-    warn_threshold = config.get("warn_threshold")
+    fail_threshold_raw = config.get("fail_threshold")
+    warn_threshold_raw = config.get("warn_threshold")
+
+    def _to_float(raw: object) -> float | None:
+        try:
+            return float(raw)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return None
+
+    fail_threshold_value = _to_float(fail_threshold_raw)
+    warn_threshold_value = _to_float(warn_threshold_raw)
 
     status = CHECK_STATUS_PASSED
     suggestion = config.get("suggestion_on_success") or ""
 
-    if fail_threshold is not None and _compare(float(aggregate_value), float(fail_threshold), comparison):
+    if fail_threshold_value is not None and _compare(float(aggregate_value), fail_threshold_value, comparison):
         status = CHECK_STATUS_FAILED
         suggestion = config.get("suggestion_on_fail") or suggestion
-    elif warn_threshold is not None and _compare(float(aggregate_value), float(warn_threshold), comparison):
+    elif warn_threshold_value is not None and _compare(float(aggregate_value), warn_threshold_value, comparison):
         status = CHECK_STATUS_WARNING
         suggestion = config.get("suggestion_on_warn") or suggestion
 
+    def _classify(value: float) -> str | None:
+        if fail_threshold_value is not None and _compare(value, fail_threshold_value, comparison):
+            return "fail"
+        if warn_threshold_value is not None and _compare(value, warn_threshold_value, comparison):
+            return "warn"
+        return None
+
+    fail_matches: List[Dict[str, object]] = []
+    warn_matches: List[Dict[str, object]] = []
+    for entry in samples:
+        category = _classify(entry["value"])  # type: ignore[index]
+        if category == "fail":
+            fail_matches.append(entry)
+        elif category == "warn":
+            warn_matches.append(entry)
+
+    reverse_sort = comparison not in {"<", "<="}
+    fail_matches.sort(key=lambda item: item["value"], reverse=reverse_sort)  # type: ignore[index]
+    warn_matches.sort(key=lambda item: item["value"], reverse=reverse_sort)  # type: ignore[index]
+    sorted_samples = sorted(samples, key=lambda item: item["value"], reverse=reverse_sort)  # type: ignore[index]
+
+    def _format_value(value: float) -> str:
+        fmt = config.get("value_format")
+        if isinstance(fmt, str) and fmt:
+            try:
+                return fmt.format(value=value)
+            except Exception:
+                pass
+        return _format_numeric_value(value)
+
+    def _threshold_label(parsed: float | None, raw: object) -> str:
+        if parsed is not None:
+            return _format_value(parsed)
+        if raw is None:
+            return "-"
+        return str(raw)
+
     detail_template = config.get("detail_template")
-    if isinstance(detail_template, str):
+    detail_prefix = ""
+    if isinstance(detail_template, str) and detail_template.strip():
         try:
-            detail = detail_template.format(value=aggregate_value, values=values, expression=expression)
+            detail_prefix = detail_template.format(
+                value=aggregate_value,
+                values=values,
+                expression=expression,
+            )
         except Exception:
-            detail = f"{aggregate_mode} value from {expression}: {aggregate_value}"
+            detail_prefix = ""
+    if not detail_prefix:
+        detail_prefix = (
+            f"{aggregate_mode} value from {expression}: {_format_value(aggregate_value)} "
+            f"(samples={len(values)})"
+        )
+
+    max_rows_raw = (
+        config.get("result_limit")
+        or config.get("max_results")
+        or config.get("limit")
+        or config.get("top_n")
+    )
+    try:
+        max_rows = int(max_rows_raw)  # type: ignore[arg-type]
+        if max_rows <= 0:
+            max_rows = 20
+    except (TypeError, ValueError):
+        max_rows = 20
+
+    matches_to_show: List[Dict[str, object]]
+    headline: str
+    if status == CHECK_STATUS_FAILED and fail_matches:
+        matches_to_show = fail_matches
+        headline = (
+            f"命中告警阈值（{comparison} {_threshold_label(fail_threshold_value, fail_threshold_raw)}）的样本共 "
+            f"{len(fail_matches)} 条，展示前 {min(len(fail_matches), max_rows)} 条："
+        )
+    elif status == CHECK_STATUS_WARNING and warn_matches:
+        matches_to_show = warn_matches
+        headline = (
+            f"命中预警阈值（{comparison} {_threshold_label(warn_threshold_value, warn_threshold_raw)}）的样本共 "
+            f"{len(warn_matches)} 条，展示前 {min(len(warn_matches), max_rows)} 条："
+        )
+    elif fail_matches:
+        matches_to_show = fail_matches
+        headline = (
+            f"检测到 {len(fail_matches)} 条满足告警阈值（{comparison} {_threshold_label(fail_threshold_value, fail_threshold_raw)}）的样本，"
+            f"展示前 {min(len(fail_matches), max_rows)} 条："
+        )
+    elif warn_matches:
+        matches_to_show = warn_matches
+        headline = (
+            f"检测到 {len(warn_matches)} 条满足预警阈值（{comparison} {_threshold_label(warn_threshold_value, warn_threshold_raw)}）的样本，"
+            f"展示前 {min(len(warn_matches), max_rows)} 条："
+        )
     else:
-        sample_count = len(values)
-        detail = f"{aggregate_mode} value from {expression}: {aggregate_value} (samples={sample_count})"
+        matches_to_show = sorted_samples
+        if matches_to_show:
+            headline = (
+                f"共收到 {len(sorted_samples)} 条样本，展示前 {min(len(sorted_samples), max_rows)} 条："
+            )
+        else:
+            headline = "未获得可展示的样本。"
+
+    lines = [detail_prefix.strip()]
+    if headline:
+        lines.append(headline.strip())
+
+    for entry in matches_to_show[:max_rows]:
+        metric = entry.get("metric") if isinstance(entry, dict) else {}
+        value = entry.get("value", 0.0) if isinstance(entry, dict) else 0.0
+        lines.append(f"- {_format_metric_identity(metric)}: {_format_value(float(value))}")
+
+    detail = "\n".join(line for line in lines if line)
 
     return status, detail, suggestion
 
