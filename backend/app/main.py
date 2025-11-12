@@ -42,6 +42,8 @@ logger = logging.getLogger(__name__)
 
 _INSPECTION_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
+_DEFAULT_INSPECTIONS_SENTINEL = Path("data/state/default_inspections_seeded.flag")
+
 
 @dataclass
 class RunExecutionControl:
@@ -444,6 +446,20 @@ def _execute_inspection_run_async(
 
 
 def _seed_defaults(db: Session) -> None:
+    if _DEFAULT_INSPECTIONS_SENTINEL.exists():
+        return
+
+    has_any = db.query(models.InspectionItem.id).limit(1).first()
+    if has_any:
+        try:
+            _DEFAULT_INSPECTIONS_SENTINEL.parent.mkdir(parents=True, exist_ok=True)
+            _DEFAULT_INSPECTIONS_SENTINEL.write_text(
+                datetime.utcnow().isoformat(), encoding="utf-8"
+            )
+        except Exception:
+            logger.debug("无法写入默认巡检项标记文件，继续运行。", exc_info=True)
+        return
+
     existing_names = {
         name for (name,) in db.query(models.InspectionItem.name).all()
     }
@@ -463,6 +479,14 @@ def _seed_defaults(db: Session) -> None:
     for item in new_items:
         db.add(item)
     db.commit()
+
+    try:
+        _DEFAULT_INSPECTIONS_SENTINEL.parent.mkdir(parents=True, exist_ok=True)
+        _DEFAULT_INSPECTIONS_SENTINEL.write_text(
+            datetime.utcnow().isoformat(), encoding="utf-8"
+        )
+    except Exception:
+        logger.debug("写入默认巡检项标记文件失败。", exc_info=True)
 
     # deprecated_names = {"Recent Events"}
     # if deprecated_names:

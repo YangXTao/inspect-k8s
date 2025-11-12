@@ -86,6 +86,7 @@ def ensure_runtime_directories() -> None:
     base = Path("data")
     (base / "reports").mkdir(parents=True, exist_ok=True)
     (base / "configs").mkdir(parents=True, exist_ok=True)
+    (base / "state").mkdir(parents=True, exist_ok=True)
     ensure_license_directory()
 
 
