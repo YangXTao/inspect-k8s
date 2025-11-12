@@ -1,0 +1,14 @@
+apiVersion: v1
+entries:
+  inspection-center:
+  - apiVersion: v2
+    appVersion: 0.1.2
+    created: "2025-11-12T10:21:10.505035221+08:00"
+    description: Helm chart for the Kubernetes 巡检中心应用（后端 + 前端）
+    digest: a72c2d88a7e5449c8ee2c3d7bf7a2fe57bf7f7ba48a9b4c71258dcde7fa98cb9
+    name: inspection-center
+    type: application
+    urls:
+    - https://yangxtao.github.io/inspect-k8s/inspection-center-0.1.2.tgz
+    version: 0.1.2
+generated: "2025-11-12T10:21:10.503354729+08:00"
