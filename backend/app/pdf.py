@@ -19,6 +19,7 @@ from reportlab.platypus import (
     Spacer,
     Table,
     TableStyle,
+    LongTable,
 )
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
@@ -452,7 +453,7 @@ def generate_pdf_report(
                 Paragraph(result.suggestion or "-", suggestion_style),
             ]
         )
-    table = Table(data, colWidths=[130, 70, 210, 160], repeatRows=1)
+    table = LongTable(data, colWidths=[130, 70, 210, 160], repeatRows=1)
 
     commands = [
 
