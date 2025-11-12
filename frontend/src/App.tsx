@@ -46,7 +46,7 @@ import {
   importInspectionItems,
 } from "./api";
 import { appConfig } from "./config";
-import {
+import type {
   ClusterConfig,
   InspectionItem,
   InspectionResult,
@@ -160,6 +160,8 @@ const clampProgress = (value: number | undefined) => {
 
 const STATUS_CIRCLE_RADIUS = 16;
 const STATUS_CIRCLE_CIRCUMFERENCE = 2 * Math.PI * STATUS_CIRCLE_RADIUS;
+
+type InspectionResultStatusFilter = InspectionResultStatus | "all";
 
 const hasRunStateChanged = (
   previous: InspectionRun | null,
@@ -310,15 +312,11 @@ const renderRunStatusBadge = (
   status: InspectionRunStatus,
   progress?: number
 ) => {
-  if (status === "running" || status === "paused" || status === "cancelled") {
+  if (status === "running" || status === "paused") {
     const clamped = clampProgress(progress);
     const progressClassName = [
       "status-progress status-progress-circle",
-      status === "paused"
-        ? "paused"
-        : status === "cancelled"
-        ? "cancelled"
-        : null,
+      status === "paused" ? "paused" : null,
     ]
       .filter(Boolean)
       .join(" ");
@@ -345,6 +343,10 @@ const renderRunStatusBadge = (
         </span>
       </div>
     );
+  }
+
+  if (status === "cancelled") {
+    return <span className={statusClass(status)}>{formatRunStatusLabel(status)}</span>;
   }
 
   return (
@@ -2598,31 +2600,23 @@ const RunDetailView = ({
     setResultPageInput("");
   }, [resultPageSize]);
 
-  useEffect(() => {
-    setResultPage(1);
-    setResultPageInput("");
-    setResultFilterQuery("");
-    setResultFilterStatus("all");
-  }, [run?.id]);
-
-  const totalResultPages = useMemo(
-    () =>
-      Math.max(
-        1,
-        Math.ceil(filteredResults.length / Math.max(resultPageSize, 1))
-      ),
-    [filteredResults.length, resultPageSize]
-  );
-
-  useEffect(() => {
-    setResultPage((prev) => Math.min(Math.max(prev, 1), totalResultPages));
-  }, [totalResultPages]);
-
-  type InspectionResultStatusFilter = InspectionResultStatus | "all";
-
   const [resultFilterQuery, setResultFilterQuery] = useState("");
   const [resultFilterStatus, setResultFilterStatus] =
     useState<InspectionResultStatusFilter>("all");
+
+  useEffect(() => {
+    setResultFilterQuery("");
+    setResultFilterStatus("all");
+    setResultPage(1);
+    setResultPageInput("");
+  }, [run?.id]);
+
+  useEffect(() => {
+    setResultPage(1);
+    if (resultPageInput) {
+      setResultPageInput("");
+    }
+  }, [resultFilterQuery, resultFilterStatus, resultPageInput]);
 
   const filteredResults = useMemo(() => {
     if (orderedResults.length === 0) {
@@ -2651,8 +2645,21 @@ const RunDetailView = ({
       return [];
     }
     const start = (resultPage - 1) * resultPageSize;
-    return filteredResults.slice(start, start + resultPageSize);
+      return filteredResults.slice(start, start + resultPageSize);
   }, [filteredResults, resultPage, resultPageSize]);
+
+  const totalResultPages = useMemo(
+    () =>
+      Math.max(
+        1,
+        Math.ceil(filteredResults.length / Math.max(resultPageSize, 1))
+      ),
+    [filteredResults, resultPageSize]
+  );
+
+  useEffect(() => {
+    setResultPage((prev) => Math.min(Math.max(prev, 1), totalResultPages));
+  }, [totalResultPages]);
 
   const handleResultPageChange = useCallback(
     (offset: number) => {
