@@ -2940,7 +2940,7 @@ const RunDetailView = ({
               <div className="inspection-results-filters">
                 <input
                   type="text"
-                  placeholder="按名称、详情或建议搜索"
+                  placeholder="过滤"
                   value={resultFilterQuery}
                   onChange={(event) => setResultFilterQuery(event.target.value)}
                 />
