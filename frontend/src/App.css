@@ -842,6 +842,10 @@ th {
   gap: 16px;
 }
 
+.inspection-results-toolbar > :first-child {
+  flex: 1 1 auto;
+}
+
 .inspection-results-filters {
   display: flex;
   align-items: center;
