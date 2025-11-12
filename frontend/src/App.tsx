@@ -2467,8 +2467,11 @@ const RunDetailView = ({
     }
     return getClusterDisplayId(clusterDisplayIds, numericClusterId, cluster);
   }, [clusterDisplayIds, cluster, numericClusterId]);
-  const clusterPath =
-    clusterSlug ?? (clusterKey ? `/clusters/${clusterKey}` : "/");
+  const clusterPath = clusterSlug
+    ? `/clusters/${clusterSlug}`
+    : clusterKey
+    ? `/clusters/${clusterKey}`
+    : "/";
 
   const isClusterIdInvalid = Number.isNaN(numericClusterId);
   const isDisplayLookupReady = useMemo(() => {
