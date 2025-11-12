@@ -1155,6 +1155,8 @@ th {
   flex-direction: column;
   gap: 8px;
   min-width: 168px;
+  align-self: stretch;
+  padding-bottom: 12px;
 }
 
 .settings-nav-button {
@@ -1218,6 +1220,28 @@ th {
   justify-content: flex-start;
 }
 
+.settings-branding {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+  font-size: 13px;
+  color: #475569;
+}
+
+.settings-branding-logo {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+}
+
+.settings-branding-name {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
 @media (max-width: 920px) {
   .settings-modal-shell {
     flex-direction: column;
@@ -1231,6 +1255,15 @@ th {
   .settings-nav-button {
     flex: 1 1 140px;
     text-align: center;
+  }
+
+  .settings-branding {
+    margin-top: 0;
+    width: 100%;
+    justify-content: center;
+    border-top: none;
+    border-left: 1px solid #e2e8f0;
+    padding: 10px 0 0;
   }
 }
 
