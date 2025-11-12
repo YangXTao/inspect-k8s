@@ -46,7 +46,7 @@ import {
   importInspectionItems,
 } from "./api";
 import { appConfig } from "./config";
-import CompanyLogo from "./assets/company-logo.svg";
+import CompanyLogoUrl from "./assets/company-logo.svg?url";
 import type {
   ClusterConfig,
   InspectionItem,
@@ -3264,7 +3264,7 @@ const SettingsModal = ({
               </button>
             ))}
             <div className="settings-branding" aria-label="智算科技">
-              <img src={CompanyLogo} alt="智算科技 Logo" className="settings-branding-logo" />
+              <img src={CompanyLogoUrl} alt="智算科技 Logo" className="settings-branding-logo" />
               <span className="settings-branding-name">智算科技</span>
             </div>
           </nav>
