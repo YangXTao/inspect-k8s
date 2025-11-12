@@ -379,6 +379,8 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> T
             f"(samples={len(values)})"
         )
 
+    default_limit = 5 if (status == CHECK_STATUS_PASSED and not fail_matches and not warn_matches) else 20
+
     max_rows_raw = (
         config.get("result_limit")
         or config.get("max_results")
@@ -388,9 +390,9 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> T
     try:
         max_rows = int(max_rows_raw)  # type: ignore[arg-type]
         if max_rows <= 0:
-            max_rows = 20
+            max_rows = default_limit
     except (TypeError, ValueError):
-        max_rows = 20
+        max_rows = default_limit
 
     matches_to_show: List[Dict[str, object]]
     headline: str
