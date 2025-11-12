@@ -46,7 +46,7 @@ import {
   importInspectionItems,
 } from "./api";
 import { appConfig } from "./config";
-import CompanyLogoUrl from "./assets/company-logo.svg?url";
+import CompanyLogoUrl from "./assets/company-logo.png?url";
 import type {
   ClusterConfig,
   InspectionItem,
