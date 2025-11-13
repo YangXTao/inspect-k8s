@@ -9,6 +9,7 @@ ARG NO_PROXY="localhost,127.0.0.1"
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     INSPECT_AGENT_CONFIG=/app/config.yaml
+ENV PYTHONPATH=/app
 
 WORKDIR /app
 
