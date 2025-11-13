@@ -3,11 +3,12 @@
 import json
 import logging
 import re
+import secrets
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Any
 from uuid import uuid4
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
@@ -15,7 +16,7 @@ import os
 import shutil
 import subprocess
 import yaml
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, Query
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -200,6 +201,114 @@ def _calculate_run_progress(run: models.InspectionRun) -> tuple[int, int, int]:
     progress = max(0, min(progress, 100))
     return total_items, processed_items, progress
 
+
+def _summarize_run_outcome(
+    *,
+    total_items: int,
+    processed_total: int,
+    status_counter: dict[str, int],
+    current_processed: int,
+) -> tuple[str, str, int]:
+    if total_items <= 0:
+        overall_status = "completed"
+        summary = "巡检完成：未配置任何检查项。"
+    elif processed_total < total_items:
+        overall_status = "incomplete"
+        summary = (
+            f"巡检未完成：仅处理 {processed_total}/{total_items} 项，"
+            "请核查巡检项配置与执行日志。"
+        )
+    else:
+        has_alerts = (
+            status_counter.get("warning", 0) > 0
+            or status_counter.get("failed", 0) > 0
+        )
+        if has_alerts:
+            overall_status = "completed"
+            summary = (
+                f"巡检完成，但存在告警：通过 {status_counter.get('passed', 0)} 项，"
+                f"告警 {status_counter.get('warning', 0)} 项，"
+                f"失败 {status_counter.get('failed', 0)} 项。"
+            )
+        else:
+            overall_status = "completed"
+            summary = (
+                f"巡检完成：通过 {status_counter.get('passed', 0)} 项，"
+                f"告警 {status_counter.get('warning', 0)} 项，"
+                f"失败 {status_counter.get('failed', 0)} 项。"
+            )
+
+    final_processed = processed_total
+    if total_items > 0:
+        final_processed = min(processed_total, total_items)
+    if overall_status == "completed":
+        final_processed = total_items
+    final_processed = max(final_processed, current_processed or 0)
+    return overall_status, summary, final_processed
+
+
+def _attach_run_report(db: Session, run: models.InspectionRun) -> models.InspectionRun:
+    run = crud.get_inspection_run(db, run.id) or run
+    if not run.results:
+        return run
+    display_id = _build_run_display_id(db, run)
+    report_path = generate_pdf_report(
+        run=run, results=run.results, display_id=display_id
+    )
+    run.report_path = report_path
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    crud.log_action(
+        db,
+        action="update",
+        entity_type="inspection_run",
+        entity_id=run.id,
+        description="生成巡检报告。",
+    )
+    return run
+
+
+def _generate_agent_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _parse_run_plan(run: models.InspectionRun) -> List[Dict[str, Any]]:
+    if not run.plan_json:
+        return []
+    try:
+        payload = json.loads(run.plan_json)
+        if isinstance(payload, list):
+            return payload
+    except Exception:
+        logger.warning("Failed to parse run %s plan_json.", run.id, exc_info=True)
+    return []
+
+
+def _serialize_agent(agent: models.InspectionAgent) -> schemas.InspectionAgentOut:
+    return schemas.InspectionAgentOut.model_validate(agent)
+
+
+def _resolve_agent_from_header(
+    db: Session,
+    authorization: str | None,
+) -> models.InspectionAgent:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Agent token 缺失。")
+    prefix = "bearer "
+    if not authorization.lower().startswith(prefix):
+        raise HTTPException(status_code=401, detail="Agent token 格式无效。")
+    token = authorization[len(prefix) :].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Agent token 为空。")
+    agent = crud.get_inspection_agent_by_token(db, token)
+    if not agent:
+        raise HTTPException(status_code=401, detail="Agent token 无效。")
+    if not agent.is_enabled:
+        raise HTTPException(status_code=403, detail="Agent 已被禁用。")
+    return agent
+
+
 app = FastAPI(title="K8s Inspection Service", version="0.3.0")
 
 CONNECTION_TEST_TIMEOUT_SECONDS = 8.0
@@ -360,42 +469,12 @@ def _execute_inspection_run_async(
             + status_counter.get("failed", 0)
         )
         total_items = len(items)
-
-        if total_items <= 0:
-            overall_status = "completed"
-            summary = "巡检完成：未配置任何检查项。"
-        elif processed_total < total_items:
-            overall_status = "incomplete"
-            summary = (
-                f"巡检未完成：仅处理 {processed_total}/{total_items} 项，"
-                "请核查巡检项配置与执行日志。"
-            )
-        else:
-            has_alerts = (
-                status_counter.get("warning", 0) > 0
-                or status_counter.get("failed", 0) > 0
-            )
-            if has_alerts:
-                overall_status = "completed"
-                summary = (
-                    f"巡检完成，但存在告警：通过 {status_counter.get('passed', 0)} 项，"
-                    f"告警 {status_counter.get('warning', 0)} 项，"
-                    f"失败 {status_counter.get('failed', 0)} 项。"
-                )
-            else:
-                overall_status = "completed"
-                summary = (
-                    f"巡检完成：通过 {status_counter.get('passed', 0)} 项，"
-                    f"告警 {status_counter.get('warning', 0)} 项，"
-                    f"失败 {status_counter.get('failed', 0)} 项。"
-                )
-
-        final_processed = processed_total
-        if total_items > 0:
-            final_processed = min(processed_total, total_items)
-        if overall_status == "completed":
-            final_processed = total_items
-        final_processed = max(final_processed, run.processed_items or 0)
+        overall_status, summary, final_processed = _summarize_run_outcome(
+            total_items=total_items,
+            processed_total=processed_total,
+            status_counter=status_counter,
+            current_processed=run.processed_items or 0,
+        )
 
         run = crud.finalize_inspection_run(
             db,
@@ -410,21 +489,7 @@ def _execute_inspection_run_async(
         if not run:
             raise RuntimeError("无法加载巡检结果。")
 
-        display_id = _build_run_display_id(db, run)
-        report_path = generate_pdf_report(
-            run=run, results=run.results, display_id=display_id
-        )
-        run.report_path = report_path
-        db.add(run)
-        db.commit()
-        db.refresh(run)
-        crud.log_action(
-            db,
-            action="update",
-            entity_type="inspection_run",
-            entity_id=run.id,
-            description="Attached PDF report to inspection run.",
-        )
+        run = _attach_run_report(db, run)
         logger.info("Inspection run %s finalized with status %s.", run_id, overall_status)
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception("Inspection run %s failed during execution.", run_id)
@@ -801,6 +866,25 @@ async def register_cluster(
             detail="Prometheus 地址需要以 http:// 或 https:// 开头。",
         )
 
+    mode_value = (execution_mode or "server").strip().lower()
+    if mode_value not in {"server", "agent"}:
+        raise HTTPException(status_code=400, detail="执行模式仅支持 server 或 agent。")
+
+    default_agent = None
+    if default_agent_id:
+        try:
+            agent_id = int(default_agent_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="默认 Agent ID 无效。")
+        default_agent = crud.get_inspection_agent(db, agent_id)
+        if not default_agent:
+            raise HTTPException(status_code=404, detail="指定的 Agent 不存在。")
+        if not default_agent.is_enabled:
+            raise HTTPException(status_code=400, detail="指定的 Agent 已被禁用。")
+
+    if mode_value == "agent" and default_agent is None:
+        raise HTTPException(status_code=400, detail="请选择可用的 Agent 用于执行巡检。")
+
     kubeconfig_path = _store_kubeconfig(data, file.filename)
     cluster = crud.create_cluster(
         db,
@@ -808,7 +892,11 @@ async def register_cluster(
         kubeconfig_path=kubeconfig_path,
         contexts_json=json.dumps(contexts, ensure_ascii=False),
         prometheus_url=normalized_prom_url,
+        execution_mode=mode_value,
+        default_agent_id=default_agent.id if default_agent else None,
     )
+    if default_agent and default_agent.cluster_id != cluster.id:
+        crud.update_inspection_agent(db, default_agent, cluster=cluster)
 
     status, message = _test_cluster_connection(cluster.kubeconfig_path)
     sanitized_message = _sanitize_message(message)
@@ -822,6 +910,7 @@ async def register_cluster(
         last_checked_at=datetime.utcnow(),
     )
 
+    cluster = crud.get_cluster(db, cluster.id)
     return _present_cluster(cluster)
 
 
@@ -859,13 +948,15 @@ async def update_cluster(
     db: Session = Depends(get_db),
     name: str | None = Form(None),
     prometheus_url: str | None = Form(None),
+    execution_mode: str | None = Form(None),
+    default_agent_id: str | None = Form(None),
     file: UploadFile | None = File(None),
 ):
     cluster = crud.get_cluster(db, cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="指定的集群不存在。")
 
-    update_kwargs: dict[str, Optional[str]] = {}
+    update_kwargs: dict[str, Any] = {}
     connection_status: Optional[str] = None
     connection_message: Optional[str] = None
     connection_checked_at: Optional[datetime] = None
@@ -892,6 +983,33 @@ async def update_cluster(
             )
         update_kwargs["prometheus_url"] = normalized_prom_url
 
+    mode_value: Optional[str] = None
+    if execution_mode is not None:
+        stripped_mode = execution_mode.strip().lower()
+        if stripped_mode and stripped_mode not in {"server", "agent"}:
+            raise HTTPException(status_code=400, detail="执行模式仅支持 server 或 agent。")
+        mode_value = stripped_mode or "server"
+        update_kwargs["execution_mode"] = mode_value
+
+    default_agent_obj: Optional[models.InspectionAgent] = None
+    default_agent_specified = False
+    if default_agent_id is not None:
+        default_agent_specified = True
+        cleaned = default_agent_id.strip() if default_agent_id else ""
+        if cleaned:
+            try:
+                agent_id = int(cleaned)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="默认 Agent ID 无效。")
+            default_agent_obj = crud.get_inspection_agent(db, agent_id)
+            if not default_agent_obj:
+                raise HTTPException(status_code=404, detail="指定的 Agent 不存在。")
+            if not default_agent_obj.is_enabled:
+                raise HTTPException(status_code=400, detail="指定的 Agent 已被禁用。")
+            update_kwargs["default_agent_id"] = default_agent_obj.id
+        else:
+            update_kwargs["default_agent_id"] = None
+
     new_kubeconfig_path: Optional[str] = None
     if file is not None:
         data = await file.read()
@@ -915,6 +1033,15 @@ async def update_cluster(
     if update_kwargs:
         cluster = crud.update_cluster(db, cluster, **update_kwargs)
 
+    if mode_value == "agent" or (mode_value is None and cluster.execution_mode == "agent"):
+        effective_agent = default_agent_obj or cluster.default_agent
+        if effective_agent is None:
+            raise HTTPException(status_code=400, detail="巡检执行模式为 agent 时，需要绑定默认 Agent。")
+        if effective_agent.cluster_id != cluster.id:
+            crud.update_inspection_agent(db, effective_agent, cluster=cluster)
+    elif default_agent_specified and update_kwargs.get("default_agent_id") is None and cluster.default_agent is not None:
+        crud.update_inspection_agent(db, cluster.default_agent, cluster=None)
+
     if connection_status is not None:
         _log_connection_status(cluster.name, connection_status, message)
         cluster = crud.update_cluster(
@@ -928,7 +1055,183 @@ async def update_cluster(
     if new_kubeconfig_path:
         _remove_file_safely(original_kubeconfig_path)
 
+    cluster = crud.get_cluster(db, cluster.id)
     return _present_cluster(cluster)
+
+
+@app.get("/agents", response_model=List[schemas.InspectionAgentOut])
+def list_agents(
+    db: Session = Depends(get_db),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
+):
+    agents = crud.list_inspection_agents(db)
+    return [_serialize_agent(agent) for agent in agents]
+
+
+@app.post("/agents", response_model=schemas.AgentRegisterOut, status_code=201)
+def register_agent(
+    payload: schemas.InspectionAgentCreate,
+    db: Session = Depends(get_db),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
+):
+    cluster: Optional[models.ClusterConfig] = None
+    if payload.cluster_id is not None:
+        cluster = crud.get_cluster(db, payload.cluster_id)
+        if not cluster:
+            raise HTTPException(status_code=404, detail="指定的集群不存在。")
+    token = _generate_agent_token()
+    while crud.get_inspection_agent_by_token(db, token) is not None:
+        token = _generate_agent_token()
+    agent = crud.create_inspection_agent(
+        db,
+        name=payload.name.strip(),
+        token=token,
+        cluster=cluster,
+        description=payload.description,
+        is_enabled=True,
+    )
+    return schemas.AgentRegisterOut(
+        id=agent.id,
+        name=agent.name,
+        token=token,
+        cluster_id=agent.cluster_id,
+    )
+
+
+@app.post("/agent/heartbeat", response_model=schemas.InspectionAgentOut)
+def agent_heartbeat(
+    payload: schemas.AgentHeartbeatIn,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db),
+):
+    agent = _resolve_agent_from_header(db, authorization)
+    crud.record_agent_heartbeat(db, agent, seen_at=payload.reported_at or datetime.utcnow())
+    agent = crud.get_inspection_agent(db, agent.id)
+    return _serialize_agent(agent)
+
+
+@app.get("/agent/tasks", response_model=List[schemas.AgentTaskOut])
+def agent_pull_tasks(
+    limit: int = Query(5, ge=1, le=50, description="每次获取的任务数量"),
+    authorization: str = Header(None),
+    db: Session = Depends(get_db),
+):
+    agent = _resolve_agent_from_header(db, authorization)
+    crud.record_agent_heartbeat(db, agent)
+    runs = crud.list_agent_runs(db, agent=agent, statuses=("queued",), limit=limit)
+    tasks: List[schemas.AgentTaskOut] = []
+    for run in runs:
+        plan_items = _parse_run_plan(run)
+        items_out: List[schemas.AgentTaskItemOut] = []
+        for item in plan_items:
+            items_out.append(
+                schemas.AgentTaskItemOut(
+                    id=int(item.get("id")),
+                    name=str(item.get("name") or ""),
+                    description=item.get("description"),
+                    check_type=str(item.get("check_type") or ""),
+                    config=item.get("config") or {},
+                )
+            )
+        tasks.append(
+            schemas.AgentTaskOut(
+                run_id=run.id,
+                cluster_id=run.cluster_id,
+                operator=run.operator,
+                total_items=run.total_items,
+                items=items_out,
+            )
+        )
+    return tasks
+
+
+@app.post("/agent/runs/{run_id}/claim", response_model=schemas.InspectionRunOut)
+def agent_claim_run(
+    run_id: int,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db),
+):
+    agent = _resolve_agent_from_header(db, authorization)
+    run = crud.get_inspection_run(db, run_id)
+    if not run or run.executor != "agent":
+        raise HTTPException(status_code=404, detail="巡检任务不存在或非 Agent 类型。")
+    if run.agent_id != agent.id:
+        raise HTTPException(status_code=403, detail="巡检任务不属于当前 Agent。")
+    if run.agent_status not in {None, "queued", "running"}:
+        raise HTTPException(status_code=400, detail="巡检任务当前状态不允许领取。")
+    run = crud.update_inspection_run_agent_state(
+        db,
+        run,
+        agent_status="running",
+        status="running",
+    )
+    crud.record_agent_heartbeat(db, agent)
+    return _serialize_run(run)
+
+
+@app.post("/agent/runs/{run_id}/results", response_model=schemas.InspectionRunOut)
+def agent_submit_results(
+    run_id: int,
+    payload: schemas.AgentRunResultIn,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db),
+):
+    agent = _resolve_agent_from_header(db, authorization)
+    run = crud.get_inspection_run(db, run_id)
+    if not run or run.executor != "agent":
+        raise HTTPException(status_code=404, detail="巡检任务不存在或非 Agent 类型。")
+    if run.agent_id != agent.id:
+        raise HTTPException(status_code=403, detail="巡检任务不属于当前 Agent。")
+    crud.record_agent_heartbeat(db, agent)
+    crud.delete_run_results(db, run)
+    status_counter: dict[str, int] = {}
+    processed_total = 0
+    for result in payload.results:
+        normalized_status = (result.status or "").strip().lower()
+        if normalized_status not in {"passed", "warning", "failed"}:
+            normalized_status = "warning"
+        detail = _sanitize_optional_text(result.detail)
+        suggestion = _sanitize_optional_text(result.suggestion)
+        crud.add_run_result_by_item_id(
+            db,
+            run,
+            result.item_id,
+            normalized_status,
+            detail,
+            suggestion,
+        )
+        status_counter[normalized_status] = status_counter.get(normalized_status, 0) + 1
+        processed_total += 1
+
+    run = crud.get_inspection_run(db, run.id)
+    total_items = run.total_items or processed_total
+    if run.total_items == 0 and processed_total > 0:
+        run.total_items = processed_total
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+    overall_status, summary, final_processed = _summarize_run_outcome(
+        total_items=run.total_items or 0,
+        processed_total=processed_total,
+        status_counter=status_counter,
+        current_processed=run.processed_items or 0,
+    )
+
+    run = crud.finalize_inspection_run(
+        db,
+        run=run,
+        status=overall_status,
+        summary=summary,
+        report_path=None,
+        processed_items=final_processed,
+    )
+    run = crud.update_inspection_run_agent_state(
+        db,
+        run,
+        agent_status="completed",
+    )
+    run = _attach_run_report(db, run)
+    return _serialize_run(run)
 
 
 @app.delete("/clusters/{cluster_id}", status_code=204)
@@ -1207,6 +1510,9 @@ def _serialize_run(run: models.InspectionRun) -> schemas.InspectionRunOut:
         progress=progress,
         created_at=run.created_at,
         completed_at=run.completed_at,
+        executor=run.executor,
+        agent_status=run.agent_status,
+        agent_id=run.agent_id,
         results=[_serialize_result(result) for result in run.results],
     )
 
@@ -1229,6 +1535,9 @@ def _serialize_run_list(run: models.InspectionRun) -> schemas.InspectionRunListO
         progress=progress,
         created_at=run.created_at,
         completed_at=run.completed_at,
+        executor=run.executor,
+        agent_status=run.agent_status,
+        agent_id=run.agent_id,
     )
 
 
@@ -1254,6 +1563,29 @@ def trigger_inspection(
             status_code=400, detail="One or more inspection items do not exist."
         )
 
+    plan_items: List[Dict[str, Any]] = []
+    for item in items:
+        plan_items.append(
+            {
+                "id": item.id,
+                "name": item.name,
+                "description": item.description,
+                "check_type": item.check_type,
+                "config": item.config,
+            }
+        )
+    plan_json = json.dumps(plan_items, ensure_ascii=False)
+
+    executor = "agent" if cluster.execution_mode == "agent" else "server"
+    agent_id: Optional[int] = None
+    agent_status: Optional[str] = None
+    if executor == "agent":
+        agent = cluster.default_agent
+        if not agent or not agent.is_enabled:
+            raise HTTPException(status_code=400, detail="该集群未配置可用的 Agent。")
+        agent_id = agent.id
+        agent_status = "queued"
+
     run = crud.create_inspection_run(
         db,
         operator=run_in.operator,
@@ -1261,9 +1593,14 @@ def trigger_inspection(
         status="running",
         total_items=len(items),
         processed_items=0,
+        plan_json=plan_json,
+        executor=executor,
+        agent_status=agent_status,
+        agent_id=agent_id,
     )
 
-    _submit_run_execution(run.id, list(run_in.item_ids))
+    if executor == "server":
+        _submit_run_execution(run.id, list(run_in.item_ids))
 
     run = crud.get_inspection_run(db, run.id)
     if not run:

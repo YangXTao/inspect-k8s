@@ -55,6 +55,8 @@ class ClusterConfigOut(BaseModel):
     last_checked_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
+    execution_mode: str
+    default_agent_id: Optional[int]
 
     @computed_field(return_type=Optional[str])
     @property
@@ -68,11 +70,25 @@ class ClusterConfigOut(BaseModel):
         _, node_count = _extract_connection_meta(self.connection_message)
         return node_count
 
+    @computed_field(return_type=Optional[str])
+    @property
+    def default_agent_name(self) -> Optional[str]:
+        agent = getattr(self, "default_agent", None)
+        if agent and getattr(agent, "name", None):
+            return agent.name
+        return None
+
 
 class ClusterUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=150)
     prometheus_url: Optional[str] = Field(
         None, max_length=255, description="Prometheus 根地址，形如 http(s)://host:port"
+    )
+    execution_mode: Optional[str] = Field(
+        None, description="巡检执行模式：server 或 agent"
+    )
+    default_agent_id: Optional[int] = Field(
+        None, description="默认执行巡检的 Agent ID"
     )
 
 
@@ -146,7 +162,18 @@ class InspectionRunOut(BaseModel):
     progress: int
     created_at: datetime
     completed_at: Optional[datetime]
+    executor: str
+    agent_status: Optional[str]
+    agent_id: Optional[int]
     results: List[InspectionResultOut]
+
+    @computed_field(return_type=Optional[str])
+    @property
+    def agent_name(self) -> Optional[str]:
+        agent = getattr(self, "agent", None)
+        if agent and getattr(agent, "name", None):
+            return agent.name
+        return None
 
 
 class InspectionRunListOut(BaseModel):
@@ -164,6 +191,95 @@ class InspectionRunListOut(BaseModel):
     progress: int
     created_at: datetime
     completed_at: Optional[datetime]
+    executor: str
+    agent_status: Optional[str]
+    agent_id: Optional[int]
+
+    @computed_field(return_type=Optional[str])
+    @property
+    def agent_name(self) -> Optional[str]:
+        agent = getattr(self, "agent", None)
+        if agent and getattr(agent, "name", None):
+            return agent.name
+        return None
+
+
+class InspectionAgentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    cluster_id: Optional[int]
+    description: Optional[str]
+    is_enabled: bool
+    last_seen_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
+
+    @computed_field(return_type=Optional[str])
+    @property
+    def cluster_name(self) -> Optional[str]:
+        cluster = getattr(self, "cluster", None)
+        if cluster and getattr(cluster, "name", None):
+            return cluster.name
+        return None
+
+
+class InspectionAgentCreate(BaseModel):
+    name: str = Field(..., max_length=100)
+    cluster_id: Optional[int] = Field(
+        None, description="关联的集群 ID（可选）"
+    )
+    description: Optional[str] = Field(
+        None, max_length=500, description="Agent 描述"
+    )
+
+
+class InspectionAgentUpdate(BaseModel):
+    name: Optional[str] = Field(None, max_length=100)
+    cluster_id: Optional[int] = Field(None, description="关联的集群 ID（可选）")
+    description: Optional[str] = Field(None, max_length=500)
+    is_enabled: Optional[bool] = Field(None, description="是否启用 Agent")
+
+
+class AgentHeartbeatIn(BaseModel):
+    reported_at: Optional[datetime] = Field(
+        None, description="Agent 上报时间（可选），默认使用服务器时间"
+    )
+
+
+class AgentRegisterOut(BaseModel):
+    id: int
+    name: str
+    token: str
+    cluster_id: Optional[int]
+
+
+class AgentTaskItemOut(BaseModel):
+    id: int
+    name: str
+    description: Optional[str]
+    check_type: str
+    config: Dict[str, Any]
+
+
+class AgentTaskOut(BaseModel):
+    run_id: int
+    cluster_id: int
+    operator: Optional[str]
+    total_items: int
+    items: List[AgentTaskItemOut]
+
+
+class AgentRunResultItemIn(BaseModel):
+    item_id: Optional[int]
+    status: str
+    detail: Optional[str] = None
+    suggestion: Optional[str] = None
+
+
+class AgentRunResultIn(BaseModel):
+    results: List[AgentRunResultItemIn] = Field(..., min_length=1)
 
 
 class InspectionItemsExportOut(BaseModel):
