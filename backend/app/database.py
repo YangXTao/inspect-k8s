@@ -131,6 +131,18 @@ def _ensure_cluster_schema() -> None:
                 "ALTER TABLE cluster_configs ADD COLUMN last_checked_at DATETIME NULL"
             )
 
+    if "execution_mode" not in existing_columns:
+        column_type = "TEXT" if dialect == "sqlite" else "VARCHAR(20)"
+        statements.append(
+            f"ALTER TABLE cluster_configs ADD COLUMN execution_mode {column_type} NOT NULL DEFAULT 'server'"
+        )
+
+    if "default_agent_id" not in existing_columns:
+        column_type = "INTEGER" if dialect == "sqlite" else "INT"
+        statements.append(
+            f"ALTER TABLE cluster_configs ADD COLUMN default_agent_id {column_type} NULL"
+        )
+
     if dialect != "sqlite":
         statements.append(
             "ALTER TABLE cluster_configs CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
@@ -215,6 +227,26 @@ def _ensure_inspection_runs_schema() -> None:
         column_type = "INTEGER" if dialect == "sqlite" else "INT"
         statements.append(
             f"ALTER TABLE inspection_runs ADD COLUMN processed_items {column_type} NOT NULL DEFAULT 0"
+        )
+    if "plan_json" not in existing_columns:
+        column_type = "TEXT" if dialect == "sqlite" else "TEXT"
+        statements.append(
+            f"ALTER TABLE inspection_runs ADD COLUMN plan_json {column_type} NULL"
+        )
+    if "executor" not in existing_columns:
+        column_type = "TEXT" if dialect == "sqlite" else "VARCHAR(20)"
+        statements.append(
+            f"ALTER TABLE inspection_runs ADD COLUMN executor {column_type} NOT NULL DEFAULT 'server'"
+        )
+    if "agent_status" not in existing_columns:
+        column_type = "TEXT" if dialect == "sqlite" else "VARCHAR(20)"
+        statements.append(
+            f"ALTER TABLE inspection_runs ADD COLUMN agent_status {column_type} NULL"
+        )
+    if "agent_id" not in existing_columns:
+        column_type = "INTEGER" if dialect == "sqlite" else "INT"
+        statements.append(
+            f"ALTER TABLE inspection_runs ADD COLUMN agent_id {column_type} NULL"
         )
 
     if dialect != "sqlite":
