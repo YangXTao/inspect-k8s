@@ -105,7 +105,7 @@ class InspectionRun(Base):
         ForeignKey("cluster_configs.id", ondelete="CASCADE"),
         nullable=False,
     )
-    status = Column(String(20), nullable=False, default="pending")
+    status = Column(String(20), nullable=False, default="queued")
     summary = Column(Text, nullable=True)
     report_path = Column(String(255), nullable=True)
     total_items = Column(Integer, nullable=False, default=0)

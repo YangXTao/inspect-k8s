@@ -175,6 +175,33 @@ class InspectionRunOut(BaseModel):
             return agent.name
         return None
 
+    @computed_field(return_type=str)
+    @property
+    def status_label(self) -> str:
+        mapping = {
+            "queued": "排队中",
+            "running": "执行中",
+            "finished": "已完成",
+            "failed": "执行失败",
+            "cancelled": "已取消",
+        }
+        status = getattr(self, "status", None) or ""
+        return mapping.get(status, "未知状态")
+
+    @computed_field(return_type=Optional[str])
+    @property
+    def agent_status_label(self) -> Optional[str]:
+        if getattr(self, "agent_status", None) is None:
+            return None
+        mapping = {
+            "queued": "待领取",
+            "running": "Agent 执行中",
+            "finished": "Agent 已完成",
+            "failed": "Agent 执行失败",
+        }
+        status = getattr(self, "agent_status", None) or ""
+        return mapping.get(status, "未知状态")
+
 
 class InspectionRunListOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -202,6 +229,33 @@ class InspectionRunListOut(BaseModel):
         if agent and getattr(agent, "name", None):
             return agent.name
         return None
+
+    @computed_field(return_type=str)
+    @property
+    def status_label(self) -> str:
+        mapping = {
+            "queued": "排队中",
+            "running": "执行中",
+            "finished": "已完成",
+            "failed": "执行失败",
+            "cancelled": "已取消",
+        }
+        status = getattr(self, "status", None) or ""
+        return mapping.get(status, "未知状态")
+
+    @computed_field(return_type=Optional[str])
+    @property
+    def agent_status_label(self) -> Optional[str]:
+        if getattr(self, "agent_status", None) is None:
+            return None
+        mapping = {
+            "queued": "待领取",
+            "running": "Agent 执行中",
+            "finished": "Agent 已完成",
+            "failed": "Agent 执行失败",
+        }
+        status = getattr(self, "agent_status", None) or ""
+        return mapping.get(status, "未知状态")
 
 
 class InspectionAgentOut(BaseModel):

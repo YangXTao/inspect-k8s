@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: inspect-agent-config
+  namespace: <NAMESPACE>
+data:
+  config.yaml: |
+    server:
+      base_url: http://backend:8000
+      register:
+        name: agent-demo
+        cluster_id: 1
+      token_file: /var/lib/inspect-agent/agent.token
+    agent:
+      poll_interval: 10
+      batch_size: 1
+      verify_ssl: false
+      request_timeout: 15
+    prometheus:
+      base_url: http://rancher-monitoring-prometheus.cattle-monitoring-system:9090
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: inspect-agent-secret
+  namespace: <NAMESPACE>
+type: Opaque
+stringData:
+  # 若希望由 Agent 自行注册，可留空；否则填入已有 Token
+  token: ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inspect-agent
+  namespace: <NAMESPACE>
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inspect-agent
+  template:
+    metadata:
+      labels:
+        app: inspect-agent
+    spec:
+      serviceAccountName: default
+      volumes:
+        - name: config
+          configMap:
+            name: inspect-agent-config
+        - name: token
+          secret:
+            secretName: inspect-agent-secret
+            optional: true
+        - name: state
+          emptyDir: {}
+      containers:
+        - name: inspect-agent
+          image: <NAME>:<image-tag>
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: INSPECT_AGENT_CONFIG
+              value: /app/config/config.yaml
+            - name: INSPECT_AGENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: inspect-agent-secret
+                  key: token
+                  optional: true
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+            - name: state
+              mountPath: /var/lib/inspect-agent
+            - name: token
+              mountPath: /app/secret
+              readOnly: true
