@@ -40,6 +40,8 @@ class ClusterConfig(Base):
         "InspectionAgent",
         back_populates="cluster",
         cascade="all, delete-orphan",
+        primaryjoin="ClusterConfig.id == InspectionAgent.cluster_id",
+        foreign_keys="InspectionAgent.cluster_id",
     )
     default_agent = relationship(
         "InspectionAgent",
