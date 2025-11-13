@@ -262,7 +262,7 @@ def create_inspection_run(
     *,
     operator: Optional[str],
     cluster: models.ClusterConfig,
-    status: str = "pending",
+    status: str = "queued",
     total_items: int = 0,
     processed_items: int = 0,
     plan_json: Optional[str] = None,
@@ -595,6 +595,8 @@ def cancel_inspection_run(
     reason: Optional[str] = None,
 ) -> models.InspectionRun:
     run.status = "cancelled"
+    if run.executor == "agent":
+        run.agent_status = "failed"
     run.completed_at = datetime.utcnow()
     if reason:
         run.summary = reason[:500]

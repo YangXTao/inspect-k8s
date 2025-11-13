@@ -1,0 +1,13 @@
+server:
+  base_url: http://backend:8000
+  register:
+    name: demo-agent
+    cluster_id: 1
+  token_file: /app/state/agent_token.txt
+agent:
+  poll_interval: 10
+  batch_size: 1
+  verify_ssl: false
+  request_timeout: 15
+prometheus:
+  base_url: http://prometheus:9090

@@ -6,9 +6,9 @@ import re
 import secrets
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Any
+from typing import Callable, Dict, List, Optional, Any, Generator
 from uuid import uuid4
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
@@ -16,7 +16,7 @@ import os
 import shutil
 import subprocess
 import yaml
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, Query, Header
+from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, UploadFile, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -44,6 +44,8 @@ logger = logging.getLogger(__name__)
 _INSPECTION_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
 _DEFAULT_INSPECTIONS_SENTINEL = Path("data/state/default_inspections_seeded.flag")
+AGENT_HEARTBEAT_TIMEOUT_MINUTES = 5
+AGENT_HEARTBEAT_TIMEOUT = timedelta(minutes=AGENT_HEARTBEAT_TIMEOUT_MINUTES)
 
 
 @dataclass
@@ -53,6 +55,12 @@ class RunExecutionControl:
 
     def __post_init__(self) -> None:
         self.pause_event.set()
+
+
+@dataclass
+class AgentRequestContext:
+    db: Session
+    agent: models.InspectionAgent
 
 
 _RUN_EXECUTION_LOCK = threading.Lock()
@@ -111,6 +119,44 @@ def _get_run_item_ids(run_id: int) -> Optional[List[int]]:
     with _RUN_EXECUTION_LOCK:
         snapshot = _RUN_ITEM_CACHE.get(run_id)
         return list(snapshot) if snapshot is not None else None
+
+
+def _requeue_stale_agent_runs(db: Session) -> int:
+    deadline = datetime.utcnow() - AGENT_HEARTBEAT_TIMEOUT
+    candidates = (
+        db.query(models.InspectionRun)
+        .filter(
+            models.InspectionRun.executor == "agent",
+            models.InspectionRun.status == "running",
+            models.InspectionRun.agent_status == "running",
+        )
+        .all()
+    )
+    recovered = 0
+    for run in candidates:
+        agent = run.agent
+        if not agent:
+            continue
+        last_seen = agent.last_seen_at
+        if last_seen and last_seen >= deadline:
+            continue
+        note = (
+            f"Agent {agent.name or agent.id} 超过 {AGENT_HEARTBEAT_TIMEOUT_MINUTES} 分钟未上报，任务已重新排队。"
+        )
+        run.status = "queued"
+        run.agent_status = "queued"
+        run.completed_at = None
+        run.report_path = None
+        if run.summary:
+            run.summary = f"{run.summary}\n{note}"
+        else:
+            run.summary = note
+        db.add(run)
+        recovered += 1
+    if recovered:
+        db.commit()
+        logger.warning("已回滚 %s 个超时的 Agent 巡检任务。", recovered)
+    return recovered
 
 
 def _submit_run_execution(run_id: int, item_ids: List[int]) -> None:
@@ -190,14 +236,16 @@ def _build_run_display_id(db: Session, run: models.InspectionRun) -> str:
 def _calculate_run_progress(run: models.InspectionRun) -> tuple[int, int, int]:
     total_items = run.total_items or 0
     processed_items = run.processed_items or 0
-    active_statuses = {"running", "paused", "cancelled"}
+    status = (run.status or "").lower()
     if total_items > 0:
         processed_items = max(0, min(processed_items, total_items))
-        if run.status not in active_statuses:
+        if status in {"finished", "failed"}:
             processed_items = max(processed_items, total_items)
+        elif status in {"queued"}:
+            processed_items = 0
         progress = int((processed_items / total_items) * 100)
     else:
-        progress = 0 if run.status in active_statuses else 100
+        progress = 0 if status in {"queued", "running"} else 100
     progress = max(0, min(progress, 100))
     return total_items, processed_items, progress
 
@@ -210,38 +258,44 @@ def _summarize_run_outcome(
     current_processed: int,
 ) -> tuple[str, str, int]:
     if total_items <= 0:
-        overall_status = "completed"
+        overall_status = "finished"
         summary = "巡检完成：未配置任何检查项。"
     elif processed_total < total_items:
-        overall_status = "incomplete"
+        overall_status = "failed"
         summary = (
-            f"巡检未完成：仅处理 {processed_total}/{total_items} 项，"
+            f"巡检失败：仅处理 {processed_total}/{total_items} 项，"
             "请核查巡检项配置与执行日志。"
         )
     else:
-        has_alerts = (
-            status_counter.get("warning", 0) > 0
-            or status_counter.get("failed", 0) > 0
-        )
-        if has_alerts:
-            overall_status = "completed"
+        passed = status_counter.get("passed", 0)
+        warnings = status_counter.get("warning", 0)
+        failed = status_counter.get("failed", 0)
+        if failed > 0:
+            overall_status = "failed"
             summary = (
-                f"巡检完成，但存在告警：通过 {status_counter.get('passed', 0)} 项，"
-                f"告警 {status_counter.get('warning', 0)} 项，"
-                f"失败 {status_counter.get('failed', 0)} 项。"
+                f"巡检失败：通过 {passed} 项，"
+                f"告警 {warnings} 项，"
+                f"失败 {failed} 项。"
+            )
+        elif warnings > 0:
+            overall_status = "finished"
+            summary = (
+                f"巡检完成，但存在告警：通过 {passed} 项，"
+                f"告警 {warnings} 项，"
+                f"失败 {failed} 项。"
             )
         else:
-            overall_status = "completed"
+            overall_status = "finished"
             summary = (
-                f"巡检完成：通过 {status_counter.get('passed', 0)} 项，"
-                f"告警 {status_counter.get('warning', 0)} 项，"
-                f"失败 {status_counter.get('failed', 0)} 项。"
+                f"巡检完成：通过 {passed} 项，"
+                f"告警 {warnings} 项，"
+                f"失败 {failed} 项。"
             )
 
     final_processed = processed_total
     if total_items > 0:
         final_processed = min(processed_total, total_items)
-    if overall_status == "completed":
+    if overall_status == "finished" and total_items > 0:
         final_processed = total_items
     final_processed = max(final_processed, current_processed or 0)
     return overall_status, summary, final_processed
@@ -309,7 +363,20 @@ def _resolve_agent_from_header(
     return agent
 
 
+def _agent_request_dependency(
+    authorization: str = Header(None),
+) -> Generator[AgentRequestContext, None, None]:
+    db = SessionLocal()
+    try:
+        agent = _resolve_agent_from_header(db, authorization)
+        _requeue_stale_agent_runs(db)
+        yield AgentRequestContext(db=db, agent=agent)
+    finally:
+        db.close()
+
+
 app = FastAPI(title="K8s Inspection Service", version="0.3.0")
+agent_router = APIRouter(prefix="/agent", tags=["agent"])
 
 CONNECTION_TEST_TIMEOUT_SECONDS = 8.0
 CONNECTION_TEST_CONNECT_TIMEOUT = 3.0
@@ -343,6 +410,19 @@ def _execute_inspection_run_async(
         if not run:
             logger.error("Inspection run %s not found for async execution.", run_id)
             return
+
+        if run.status not in {"queued", "running"}:
+            logger.warning(
+                "巡检任务 %s 当前状态为 %s，跳过执行。",
+                run_id,
+                run.status,
+            )
+            return
+        if run.status != "running":
+            run.status = "running"
+            db.add(run)
+            db.commit()
+            db.refresh(run)
 
         cluster = crud.get_cluster(db, run.cluster_id)
         if not cluster:
@@ -501,7 +581,7 @@ def _execute_inspection_run_async(
             crud.finalize_inspection_run(
                 db,
                 run=run,
-                status="incomplete",
+                status="failed",
                 summary=summary[:500],
                 report_path=None,
                 processed_items=run.processed_items or 0,
@@ -1098,27 +1178,27 @@ def register_agent(
     )
 
 
-@app.post("/agent/heartbeat", response_model=schemas.InspectionAgentOut)
+@agent_router.post("/heartbeat", response_model=schemas.InspectionAgentOut)
 def agent_heartbeat(
     payload: schemas.AgentHeartbeatIn,
-    authorization: str = Header(None),
-    db: Session = Depends(get_db),
+    ctx: AgentRequestContext = Depends(_agent_request_dependency),
 ):
-    agent = _resolve_agent_from_header(db, authorization)
-    crud.record_agent_heartbeat(db, agent, seen_at=payload.reported_at or datetime.utcnow())
-    agent = crud.get_inspection_agent(db, agent.id)
-    return _serialize_agent(agent)
+    updated = crud.record_agent_heartbeat(
+        ctx.db, ctx.agent, seen_at=payload.reported_at or datetime.utcnow()
+    )
+    refreshed = crud.get_inspection_agent(ctx.db, updated.id) or updated
+    return _serialize_agent(refreshed)
 
 
-@app.get("/agent/tasks", response_model=List[schemas.AgentTaskOut])
+@agent_router.get("/tasks", response_model=List[schemas.AgentTaskOut])
 def agent_pull_tasks(
     limit: int = Query(5, ge=1, le=50, description="每次获取的任务数量"),
-    authorization: str = Header(None),
-    db: Session = Depends(get_db),
+    ctx: AgentRequestContext = Depends(_agent_request_dependency),
 ):
-    agent = _resolve_agent_from_header(db, authorization)
-    crud.record_agent_heartbeat(db, agent)
-    runs = crud.list_agent_runs(db, agent=agent, statuses=("queued",), limit=limit)
+    crud.record_agent_heartbeat(ctx.db, ctx.agent)
+    runs = crud.list_agent_runs(
+        ctx.db, agent=ctx.agent, statuses=("queued",), limit=limit
+    )
     tasks: List[schemas.AgentTaskOut] = []
     for run in runs:
         plan_items = _parse_run_plan(run)
@@ -1145,45 +1225,47 @@ def agent_pull_tasks(
     return tasks
 
 
-@app.post("/agent/runs/{run_id}/claim", response_model=schemas.InspectionRunOut)
+@agent_router.post("/runs/{run_id}/claim", response_model=schemas.InspectionRunOut)
 def agent_claim_run(
     run_id: int,
-    authorization: str = Header(None),
-    db: Session = Depends(get_db),
+    ctx: AgentRequestContext = Depends(_agent_request_dependency),
 ):
-    agent = _resolve_agent_from_header(db, authorization)
-    run = crud.get_inspection_run(db, run_id)
+    run = crud.get_inspection_run(ctx.db, run_id)
     if not run or run.executor != "agent":
         raise HTTPException(status_code=404, detail="巡检任务不存在或非 Agent 类型。")
-    if run.agent_id != agent.id:
+    if run.agent_id != ctx.agent.id:
         raise HTTPException(status_code=403, detail="巡检任务不属于当前 Agent。")
-    if run.agent_status not in {None, "queued", "running"}:
+    if run.agent_status not in {None, "queued", "running"} or run.status not in {
+        "queued",
+        "running",
+    }:
         raise HTTPException(status_code=400, detail="巡检任务当前状态不允许领取。")
     run = crud.update_inspection_run_agent_state(
-        db,
+        ctx.db,
         run,
         agent_status="running",
         status="running",
     )
-    crud.record_agent_heartbeat(db, agent)
-    return _serialize_run(run)
+    crud.record_agent_heartbeat(ctx.db, ctx.agent)
+    updated = crud.get_inspection_run(ctx.db, run_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail="巡检任务不存在。")
+    return _serialize_run(updated)
 
 
-@app.post("/agent/runs/{run_id}/results", response_model=schemas.InspectionRunOut)
+@agent_router.post("/runs/{run_id}/results", response_model=schemas.InspectionRunOut)
 def agent_submit_results(
     run_id: int,
     payload: schemas.AgentRunResultIn,
-    authorization: str = Header(None),
-    db: Session = Depends(get_db),
+    ctx: AgentRequestContext = Depends(_agent_request_dependency),
 ):
-    agent = _resolve_agent_from_header(db, authorization)
-    run = crud.get_inspection_run(db, run_id)
+    run = crud.get_inspection_run(ctx.db, run_id)
     if not run or run.executor != "agent":
         raise HTTPException(status_code=404, detail="巡检任务不存在或非 Agent 类型。")
-    if run.agent_id != agent.id:
+    if run.agent_id != ctx.agent.id:
         raise HTTPException(status_code=403, detail="巡检任务不属于当前 Agent。")
-    crud.record_agent_heartbeat(db, agent)
-    crud.delete_run_results(db, run)
+    crud.record_agent_heartbeat(ctx.db, ctx.agent)
+    crud.delete_run_results(ctx.db, run)
     status_counter: dict[str, int] = {}
     processed_total = 0
     for result in payload.results:
@@ -1193,7 +1275,7 @@ def agent_submit_results(
         detail = _sanitize_optional_text(result.detail)
         suggestion = _sanitize_optional_text(result.suggestion)
         crud.add_run_result_by_item_id(
-            db,
+            ctx.db,
             run,
             result.item_id,
             normalized_status,
@@ -1203,13 +1285,13 @@ def agent_submit_results(
         status_counter[normalized_status] = status_counter.get(normalized_status, 0) + 1
         processed_total += 1
 
-    run = crud.get_inspection_run(db, run.id)
+    run = crud.get_inspection_run(ctx.db, run.id)
     total_items = run.total_items or processed_total
     if run.total_items == 0 and processed_total > 0:
         run.total_items = processed_total
-        db.add(run)
-        db.commit()
-        db.refresh(run)
+        ctx.db.add(run)
+        ctx.db.commit()
+        ctx.db.refresh(run)
     overall_status, summary, final_processed = _summarize_run_outcome(
         total_items=run.total_items or 0,
         processed_total=processed_total,
@@ -1218,20 +1300,23 @@ def agent_submit_results(
     )
 
     run = crud.finalize_inspection_run(
-        db,
+        ctx.db,
         run=run,
         status=overall_status,
         summary=summary,
         report_path=None,
         processed_items=final_processed,
     )
+    agent_state = "finished" if overall_status == "finished" else "failed"
     run = crud.update_inspection_run_agent_state(
-        db,
+        ctx.db,
         run,
-        agent_status="completed",
+        agent_status=agent_state,
     )
-    run = _attach_run_report(db, run)
+    run = _attach_run_report(ctx.db, run)
     return _serialize_run(run)
+
+app.include_router(agent_router)
 
 
 @app.delete("/clusters/{cluster_id}", status_code=204)
@@ -1590,7 +1675,7 @@ def trigger_inspection(
         db,
         operator=run_in.operator,
         cluster=cluster,
-        status="running",
+        status="queued",
         total_items=len(items),
         processed_items=0,
         plan_json=plan_json,
@@ -1610,12 +1695,14 @@ def trigger_inspection(
 
 @app.get("/inspection-runs", response_model=List[schemas.InspectionRunListOut])
 def list_inspection_runs(db: Session = Depends(get_db)):
+    _requeue_stale_agent_runs(db)
     runs = crud.list_inspection_runs(db)
     return [_serialize_run_list(run) for run in runs]
 
 
 @app.get("/inspection-runs/{run_id}", response_model=schemas.InspectionRunOut)
 def get_inspection_run(run_id: int, db: Session = Depends(get_db)):
+    _requeue_stale_agent_runs(db)
     run = crud.get_inspection_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
@@ -1646,8 +1733,8 @@ def cancel_inspection_run(run_id: int, db: Session = Depends(get_db)):
     run = crud.get_inspection_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
-    if run.status not in {"running", "paused"}:
-        raise HTTPException(status_code=400, detail="仅可取消进行中或已暂停的巡检。")
+    if run.status not in {"queued", "running"}:
+        raise HTTPException(status_code=400, detail="仅可取消排队或进行中的巡检。")
     crud.cancel_inspection_run(db, run)
     _cancel_run_execution(run.id)
     refreshed = crud.get_inspection_run(db, run_id)

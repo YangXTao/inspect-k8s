@@ -216,6 +216,7 @@ def _ensure_inspection_runs_schema() -> None:
     }
     dialect = engine.dialect.name
     statements: list[str] = []
+    updates: list[str] = []
 
     if "total_items" not in existing_columns:
         column_type = "INTEGER" if dialect == "sqlite" else "INT"
@@ -254,11 +255,29 @@ def _ensure_inspection_runs_schema() -> None:
             "ALTER TABLE inspection_runs CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
         )
 
-    if not statements:
+    if "status" in existing_columns:
+        updates.extend(
+            [
+                "UPDATE inspection_runs SET status = 'queued' WHERE status = 'pending'",
+                "UPDATE inspection_runs SET status = 'finished' WHERE status = 'completed'",
+                "UPDATE inspection_runs SET status = 'failed' WHERE status = 'incomplete'",
+            ]
+        )
+    if "agent_status" in existing_columns:
+        updates.extend(
+            [
+                "UPDATE inspection_runs SET agent_status = 'finished' WHERE agent_status = 'completed'",
+                "UPDATE inspection_runs SET agent_status = 'queued' WHERE agent_status = 'pending'",
+            ]
+        )
+
+    if not statements and not updates:
         return
 
     with engine.begin() as connection:
         for statement in statements:
+            connection.execute(text(statement))
+        for statement in updates:
             connection.execute(text(statement))
 
 
