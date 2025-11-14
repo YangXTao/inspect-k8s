@@ -269,6 +269,7 @@ class InspectionAgentOut(BaseModel):
     last_seen_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
+    prometheus_url: Optional[str]
 
     @computed_field(return_type=Optional[str])
     @property
@@ -287,6 +288,9 @@ class InspectionAgentCreate(BaseModel):
     description: Optional[str] = Field(
         None, max_length=500, description="Agent 描述"
     )
+    prometheus_url: Optional[str] = Field(
+        None, max_length=255, description="Agent Prometheus URL"
+    )
 
 
 class InspectionAgentUpdate(BaseModel):
@@ -294,6 +298,7 @@ class InspectionAgentUpdate(BaseModel):
     cluster_id: Optional[int] = Field(None, description="关联的集群 ID（可选）")
     description: Optional[str] = Field(None, max_length=500)
     is_enabled: Optional[bool] = Field(None, description="是否启用 Agent")
+    prometheus_url: Optional[str] = Field(None, max_length=255, description="Agent Prometheus URL")
 
 
 class AgentHeartbeatIn(BaseModel):
@@ -334,6 +339,31 @@ class AgentRunResultItemIn(BaseModel):
 
 class AgentRunResultIn(BaseModel):
     results: List[AgentRunResultItemIn] = Field(..., min_length=1)
+
+
+class AgentBootstrapCluster(BaseModel):
+    name: str = Field(..., max_length=150, description="Agent ��Ӧ�ļ�Ⱥ����")
+    kubeconfig_b64: Optional[str] = Field(
+        None, description="Base64 ����� kubeconfig ���ݣ����ѡ��"
+    )
+    kubeconfig_name: Optional[str] = Field(
+        None, description="kubeconfig ԭʼ�ļ����ƣ����ѡ��"
+    )
+
+
+class AgentBootstrapIn(BaseModel):
+    registration_token: str = Field(
+        ...,
+        min_length=16,
+        max_length=128,
+        description="Server �������ɵ� Agent ���� Token",
+    )
+    prometheus_url: Optional[str] = Field(
+        None,
+        max_length=255,
+        description="Agent ���ṩ�� Prometheus ��ַ����ѡ��",
+    )
+    cluster: AgentBootstrapCluster
 
 
 class InspectionItemsExportOut(BaseModel):

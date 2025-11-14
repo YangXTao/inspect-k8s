@@ -409,6 +409,7 @@ def create_inspection_agent(
     cluster: Optional[models.ClusterConfig] = None,
     description: Optional[str] = None,
     is_enabled: bool = True,
+    prometheus_url: Optional[str] = None,
 ) -> models.InspectionAgent:
     agent = models.InspectionAgent(
         name=name,
@@ -416,6 +417,7 @@ def create_inspection_agent(
         cluster_id=cluster.id if cluster else None,
         description=description,
         is_enabled=is_enabled,
+        prometheus_url=prometheus_url,
     )
     db.add(agent)
     db.commit()
@@ -438,6 +440,7 @@ def update_inspection_agent(
     description: Optional[str] = None,
     is_enabled: Optional[bool] = None,
     cluster: Any = UNSET,
+    prometheus_url: Any = UNSET,
 ) -> models.InspectionAgent:
     if name is not None:
         agent.name = name
@@ -447,6 +450,8 @@ def update_inspection_agent(
         agent.is_enabled = is_enabled
     if cluster is not UNSET:
         agent.cluster_id = cluster.id if isinstance(cluster, models.ClusterConfig) else None
+    if prometheus_url is not UNSET:
+        agent.prometheus_url = prometheus_url
     agent.updated_at = datetime.utcnow()
     db.add(agent)
     db.commit()

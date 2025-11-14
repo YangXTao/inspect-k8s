@@ -1,4 +1,4 @@
-apiVersion: v1
+﻿apiVersion: v1
 kind: ConfigMap
 metadata:
   name: inspect-agent-config
@@ -7,17 +7,17 @@ data:
   config.yaml: |
     server:
       base_url: http://backend:8000
-      register:
-        name: agent-demo
-        cluster_id: 1
       token_file: /var/lib/inspect-agent/agent.token
     agent:
       poll_interval: 10
       batch_size: 1
       verify_ssl: false
       request_timeout: 15
+    cluster:
+      name: demo-cluster
+      kubeconfig_path: /app/kubeconfig/cluster.yaml
     prometheus:
-      base_url: http://rancher-monitoring-prometheus.cattle-monitoring-system:9090
+      base_url: http://prometheus.monitoring:9090
 ---
 apiVersion: v1
 kind: Secret
@@ -26,8 +26,9 @@ metadata:
   namespace: <NAMESPACE>
 type: Opaque
 stringData:
-  # 若希望由 Agent 自行注册，可留空；否则填入已有 Token
-  token: ""
+  registration_token: ""
+  kubeconfig: |
+    # 将 kubeconfig 粘贴在这里（可选）。如果不提供，首次注册需要手动挂载。
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -49,9 +50,12 @@ spec:
         - name: config
           configMap:
             name: inspect-agent-config
-        - name: token
+        - name: kubeconfig
           secret:
             secretName: inspect-agent-secret
+            items:
+              - key: kubeconfig
+                path: cluster.yaml
             optional: true
         - name: state
           emptyDir: {}
@@ -62,17 +66,17 @@ spec:
           env:
             - name: INSPECT_AGENT_CONFIG
               value: /app/config/config.yaml
-            - name: INSPECT_AGENT_TOKEN
+            - name: INSPECT_AGENT_REGISTRATION_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: inspect-agent-secret
-                  key: token
+                  key: registration_token
                   optional: true
           volumeMounts:
             - name: config
               mountPath: /app/config
+            - name: kubeconfig
+              mountPath: /app/kubeconfig
+              readOnly: true
             - name: state
               mountPath: /var/lib/inspect-agent
-            - name: token
-              mountPath: /app/secret
-              readOnly: true

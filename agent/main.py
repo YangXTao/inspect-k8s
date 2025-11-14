@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import logging
 import os
 import sys
@@ -40,9 +41,12 @@ def _as_int(value: Any, default: int) -> int:
 class AgentConfig:
     server_base: str
     token: Optional[str] = None
+    registration_token: Optional[str] = None
     token_file: Optional[Path] = None
     agent_name: Optional[str] = None
     cluster_id: Optional[int] = None
+    cluster_name: Optional[str] = None
+    kubeconfig_path: Optional[Path] = None
     prometheus_url: Optional[str] = None
     poll_interval: int = DEFAULT_POLL_INTERVAL
     batch_size: int = DEFAULT_BATCH_SIZE
@@ -79,67 +83,88 @@ def _load_yaml_config(path: Optional[str]) -> Dict[str, Any]:
 
 def load_config(config_path: Optional[str]) -> AgentConfig:
     raw = _load_yaml_config(config_path)
-    server_cfg = raw.get("server", {})
-    agent_cfg = raw.get("agent", {})
-    prom_cfg = raw.get("prometheus", {})
-    register_cfg = server_cfg.get("register", {})
+    server_cfg = raw.get('server', {})
+    agent_cfg = raw.get('agent', {})
+    cluster_cfg = raw.get('cluster', {})
+    prom_cfg = raw.get('prometheus', {})
+    register_cfg = server_cfg.get('register', {})
 
-    server_base = os.getenv("INSPECT_AGENT_SERVER", server_cfg.get("base_url"))
+    server_base = os.getenv('INSPECT_AGENT_SERVER', server_cfg.get('base_url'))
     if not server_base:
-        raise ValueError("未配置 server.base_url 或环境变量 INSPECT_AGENT_SERVER。")
+        raise ValueError('server.base_url is required (or set INSPECT_AGENT_SERVER).')
 
     token_file_value = os.getenv(
-        "INSPECT_AGENT_TOKEN_FILE",
-        agent_cfg.get("token_file") or server_cfg.get("token_file") or "agent_token.txt",
+        'INSPECT_AGENT_TOKEN_FILE',
+        agent_cfg.get('token_file') or server_cfg.get('token_file') or 'agent_token.txt',
     )
     token_file = Path(token_file_value).expanduser() if token_file_value else None
 
     cluster_id_value = os.getenv(
-        "INSPECT_AGENT_CLUSTER_ID",
-        agent_cfg.get("cluster_id") or register_cfg.get("cluster_id"),
+        'INSPECT_AGENT_CLUSTER_ID',
+        agent_cfg.get('cluster_id') or register_cfg.get('cluster_id'),
     )
     cluster_id = None
-    if cluster_id_value not in (None, ""):
+    if cluster_id_value not in (None, '' ):
         try:
             cluster_id = int(cluster_id_value)
         except ValueError as exc:
-            raise ValueError("cluster_id 必须为数字") from exc
+            raise ValueError('cluster_id must be an integer') from exc
+
+    cluster_name = os.getenv(
+        'INSPECT_AGENT_CLUSTER_NAME',
+        cluster_cfg.get('name') or agent_cfg.get('cluster_name') or register_cfg.get('cluster_name'),
+    )
+    kubeconfig_path_value = os.getenv(
+        'INSPECT_AGENT_KUBECONFIG',
+        cluster_cfg.get('kubeconfig_path') or agent_cfg.get('kubeconfig_path'),
+    )
+    kubeconfig_path = (
+        Path(kubeconfig_path_value).expanduser() if kubeconfig_path_value else None
+    )
+
+    registration_token = os.getenv(
+        'INSPECT_AGENT_REGISTRATION_TOKEN',
+        server_cfg.get('registration_token')
+        or agent_cfg.get('registration_token')
+        or register_cfg.get('token'),
+    )
 
     config = AgentConfig(
-        server_base=server_base.rstrip("/"),
-        token=os.getenv("INSPECT_AGENT_TOKEN", server_cfg.get("token")),
+        server_base=server_base.rstrip('/'),
+        token=os.getenv('INSPECT_AGENT_TOKEN', server_cfg.get('token')),
+        registration_token=registration_token,
         token_file=token_file,
         agent_name=os.getenv(
-            "INSPECT_AGENT_NAME",
-            agent_cfg.get("name") or register_cfg.get("name"),
+            'INSPECT_AGENT_NAME',
+            agent_cfg.get('name') or register_cfg.get('name'),
         ),
         cluster_id=cluster_id,
+        cluster_name=cluster_name.strip() if cluster_name else None,
+        kubeconfig_path=kubeconfig_path,
         prometheus_url=os.getenv(
-            "INSPECT_AGENT_PROM_URL",
-            prom_cfg.get("base_url"),
+            'INSPECT_AGENT_PROM_URL',
+            prom_cfg.get('base_url'),
         ),
         poll_interval=_as_int(
-            os.getenv("INSPECT_AGENT_POLL_INTERVAL", agent_cfg.get("poll_interval")),
+            os.getenv('INSPECT_AGENT_POLL_INTERVAL', agent_cfg.get('poll_interval')),
             DEFAULT_POLL_INTERVAL,
         ),
         batch_size=_as_int(
-            os.getenv("INSPECT_AGENT_BATCH_SIZE", agent_cfg.get("batch_size")),
+            os.getenv('INSPECT_AGENT_BATCH_SIZE', agent_cfg.get('batch_size')),
             DEFAULT_BATCH_SIZE,
         ),
         verify_ssl=not _as_bool(
             os.getenv(
-                "INSPECT_AGENT_INSECURE",
-                False if agent_cfg.get("verify_ssl", True) else True,
+                'INSPECT_AGENT_INSECURE',
+                False if agent_cfg.get('verify_ssl', True) else True,
             )
         ),
         request_timeout=_as_int(
-            os.getenv("INSPECT_AGENT_TIMEOUT", agent_cfg.get("request_timeout")),
+            os.getenv('INSPECT_AGENT_TIMEOUT', agent_cfg.get('request_timeout')),
             DEFAULT_TIMEOUT,
         ),
     )
     return config
-
-
 class AgentClient:
     def __init__(self, config: AgentConfig) -> None:
         self.config = config
@@ -156,50 +181,33 @@ class AgentClient:
             raise RuntimeError("缺少 Agent Token。")
         return {"Authorization": f"Bearer {self.token}"}
 
-    def register_if_needed(self) -> None:
+    def register_if_needed(self, cluster_payload: Optional[Dict[str, Any]]) -> None:
         if self.token:
             return
-        if not self.config.agent_name:
-            raise RuntimeError("未提供 Agent 名称，无法向服务端注册。")
-        payload: Dict[str, Any] = {"name": self.config.agent_name}
-        if self.config.cluster_id is not None:
-            payload["cluster_id"] = self.config.cluster_id
+        registration_token = self.config.registration_token
+        if not registration_token:
+            raise RuntimeError("缺少注册 Token，无法完成引导流程。")
+        if not cluster_payload:
+            raise RuntimeError("缺少集群信息，无法完成 Agent 注册。")
+        payload: Dict[str, Any] = {
+            "registration_token": registration_token,
+            "prometheus_url": self.config.prometheus_url,
+            "cluster": cluster_payload,
+        }
         LOG.info(
-            "正在向服务端注册 Agent（name=%s, cluster_id=%s）",
-            payload["name"],
-            payload.get("cluster_id"),
+            "正在使用注册 Token 引导 Agent（cluster=%s）。",
+            cluster_payload.get("name"),
         )
         resp = self.session.post(
-            f"{self.config.server_base}/agents",
+            f"{self.config.server_base}/agent/bootstrap",
             json=payload,
             timeout=self.config.request_timeout,
         )
         resp.raise_for_status()
-        data = resp.json()
-        token = data.get("token")
-        if not token:
-            raise RuntimeError("服务端返回的注册信息缺少 token。")
-        self.token = token
+        self.token = registration_token
+        self.config.token = registration_token
         if self.config.token_file:
-            self.config.save_token(token)
-
-    def load_token_from_disk(self) -> None:
-        if self.token:
-            return
-        token = self.config.load_token()
-        if token:
-            LOG.info("已从 %s 读取 Agent Token。", self.config.token_file)
-            self.token = token
-
-    def send_heartbeat(self) -> None:
-        payload = {"reported_at": datetime.now(timezone.utc).isoformat()}
-        resp = self.session.post(
-            f"{self.config.server_base}/agent/heartbeat",
-            json=payload,
-            headers=self._headers(),
-            timeout=self.config.request_timeout,
-        )
-        resp.raise_for_status()
+            self.config.save_token(self.token)
 
     def fetch_tasks(self, limit: int) -> List[Dict[str, Any]]:
         resp = self.session.get(
@@ -272,6 +280,20 @@ class AgentRunner:
             client.session,
             timeout=config.request_timeout,
         )
+
+    def build_bootstrap_payload(self) -> Optional[Dict[str, Any]]:
+        if self.config.cluster_name is None:
+            return None
+        payload: Dict[str, Any] = {"name": self.config.cluster_name}
+        path = self.config.kubeconfig_path
+        if path:
+            try:
+                data = path.read_bytes()
+            except FileNotFoundError as exc:
+                raise RuntimeError(f"无法读取 kubeconfig 文件：{path}") from exc
+            payload["kubeconfig_b64"] = base64.b64encode(data).decode("utf-8")
+            payload["kubeconfig_name"] = path.name
+        return payload
 
     def run_forever(self, once: bool = False) -> None:
         LOG.info("Agent 已启动，轮询间隔 %s 秒。", self.config.poll_interval)
@@ -421,26 +443,25 @@ def main(argv: Optional[List[str]] = None) -> None:
     try:
         config = load_config(args.config)
     except Exception as exc:
-        LOG.error("加载配置失败：%s", exc)
+        LOG.error('加载配置失败：%s', exc)
         sys.exit(1)
 
     client = AgentClient(config)
+    runner = AgentRunner(config, client)
     try:
         client.load_token_from_disk()
-        client.register_if_needed()
+        cluster_payload = runner.build_bootstrap_payload() if not client.token else None
+        client.register_if_needed(cluster_payload)
     except Exception as exc:
-        LOG.error("初始化 Agent 失败：%s", exc)
+        LOG.error('初始化 Agent 失败：%s', exc)
         sys.exit(1)
 
-    runner = AgentRunner(config, client)
     try:
         runner.run_forever(once=args.once)
     except KeyboardInterrupt:
-        LOG.info("Agent 已终止。")
+        LOG.info('Agent 已终止。')
     except Exception as exc:
-        LOG.exception("Agent 运行失败：%s", exc)
+        LOG.exception('Agent 运行失败：%s', exc)
         sys.exit(2)
-
-
 if __name__ == "__main__":
     main()
