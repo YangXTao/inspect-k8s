@@ -10,7 +10,6 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     INSPECT_AGENT_CONFIG=/app/config.yaml \
     PYTHONPATH=/app
-ENV PYTHONPATH=/app
 
 WORKDIR /app
 
@@ -21,6 +20,10 @@ ENV PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY . /app/agent
+
+RUN mkdir -p /app/config /app/secret
+
+WORKDIR /app/agent
 
 ENTRYPOINT ["python", "-m", "agent"]
