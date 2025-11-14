@@ -216,6 +216,16 @@ class AgentClient:
         if self.config.token_file:
             self.config.save_token(self.token)
 
+    def send_heartbeat(self) -> None:
+        payload = {"reported_at": datetime.now(timezone.utc).isoformat()}
+        resp = self.session.post(
+            f"{self.config.server_base}/agent/heartbeat",
+            json=payload,
+            headers=self._headers(),
+            timeout=self.config.request_timeout,
+        )
+        resp.raise_for_status()
+
     def fetch_tasks(self, limit: int) -> List[Dict[str, Any]]:
         resp = self.session.get(
             f"{self.config.server_base}/agent/tasks",
