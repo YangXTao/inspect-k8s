@@ -1,11 +1,13 @@
 import { appConfig } from "./config";
 import {
+  AgentRegisterResponse,
   ClusterConfig,
+  InspectionAgent,
   InspectionItem,
-  InspectionRun,
-  InspectionRunListItem,
   InspectionItemsExportPayload,
   InspectionItemsImportResult,
+  InspectionRun,
+  InspectionRunListItem,
   LicenseStatus,
 } from "./types";
 
@@ -199,6 +201,38 @@ export function updateInspectionItem(
 export function deleteInspectionItem(itemId: number): Promise<void> {
   return request<void>(`/inspection-items/${itemId}`, {
     method: "DELETE",
+  });
+}
+
+export function getAgents(): Promise<InspectionAgent[]> {
+  return request<InspectionAgent[]>("/agents");
+}
+
+export function createAgent(payload: {
+  name: string;
+  description?: string;
+  cluster_id?: number | null;
+  prometheus_url?: string | null;
+}): Promise<AgentRegisterResponse> {
+  return request<AgentRegisterResponse>("/agents", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateAgent(
+  agentId: number,
+  payload: {
+    name?: string;
+    description?: string;
+    is_enabled?: boolean;
+    cluster_id?: number | null;
+    prometheus_url?: string | null;
+  }
+): Promise<InspectionAgent> {
+  return request<InspectionAgent>(`/agents/${agentId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
   });
 }
 

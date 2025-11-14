@@ -24,31 +24,38 @@ import {
 import { Helmet } from "react-helmet";
 import type { Location as RouterLocation } from "history";
 import {
+  cancelInspectionRun,
+  createAgent as apiCreateAgent,
+  createInspectionItem as apiCreateInspectionItem,
   createInspectionRun,
   deleteCluster as apiDeleteCluster,
+  deleteInspectionItem as apiDeleteInspectionItem,
   deleteInspectionRun as apiDeleteInspectionRun,
+  exportInspectionItems,
+  getAgents,
   getClusters,
   getInspectionItems,
   getInspectionRun,
   getInspectionRuns,
-  getReportDownloadUrl,
-  registerCluster,
-  updateCluster,
-  testClusterConnection,
-  cancelInspectionRun,
   getLicenseStatus,
+  getReportDownloadUrl,
+  importInspectionItems,
+  registerCluster,
+  testClusterConnection,
+  updateAgent as apiUpdateAgent,
+  updateCluster,
   uploadLicense,
   uploadLicenseText,
-  createInspectionItem as apiCreateInspectionItem,
   updateInspectionItem as apiUpdateInspectionItem,
-  deleteInspectionItem as apiDeleteInspectionItem,
-  exportInspectionItems,
-  importInspectionItems,
 } from "./api";
 import { appConfig } from "./config";
 import CompanyLogoUrl from "./assets/company-logo.png?url";
 import type {
+  AgentRegisterResponse,
   ClusterConfig,
+  ExecutionMode,
+  InspectionAgent,
+  InspectionAgentStatus,
   InspectionItem,
   InspectionResult,
   InspectionResultStatus,
@@ -68,6 +75,7 @@ type LicenseCapabilities = {
   reason: string | null;
   features: string[];
   canManageClusters: boolean;
+  canManageAgents: boolean;
   canRunInspections: boolean;
   canDownloadReports: boolean;
   status: LicenseStatus | null;
@@ -106,22 +114,16 @@ const BEIJING_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
   second: "2-digit",
 });
 
-const statusClass = (status: string) => {
+const statusClass = (status: InspectionRunStatus) => {
   switch (status) {
-    case "completed":
-      return "status-pill success";
-    case "incomplete":
-      return "status-pill danger";
-    case "passed":
-      return "status-pill success";
-    case "warning":
-      return "status-pill warning";
-    case "failed":
-      return "status-pill danger";
+    case "queued":
+      return "status-pill queued";
     case "running":
       return "status-pill running";
-    case "paused":
-      return "status-pill paused";
+    case "finished":
+      return "status-pill success";
+    case "failed":
+      return "status-pill danger";
     case "cancelled":
       return "status-pill cancelled";
     default:
@@ -129,200 +131,15 @@ const statusClass = (status: string) => {
   }
 };
 
-const formatRunStatusLabel = (status: InspectionRunStatus) => {
-  switch (status) {
-    case "running":
-      return "巡检中";
-    case "paused":
-      return "暂停中";
-    case "cancelled":
-      return "已取消";
-    case "completed":
-      return "已完成";
-    case "incomplete":
-      return "未完成";
-    case "passed":
-      return "已通过";
-    case "failed":
-      return "执行失败";
-    case "warning":
-      return "存在告警";
-    default:
-      return status;
-  }
-};
-
-const clampProgress = (value: number | undefined) => {
-  if (typeof value !== "number" || Number.isNaN(value)) {
-    return 0;
-  }
-  return Math.min(100, Math.max(0, Math.round(value)));
-};
-
-const STATUS_CIRCLE_RADIUS = 16;
-const STATUS_CIRCLE_CIRCUMFERENCE = 2 * Math.PI * STATUS_CIRCLE_RADIUS;
-
-type InspectionResultStatusFilter = InspectionResultStatus | "all";
-
-const hasRunStateChanged = (
-  previous: InspectionRun | null,
-  next: InspectionRun
-) => {
-  if (!previous) {
-    return true;
-  }
-  if (
-    previous.status !== next.status ||
-    previous.report_path !== next.report_path ||
-    previous.summary !== next.summary ||
-    previous.completed_at !== next.completed_at ||
-    previous.total_items !== next.total_items ||
-    previous.processed_items !== next.processed_items ||
-    previous.progress !== next.progress
-  ) {
-    return true;
-  }
-  if (previous.results.length !== next.results.length) {
-    return true;
-  }
-  for (let index = 0; index < next.results.length; index += 1) {
-    const prevResult = previous.results[index];
-    const nextResult = next.results[index];
-    if (
-      !prevResult ||
-      prevResult.status !== nextResult.status ||
-      prevResult.detail !== nextResult.detail ||
-      prevResult.suggestion !== nextResult.suggestion
-    ) {
-      return true;
-    }
-  }
-  return false;
-};
-
-type RunProgressInfo = {
-  status: InspectionRunStatus;
-  progress: number;
-  processed: number;
-  total: number;
-  pending: number;
-  reportReady: boolean;
-};
-
-const buildRunProgressInfo = (run: InspectionRun): RunProgressInfo => {
-  const total = Math.max(run.total_items ?? 0, run.results.length);
-  const processed = Math.min(run.processed_items ?? 0, total);
-  const pending = Math.max(total - processed, 0);
-  const progress = clampProgress(run.progress);
-  return {
-    status: run.status,
-    progress,
-    processed,
-    total,
-    pending,
-    reportReady: Boolean(run.report_path),
-  };
-};
-
-const isProgressInfoEqual = (
-  previous: RunProgressInfo | null,
-  next: RunProgressInfo
-) => {
-  if (!previous) {
-    return false;
-  }
-  return (
-    previous.status === next.status &&
-    previous.progress === next.progress &&
-    previous.processed === next.processed &&
-    previous.total === next.total &&
-    previous.pending === next.pending &&
-    previous.reportReady === next.reportReady
-    );
-  };
-
-const areRunListsEqual = (
-  previous: InspectionRunListItem[] | undefined,
-  next: InspectionRunListItem[]
-) => {
-  if (!previous || previous.length !== next.length) {
-    return false;
-  }
-  for (let index = 0; index < next.length; index += 1) {
-    const prev = previous[index];
-    const curr = next[index];
-    if (
-      prev.id !== curr.id ||
-      prev.status !== curr.status ||
-      prev.progress !== curr.progress ||
-      prev.processed_items !== curr.processed_items ||
-      prev.total_items !== curr.total_items ||
-      prev.report_path !== curr.report_path
-    ) {
-      return false;
-    }
-  }
-  return true;
-};
-
-const isRunStillProcessing = (
-  info: RunProgressInfo | null,
-  run: InspectionRun | null
-) => {
-  if (info) {
-    return (
-      info.status === "running" ||
-      info.status === "paused" ||
-      (!info.reportReady && info.progress >= 100)
-    );
-  }
-  if (!run) {
-    return false;
-  }
-  const progress = clampProgress(run.progress);
-  return (
-    run.status === "running" ||
-    run.status === "paused" ||
-    (!run.report_path && progress >= 100)
-  );
-};
-
-const areResultsEqual = (
-  previous: InspectionResult[] | null | undefined,
-  next: InspectionResult[]
-) => {
-  if (!previous || previous.length !== next.length) {
-    return false;
-  }
-  for (let index = 0; index < next.length; index += 1) {
-    const prev = previous[index];
-    const curr = next[index];
-    if (
-      prev.id !== curr.id ||
-      prev.status !== curr.status ||
-      prev.detail !== curr.detail ||
-      prev.suggestion !== curr.suggestion
-    ) {
-      return false;
-    }
-  }
-  return true;
-};
-
 const renderRunStatusBadge = (
   status: InspectionRunStatus,
+  statusLabel: string,
   progress?: number
 ) => {
-  if (status === "running" || status === "paused") {
+  if (status === "running") {
     const clamped = clampProgress(progress);
-    const progressClassName = [
-      "status-progress status-progress-circle",
-      status === "paused" ? "paused" : null,
-    ]
-      .filter(Boolean)
-      .join(" ");
     return (
-      <div className={progressClassName}>
+      <div className="status-progress status-progress-circle">
         <div className="status-circle">
           <svg viewBox="0 0 40 40">
             <circle className="status-circle-bg" cx="20" cy="20" r={STATUS_CIRCLE_RADIUS} />
@@ -339,20 +156,12 @@ const renderRunStatusBadge = (
           </svg>
           <span className="status-circle-label">{clamped}%</span>
         </div>
-        <span className={statusClass(status)}>
-          {formatRunStatusLabel(status)}
-        </span>
+        <span className={statusClass(status)}>{statusLabel}</span>
       </div>
     );
   }
 
-  if (status === "cancelled") {
-    return <span className={statusClass(status)}>{formatRunStatusLabel(status)}</span>;
-  }
-
-  return (
-    <span className={statusClass(status)}>{formatRunStatusLabel(status)}</span>
-  );
+  return <span className={statusClass(status)}>{statusLabel}</span>;
 };
 
 const formatDate = (value?: string | null) => {
@@ -373,6 +182,65 @@ const formatDate = (value?: string | null) => {
   }
 
   return BEIJING_TIME_FORMATTER.format(parsed);
+};
+
+const EXECUTION_MODE_LABELS: Record<ExecutionMode, string> = {
+  server: "服务端",
+  agent: "Agent",
+};
+
+const describeExecutor = (
+  executor: ExecutionMode,
+  agentName?: string | null,
+  agentId?: number | null
+) => {
+  if (executor === "server") {
+    return "服务端 (Server)";
+  }
+  const trimmedName = agentName?.trim();
+  if (trimmedName) {
+    return `Agent · ${trimmedName}`;
+  }
+  if (typeof agentId === "number") {
+    return `Agent #${agentId}`;
+  }
+  return "Agent";
+};
+
+const describeAgentStatus = (
+  status?: InspectionAgentStatus | null,
+  label?: string | null
+) => {
+  if (label && label.trim()) {
+    return label.trim();
+  }
+  switch (status) {
+    case "queued":
+      return "待执行";
+    case "running":
+      return "执行中";
+    case "finished":
+      return "已完成";
+    case "failed":
+      return "执行失败";
+    default:
+      return "-";
+  }
+};
+
+const agentStatusClassName = (status?: InspectionAgentStatus | null) => {
+  switch (status) {
+    case "queued":
+      return "status-pill warning";
+    case "running":
+      return "status-pill running";
+    case "finished":
+      return "status-pill success";
+    case "failed":
+      return "status-pill danger";
+    default:
+      return "status-pill";
+  }
 };
 
 const clusterStatusMeta = {
@@ -620,6 +488,44 @@ const isSameDisplayMap = (
   });
 };
 
+const areRunListsEqual = (
+  prev: InspectionRunListItem[] | null | undefined,
+  next: InspectionRunListItem[]
+) => {
+  if (!prev || prev.length !== next.length) {
+    return false;
+  }
+  const prevMap = new Map(prev.map((run) => [run.id, run]));
+  for (const run of next) {
+    const previous = prevMap.get(run.id);
+    if (!previous) {
+      return false;
+    }
+    if (
+      previous.operator !== run.operator ||
+      previous.cluster_id !== run.cluster_id ||
+      previous.cluster_name !== run.cluster_name ||
+      previous.status !== run.status ||
+      previous.status_label !== run.status_label ||
+      previous.summary !== run.summary ||
+      previous.report_path !== run.report_path ||
+      previous.total_items !== run.total_items ||
+      previous.processed_items !== run.processed_items ||
+      previous.progress !== run.progress ||
+      previous.created_at !== run.created_at ||
+      previous.completed_at !== run.completed_at ||
+      previous.executor !== run.executor ||
+      previous.agent_status !== run.agent_status ||
+      previous.agent_status_label !== run.agent_status_label ||
+      previous.agent_id !== run.agent_id ||
+      previous.agent_name !== run.agent_name
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
+
 const logWithTimestamp = (
   level: "info" | "warn" | "error" = "info",
   message: string,
@@ -710,6 +616,14 @@ interface OverviewProps {
   openKubeconfigModal: () => void;
   kubeconfigSummary: string | null;
   kubeconfigReady: boolean;
+  clusterExecutionModeInput: ExecutionMode;
+  setClusterExecutionModeInput: (value: ExecutionMode) => void;
+  clusterDefaultAgentIdInput: number | null;
+  setClusterDefaultAgentIdInput: (value: number | null) => void;
+  agents: InspectionAgent[];
+  agentLoading: boolean;
+  agentError: string | null;
+  onRefreshAgents: () => Promise<void>;
   onUpload: () => Promise<void>;
   onEditCluster: (cluster: ClusterConfig) => void;
   onDeleteCluster: (cluster: ClusterConfig) => Promise<void>;
@@ -734,6 +648,14 @@ const OverviewView = ({
   openKubeconfigModal,
   kubeconfigSummary,
   kubeconfigReady,
+  clusterExecutionModeInput,
+  setClusterExecutionModeInput,
+  clusterDefaultAgentIdInput,
+  setClusterDefaultAgentIdInput,
+  agents,
+  agentLoading,
+  agentError,
+  onRefreshAgents,
   onUpload,
   onEditCluster,
   onDeleteCluster,
@@ -744,6 +666,56 @@ const OverviewView = ({
   license,
 }: OverviewProps) => {
   const navigate = useNavigate();
+  const enabledAgents = useMemo(
+    () => agents.filter((agent) => agent.is_enabled),
+    [agents]
+  );
+  const agentModeDisabled =
+    !license.canManageAgents || enabledAgents.length === 0;
+
+  const handleExecutionModeChange = useCallback(
+    (mode: ExecutionMode) => {
+      setClusterExecutionModeInput(mode);
+      if (mode !== "agent") {
+        setClusterDefaultAgentIdInput(null);
+      }
+    },
+    [setClusterExecutionModeInput, setClusterDefaultAgentIdInput]
+  );
+
+  const handleDefaultAgentSelect = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      const raw = event.target.value;
+      if (!raw) {
+        setClusterDefaultAgentIdInput(null);
+        return;
+      }
+      const numeric = Number(raw);
+      setClusterDefaultAgentIdInput(Number.isNaN(numeric) ? null : numeric);
+    },
+    [setClusterDefaultAgentIdInput]
+  );
+  useEffect(() => {
+    if (clusterExecutionModeInput !== "agent") {
+      return;
+    }
+    if (
+      clusterDefaultAgentIdInput !== null &&
+      enabledAgents.some(
+        (agent) => agent.id === clusterDefaultAgentIdInput
+      )
+    ) {
+      return;
+    }
+    if (enabledAgents.length === 1) {
+      setClusterDefaultAgentIdInput(enabledAgents[0].id);
+    }
+  }, [
+    clusterExecutionModeInput,
+    clusterDefaultAgentIdInput,
+    enabledAgents,
+    setClusterDefaultAgentIdInput,
+  ]);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const pageFromSearch = useMemo(() => {
@@ -918,6 +890,72 @@ const OverviewView = ({
               disabled={!license.canManageClusters}
               onChange={(event) => setClusterPromInput(event.target.value)}
             />
+            <label className="cluster-upload-label">
+              执行模式
+              <select
+                value={clusterExecutionModeInput}
+                onChange={(event) =>
+                  handleExecutionModeChange(event.target.value as ExecutionMode)
+                }
+                disabled={!license.canManageClusters}
+              >
+                <option value="server">服务端执行</option>
+                <option value="agent" disabled={agentModeDisabled}>
+                  Agent 执行
+                </option>
+              </select>
+            </label>
+            {clusterExecutionModeInput === "agent" && (
+              <label className="cluster-upload-label">
+                默认 Agent
+                <select
+                  value={
+                    clusterDefaultAgentIdInput !== null
+                      ? String(clusterDefaultAgentIdInput)
+                      : ""
+                  }
+                  onChange={handleDefaultAgentSelect}
+                  disabled={
+                    !license.canManageClusters ||
+                    !license.canManageAgents ||
+                    agentLoading
+                  }
+                >
+                  <option value="">请选择可用 Agent</option>
+                  {enabledAgents.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name}
+                      {agent.cluster_name ? `（${agent.cluster_name}）` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <div className="cluster-upload-agent-meta">
+              <button
+                type="button"
+                className="link-button small"
+                onClick={() => void onRefreshAgents()}
+                disabled={agentLoading}
+              >
+                刷新 Agent
+              </button>
+              {agentLoading && (
+                <span className="cluster-upload-note">Agent 列表加载中...</span>
+              )}
+              {!agentLoading &&
+                clusterExecutionModeInput === "agent" &&
+                agentModeDisabled && (
+                  <span className="cluster-upload-note warning">
+                    {license.canManageAgents
+                      ? "暂无可用 Agent，请先在设置中创建。"
+                      : license.reason ?? "当前 License 不支持 Agent 管理。"}
+                  </span>
+                )}
+              {agentError && (
+                <span className="cluster-upload-note error">{agentError}</span>
+              )}
+            </div>
             <button
               type="button"
               className={`cluster-upload-trigger${
@@ -1306,18 +1344,45 @@ const HistoryView = ({
   const shouldShowNotice =
     notice && noticeType && noticeScope === "history";
 
+  const [executorFilter, setExecutorFilter] = useState<ExecutionMode | "all">(
+    "all"
+  );
+  const [agentStatusFilter, setAgentStatusFilter] = useState<
+    InspectionAgentStatus | "all" | "none"
+  >("all");
+
   const [pageSize, setPageSize] = useState<number>(RUN_PAGE_SIZE_OPTIONS[0]);
   const [page, setPage] = useState(1);
   const [pageInput, setPageInput] = useState("");
+
+  const filteredRuns = useMemo(() => {
+    return runs.filter((run) => {
+      if (executorFilter !== "all" && run.executor !== executorFilter) {
+        return false;
+      }
+      if (agentStatusFilter === "none") {
+        return run.executor !== "agent" || !run.agent_status;
+      }
+      if (agentStatusFilter !== "all") {
+        return run.agent_status === agentStatusFilter;
+      }
+      return true;
+    });
+  }, [runs, executorFilter, agentStatusFilter]);
 
   useEffect(() => {
     setPage(1);
     setPageInput("");
   }, [pageSize]);
 
+  useEffect(() => {
+    setPage(1);
+    setPageInput("");
+  }, [executorFilter, agentStatusFilter]);
+
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(runs.length / Math.max(pageSize, 1))),
-    [runs.length, pageSize]
+    () => Math.max(1, Math.ceil(filteredRuns.length / Math.max(pageSize, 1))),
+    [filteredRuns.length, pageSize]
   );
 
   useEffect(() => {
@@ -1328,17 +1393,26 @@ const HistoryView = ({
 
   useEffect(() => {
     setSelectedRunIds((prev) =>
-      prev.filter((id) => runs.some((run) => run.id === id))
+      prev.filter((id) => filteredRuns.some((run) => run.id === id))
     );
-  }, [runs]);
+  }, [filteredRuns]);
 
   const pagedRuns = useMemo(() => {
     const start = (page - 1) * pageSize;
-    return runs.slice(start, start + pageSize);
-  }, [runs, page, pageSize]);
+    return filteredRuns.slice(start, start + pageSize);
+  }, [filteredRuns, page, pageSize]);
+
+  const visibleSelectedCount = useMemo(
+    () =>
+      selectedRunIds.filter((id) =>
+        filteredRuns.some((run) => run.id === id)
+      ).length,
+    [selectedRunIds, filteredRuns]
+  );
 
   const allSelected =
-    runs.length > 0 && selectedRunIds.length === runs.length;
+    filteredRuns.length > 0 &&
+    filteredRuns.every((run) => selectedRunIds.includes(run.id));
 
   const handleToggleRun = useCallback((runId: number) => {
     setSelectedRunIds((prev) =>
@@ -1350,15 +1424,19 @@ const HistoryView = ({
 
   const handleToggleAllRuns = useCallback(() => {
     setSelectedRunIds((prev) => {
-      if (runs.length === 0) {
-        return [];
+      if (filteredRuns.length === 0) {
+        return prev;
       }
-      if (prev.length === runs.length) {
-        return [];
+      const visibleIds = filteredRuns.map((run) => run.id);
+      const allVisibleSelected = visibleIds.every((id) => prev.includes(id));
+      if (allVisibleSelected) {
+        return prev.filter((id) => !visibleIds.includes(id));
       }
-      return runs.map((run) => run.id);
+      const merged = new Set(prev);
+      visibleIds.forEach((id) => merged.add(id));
+      return Array.from(merged);
     });
-  }, [runs]);
+  }, [filteredRuns]);
 
   const handlePageChange = useCallback(
     (offset: number) => {
@@ -1400,38 +1478,77 @@ const HistoryView = ({
     void onDeleteRunsBulk(selectedRunIds);
   }, [onDeleteRunsBulk, selectedRunIds]);
 
+  const handleExecutorFilterChange = (
+    event: ChangeEvent<HTMLSelectElement>
+  ) => {
+    setExecutorFilter(event.target.value as ExecutionMode | "all");
+  };
+
+  const handleAgentStatusFilterChange = (
+    event: ChangeEvent<HTMLSelectElement>
+  ) => {
+    setAgentStatusFilter(
+      event.target.value as InspectionAgentStatus | "all" | "none"
+    );
+  };
+
   return (
     <section className="card history history-page">
       <div className="card-header">
-          <h2>历史巡检</h2>
-          <div className="card-actions">
-            {runs.length > 0 && (
-              <>
-                <div className="card-actions-group">
-                <span className="selection-hint">
-                  已选 {selectedRunIds.length} / {runs.length}
-                </span>
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={handleToggleAllRuns}
-                >
-                  {allSelected ? "取消全选" : "全选"}
-                </button>
-                <button
-                  type="button"
-                  className="secondary danger"
-                    onClick={handleDeleteSelectedRuns}
-                    disabled={selectedRunIds.length === 0}
-                  >
-                    删除选中
-                  </button>
-                </div>
-              </>
-            )}
-            <button
-              type="button"
-              className="secondary"
+        <h2>历史巡检</h2>
+        <div className="card-actions">
+          <div className="card-actions-group history-filter-group">
+            <label>
+              执行方式
+              <select
+                value={executorFilter}
+                onChange={handleExecutorFilterChange}
+              >
+                <option value="all">全部</option>
+                <option value="server">服务端</option>
+                <option value="agent">Agent</option>
+              </select>
+            </label>
+            <label>
+              Agent 状态
+              <select
+                value={agentStatusFilter}
+                onChange={handleAgentStatusFilterChange}
+              >
+                <option value="all">全部</option>
+                <option value="none">非 Agent / 未上报</option>
+                <option value="queued">待执行</option>
+                <option value="running">执行中</option>
+                <option value="finished">已完成</option>
+                <option value="failed">执行失败</option>
+              </select>
+            </label>
+          </div>
+          {filteredRuns.length > 0 && (
+            <div className="card-actions-group">
+              <span className="selection-hint">
+                已选 {visibleSelectedCount} / {filteredRuns.length}
+              </span>
+              <button
+                type="button"
+                className="secondary"
+                onClick={handleToggleAllRuns}
+              >
+                {allSelected ? "取消全选" : "全选"}
+              </button>
+              <button
+                type="button"
+                className="secondary danger"
+                onClick={handleDeleteSelectedRuns}
+                disabled={selectedRunIds.length === 0}
+              >
+                删除选中
+              </button>
+            </div>
+          )}
+          <button
+            type="button"
+            className="secondary"
             onClick={() => void onRefreshRuns()}
           >
             刷新
@@ -1446,8 +1563,12 @@ const HistoryView = ({
           {license.reason ?? "当前 License 不支持下载巡检报告。"}
         </div>
       )}
-      {runs.length === 0 ? (
-        <div className="placeholder">暂无巡检记录，请稍后再查看。</div>
+      {filteredRuns.length === 0 ? (
+        <div className="placeholder">
+          {runs.length === 0
+            ? "暂无巡检记录，请稍后再查看。"
+            : "无符合筛选条件的巡检记录，请调整筛选条件。"}
+        </div>
       ) : (
         <div className="table-wrapper">
           <table>
@@ -1462,6 +1583,8 @@ const HistoryView = ({
                 </th>
                 <th>巡检编号</th>
                 <th>集群</th>
+                <th>执行方式</th>
+                <th>Agent 状态</th>
                 <th>巡检人</th>
                 <th>状态</th>
                 <th>开始时间</th>
@@ -1493,9 +1616,28 @@ const HistoryView = ({
                     <td>
                       {run.cluster_name}({clusterSlug})
                     </td>
+                    <td>
+                      {describeExecutor(
+                        run.executor,
+                        run.agent_name,
+                        run.agent_id
+                      )}
+                    </td>
+                    <td>
+                      {run.executor === "agent" ? (
+                        <span className={agentStatusClassName(run.agent_status)}>
+                          {describeAgentStatus(
+                            run.agent_status,
+                            run.agent_status_label
+                          )}
+                        </span>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
                     <td>{run.operator || "-"}</td>
                     <td>
-                      {renderRunStatusBadge(run.status, run.progress)}
+                      {renderRunStatusBadge(run.status, run.status_label ?? run.status, run.progress)}
                     </td>
                     <td>{formatDate(run.created_at)}</td>
                     <td>{formatDate(run.completed_at)}</td>
@@ -1508,7 +1650,7 @@ const HistoryView = ({
                       >
                         查看详情
                       </button>
-                      {(run.status === "running" || run.status === "paused") && (
+                      {(run.status === "running" || run.status === "queued") && (
                         <button
                           className="link-button danger"
                           onClick={async () => await onCancelRun(run)}
@@ -1550,7 +1692,7 @@ const HistoryView = ({
           </table>
         </div>
       )}
-      {runs.length > 0 && (
+      {filteredRuns.length > 0 && (
         <div className="table-pagination">
           <label className="page-size-control">
             每页
@@ -1645,6 +1787,14 @@ interface ClusterDetailProps {
   onTestClusterConnection: (clusterId: number) => Promise<void>;
   testingClusterIds: Record<number, boolean>;
   license: LicenseCapabilities;
+  agents: InspectionAgent[];
+  agentLoading: boolean;
+  agentError: string | null;
+  onRefreshAgents: () => Promise<void>;
+  onUpdateClusterExecution: (
+    clusterId: number,
+    payload: { executionMode: ExecutionMode; defaultAgentId: number | null }
+  ) => Promise<void>;
 }
 
 interface ClusterDetailContentProps {
@@ -1675,6 +1825,14 @@ interface ClusterDetailContentProps {
   onTestClusterConnection: (clusterId: number) => Promise<void>;
   testingClusterIds: Record<number, boolean>;
   license: LicenseCapabilities;
+  agents: InspectionAgent[];
+  agentLoading: boolean;
+  agentError: string | null;
+  onRefreshAgents: () => Promise<void>;
+  onUpdateClusterExecution: (
+    clusterId: number,
+    payload: { executionMode: ExecutionMode; defaultAgentId: number | null }
+  ) => Promise<void>;
 }
 
 const ClusterDetailContent = ({
@@ -1705,11 +1863,131 @@ const ClusterDetailContent = ({
   onTestClusterConnection,
   testingClusterIds,
   license,
+  agents,
+  agentLoading,
+  agentError,
+  onRefreshAgents,
+  onUpdateClusterExecution,
 }: ClusterDetailContentProps) => {
   const navigate = useNavigate();
 
   const shouldShowNotice =
     notice && noticeType && clusterNoticeScope === "clusterDetail";
+
+  const [executionModeInput, setExecutionModeInput] = useState<ExecutionMode>(
+    cluster.execution_mode
+  );
+  const [defaultAgentIdInput, setDefaultAgentIdInput] = useState<number | null>(
+    cluster.default_agent_id ?? null
+  );
+  const [executionError, setExecutionError] = useState<string | null>(null);
+  const [savingExecution, setSavingExecution] = useState(false);
+
+  const availableAgents = useMemo(() => {
+    const list = agents.filter(
+      (agent) =>
+        agent.is_enabled &&
+        (agent.cluster_id === null || agent.cluster_id === cluster.id)
+    );
+    if (
+      cluster.default_agent_id != null &&
+      !list.some((agent) => agent.id === cluster.default_agent_id)
+    ) {
+      const fallback = agents.find(
+        (agent) => agent.id === cluster.default_agent_id
+      );
+      if (fallback) {
+        list.push(fallback);
+      }
+    }
+    return list;
+  }, [agents, cluster.default_agent_id, cluster.id]);
+
+  const agentOptions = useMemo(() => {
+    const map = new Map<number, InspectionAgent>();
+    availableAgents.forEach((agent) => map.set(agent.id, agent));
+    if (
+      executionModeInput === "agent" &&
+      defaultAgentIdInput !== null &&
+      !map.has(defaultAgentIdInput)
+    ) {
+      const fallback = agents.find(
+        (agent) => agent.id === defaultAgentIdInput
+      );
+      if (fallback) {
+        map.set(fallback.id, fallback);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) =>
+      a.name.localeCompare(b.name, "zh-Hans-CN", { sensitivity: "base" })
+    );
+  }, [availableAgents, agents, executionModeInput, defaultAgentIdInput]);
+
+  useEffect(() => {
+    setExecutionModeInput(cluster.execution_mode);
+    setDefaultAgentIdInput(cluster.default_agent_id ?? null);
+    setExecutionError(null);
+  }, [cluster.execution_mode, cluster.default_agent_id, cluster.id]);
+
+  const agentModeDisabled =
+    !license.canManageAgents || availableAgents.length === 0;
+
+  const handleExecutionModeSelect = (event: ChangeEvent<HTMLSelectElement>) => {
+    const nextMode = event.target.value as ExecutionMode;
+    setExecutionModeInput(nextMode);
+    if (nextMode !== "agent") {
+      setDefaultAgentIdInput(null);
+    }
+  };
+
+  const handleDefaultAgentSelect = (event: ChangeEvent<HTMLSelectElement>) => {
+    const raw = event.target.value;
+    if (!raw) {
+      setDefaultAgentIdInput(null);
+      return;
+    }
+    const parsed = Number(raw);
+    setDefaultAgentIdInput(Number.isNaN(parsed) ? null : parsed);
+  };
+
+  const handleSaveExecution = async () => {
+    setExecutionError(null);
+    if (!license.canManageClusters) {
+      setExecutionError("当前 License 不支持修改集群配置。");
+      return;
+    }
+    if (executionModeInput === "agent") {
+      if (!license.canManageAgents) {
+        setExecutionError("当前 License 不支持 Agent 管理。");
+        return;
+      }
+      if (
+        defaultAgentIdInput === null ||
+        !availableAgents.some((agent) => agent.id === defaultAgentIdInput)
+      ) {
+        setExecutionError("请选择可用的默认 Agent。");
+        return;
+      }
+    }
+    setSavingExecution(true);
+    try {
+      await onUpdateClusterExecution(cluster.id, {
+        executionMode: executionModeInput,
+        defaultAgentId:
+          executionModeInput === "agent" ? defaultAgentIdInput : null,
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "更新执行配置失败";
+      setExecutionError(message);
+    } finally {
+      setSavingExecution(false);
+    }
+  };
+
+  const handleRefreshAgentsClick = useCallback(() => {
+    void onRefreshAgents();
+  }, [onRefreshAgents]);
 
   useEffect(() => {
     setSelectedIds(() => []);
@@ -1971,6 +2249,20 @@ const ClusterDetailContent = ({
               {cluster.prometheus_url || "未配置"}
             </div>
             <div>
+              <strong>执行模式: </strong>
+              {EXECUTION_MODE_LABELS[cluster.execution_mode] ??
+                cluster.execution_mode}
+            </div>
+            <div>
+              <strong>默认 Agent: </strong>
+              {cluster.execution_mode === "agent"
+                ? cluster.default_agent_name ??
+                  (cluster.default_agent_id != null
+                    ? `#${cluster.default_agent_id}`
+                    : "未配置")
+                : "-"}
+            </div>
+            <div>
               <strong>创建时间: </strong>
               {formatDate(cluster.created_at)}
             </div>
@@ -1988,6 +2280,103 @@ const ClusterDetailContent = ({
               ))
             ) : (
               <span className="chip muted">未检测到上下文</span>
+            )}
+          </div>
+        </div>
+
+        <div className="detail-card">
+          <h2>执行设置</h2>
+          <div className="execution-settings">
+            <label>
+              执行模式
+              <select
+                value={executionModeInput}
+                onChange={handleExecutionModeSelect}
+                disabled={
+                  savingExecution || !license.canManageClusters
+                }
+              >
+                <option value="server">服务端执行</option>
+                <option value="agent" disabled={agentModeDisabled}>
+                  Agent 执行
+                </option>
+              </select>
+            </label>
+            {executionModeInput === "agent" && (
+              <label>
+                默认 Agent
+                <select
+                  value={
+                    defaultAgentIdInput !== null
+                      ? String(defaultAgentIdInput)
+                      : ""
+                  }
+                  onChange={handleDefaultAgentSelect}
+                  disabled={
+                    savingExecution ||
+                    !license.canManageClusters ||
+                    !license.canManageAgents ||
+                    agentLoading
+                  }
+                >
+                  <option value="">请选择可用 Agent</option>
+                  {agentOptions.map((agent) => (
+                    <option
+                      key={agent.id}
+                      value={agent.id}
+                      disabled={!agent.is_enabled}
+                    >
+                      {agent.name}
+                      {agent.cluster_name
+                        ? `（${agent.cluster_name}）`
+                        : ""}
+                      {!agent.is_enabled ? "（已禁用）" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <div className="execution-settings-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={handleRefreshAgentsClick}
+                disabled={agentLoading || !license.canManageAgents}
+              >
+                {agentLoading ? "刷新中..." : "刷新 Agent"}
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={handleSaveExecution}
+                disabled={
+                  savingExecution ||
+                  !license.canManageClusters ||
+                  (executionModeInput === "agent" &&
+                    !license.canManageAgents)
+                }
+              >
+                {savingExecution ? "保存中..." : "保存设置"}
+              </button>
+            </div>
+            {!license.canManageAgents && (
+              <div className="feedback warning">
+                当前 License 不支持 Agent 管理。
+              </div>
+            )}
+            {executionModeInput === "agent" &&
+              license.canManageAgents &&
+              !agentLoading &&
+              availableAgents.length === 0 && (
+                <div className="feedback warning">
+                  未检测到可用 Agent，请先创建或启用 Agent。
+                </div>
+              )}
+            {executionError && (
+              <div className="feedback error">{executionError}</div>
+            )}
+            {agentError && (
+              <div className="feedback error">{agentError}</div>
             )}
           </div>
         </div>
@@ -2111,6 +2500,8 @@ const ClusterDetailContent = ({
                   />
                 </th>
                 <th>巡检编号</th>
+                <th>执行方式</th>
+                <th>Agent 状态</th>
                 <th>巡检人</th>
                 <th>状态</th>
                 <th>开始时间</th>
@@ -2135,9 +2526,28 @@ const ClusterDetailContent = ({
                       />
                     </td>
                     <td>{runSlug}</td>
+                    <td>
+                      {describeExecutor(
+                        run.executor,
+                        run.agent_name,
+                        run.agent_id
+                      )}
+                    </td>
+                    <td>
+                      {run.executor === "agent" ? (
+                        <span className={agentStatusClassName(run.agent_status)}>
+                          {describeAgentStatus(
+                            run.agent_status,
+                            run.agent_status_label
+                          )}
+                        </span>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
                     <td>{run.operator || "-"}</td>
                     <td>
-                      {renderRunStatusBadge(run.status, run.progress)}
+                      {renderRunStatusBadge(run.status, run.status_label ?? run.status, run.progress)}
                     </td>
                     <td>{formatDate(run.created_at)}</td>
                     <td>{formatDate(run.completed_at)}</td>
@@ -2152,7 +2562,7 @@ const ClusterDetailContent = ({
                       >
                         查看详情
                       </button>
-                      {(run.status === "running" || run.status === "paused") && (
+                      {(run.status === "running" || run.status === "queued") && (
                         <button
                           className="link-button danger"
                           onClick={async (event) => {
@@ -2292,6 +2702,11 @@ const ClusterDetailView = ({
   onTestClusterConnection,
   testingClusterIds,
   license,
+  agents,
+  agentLoading,
+  agentError,
+  onRefreshAgents,
+  onUpdateClusterExecution,
 }: ClusterDetailProps) => {
   const { clusterKey } = useParams<{ clusterKey?: string }>();
   const navigate = useNavigate();
@@ -2356,11 +2771,11 @@ const ClusterDetailView = ({
   );
 
   return (
-      <ClusterDetailContent
-        cluster={cluster}
-        clusterSlug={clusterSlug}
-        items={items}
-        runs={runs}
+    <ClusterDetailContent
+      cluster={cluster}
+      clusterSlug={clusterSlug}
+      items={items}
+      runs={runs}
       selectedIds={selectedIds}
       setSelectedIds={setSelectedIds}
       operator={operator}
@@ -2379,12 +2794,17 @@ const ClusterDetailView = ({
       onCancelRun={onCancelRun}
       onEditCluster={onEditCluster}
       onDeleteCluster={onDeleteCluster}
-        clusterDisplayIds={clusterDisplayIds}
-        runDisplayIds={runDisplayIds}
-        onTestClusterConnection={onTestClusterConnection}
-        testingClusterIds={testingClusterIds}
-        license={license}
-      />
+      clusterDisplayIds={clusterDisplayIds}
+      runDisplayIds={runDisplayIds}
+      onTestClusterConnection={onTestClusterConnection}
+      testingClusterIds={testingClusterIds}
+      license={license}
+      agents={agents}
+      agentLoading={agentLoading}
+      agentError={agentError}
+      onRefreshAgents={onRefreshAgents}
+      onUpdateClusterExecution={onUpdateClusterExecution}
+    />
   );
 };
 
@@ -2707,7 +3127,7 @@ const RunDetailView = ({
     if (!run) {
       return false;
     }
-    return run.status === "running" || run.status === "paused";
+    return run.status === "running" || run.status === "queued";
   }, [run]);
 
   useEffect(() => {
@@ -2775,7 +3195,7 @@ const RunDetailView = ({
   }, [run?.id, run?.status]);
 
   const handleCancelRunDetail = useCallback(() => {
-    if (!run || !(run.status === "running" || run.status === "paused")) {
+    if (!run || !(run.status === "running" || run.status === "queued")) {
       return;
     }
     void onCancelRun(run.id, clusterPath);
@@ -2899,6 +3319,27 @@ const RunDetailView = ({
                   {`${cluster.name}(${resolvedClusterSlug})`}
                 </div>
                 <div>
+                  <strong>执行方式: </strong>
+                  {describeExecutor(
+                    run.executor,
+                    run.agent_name,
+                    run.agent_id
+                  )}
+                </div>
+                <div>
+                  <strong>Agent 状态: </strong>
+                  {run.executor === "agent" ? (
+                    <span className={agentStatusClassName(run.agent_status)}>
+                      {describeAgentStatus(
+                        run.agent_status,
+                        run.agent_status_label
+                      )}
+                    </span>
+                  ) : (
+                    "-"
+                  )}
+                </div>
+                <div>
                   <strong>巡检人: </strong>
                   {run.operator || "-"}
                 </div>
@@ -2906,6 +3347,7 @@ const RunDetailView = ({
                   <strong>状态: </strong>
                   {renderRunStatusBadge(
                     run.status,
+                    run.status_label ?? run.status,
                     progressInfo?.progress ?? run.progress
                   )}
                 </div>
@@ -3302,6 +3744,7 @@ const SettingsOverviewPanel = ({
     clusters: "集群管理",
     inspections: "巡检执行",
     reports: "报告下载",
+    agents: "Agent 管理",
   };
   const featureSummary =
     license.features.length > 0
@@ -4134,6 +4577,263 @@ const InspectionSettingsPanel = ({
   );
 };
 
+interface AgentSettingsPanelProps {
+  agents: InspectionAgent[];
+  clusters: ClusterConfig[];
+  loading: boolean;
+  submitting: boolean;
+  notice: string | null;
+  error: string | null;
+  generatedToken: string | null;
+  onRefresh: () => Promise<void>;
+  onCreate: (payload: {
+    name: string;
+    description?: string;
+    cluster_id?: number | null;
+    prometheus_url?: string | null;
+  }) => Promise<void>;
+  onUpdate: (
+    agentId: number,
+    payload: {
+      name?: string;
+      description?: string;
+      is_enabled?: boolean;
+      cluster_id?: number | null;
+      prometheus_url?: string | null;
+    }
+  ) => Promise<InspectionAgent | null>;
+  onClearToken: () => void;
+  canManageAgents: boolean;
+}
+
+const AgentSettingsPanel = ({
+  agents,
+  clusters,
+  loading,
+  submitting,
+  notice,
+  error,
+  generatedToken,
+  onRefresh,
+  onCreate,
+  onUpdate,
+  onClearToken,
+  canManageAgents,
+}: AgentSettingsPanelProps) => {
+  const [formName, setFormName] = useState("");
+  const [formDescription, setFormDescription] = useState("");
+  const [formClusterId, setFormClusterId] = useState<string>("");
+  const [formPrometheusUrl, setFormPrometheusUrl] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const clusterNameMap = useMemo(() => {
+    const map = new Map<number, string>();
+    clusters.forEach((cluster) => {
+      map.set(cluster.id, cluster.name);
+    });
+    return map;
+  }, [clusters]);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmedName = formName.trim();
+    if (!trimmedName) {
+      setFormError("Agent 名称不能为空");
+      return;
+    }
+    setFormError(null);
+    try {
+      await onCreate({
+        name: trimmedName,
+        description: formDescription.trim() || undefined,
+        cluster_id:
+          formClusterId === "" ? null : Number.parseInt(formClusterId, 10),
+        prometheus_url: formPrometheusUrl.trim() || undefined,
+      });
+      setFormName("");
+      setFormDescription("");
+      setFormClusterId("");
+      setFormPrometheusUrl("");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "创建 Agent 失败";
+      setFormError(message);
+    }
+  };
+
+  const handleToggleAgent = async (agent: InspectionAgent) => {
+    try {
+      await onUpdate(agent.id, { is_enabled: !agent.is_enabled });
+    } catch {
+      // 详细错误已由上层处理
+    }
+  };
+
+  const resolveClusterLabel = (agent: InspectionAgent) => {
+    if (agent.cluster_id == null) {
+      return "未关联";
+    }
+    return (
+      agent.cluster_name ??
+      clusterNameMap.get(agent.cluster_id) ??
+      `#${agent.cluster_id}`
+    );
+  };
+
+  return (
+    <div className="agent-settings-panel">
+      <div className="agent-settings-header">
+        <h3>Agent 管理</h3>
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => void onRefresh()}
+          disabled={loading || submitting}
+        >
+          {loading ? "刷新中..." : "刷新列表"}
+        </button>
+      </div>
+      {notice && <div className="feedback success">{notice}</div>}
+      {error && <div className="feedback error">{error}</div>}
+      {!canManageAgents && (
+        <div className="feedback warning">
+          当前 License 不支持 Agent 管理，相关操作已禁用。
+        </div>
+      )}
+      <section className="agent-create-section">
+        <h4>新增 Agent</h4>
+        <form className="agent-create-form" onSubmit={handleSubmit}>
+          <label>
+            Agent 名称
+            <input
+              type="text"
+              value={formName}
+              onChange={(event) => setFormName(event.target.value)}
+              disabled={submitting || !canManageAgents}
+              placeholder="例如：beijing-agent-01"
+            />
+          </label>
+          <label>
+            描述
+            <input
+              type="text"
+              value={formDescription}
+              onChange={(event) => setFormDescription(event.target.value)}
+              disabled={submitting || !canManageAgents}
+              placeholder="可选：用途或部署位置"
+            />
+          </label>
+          <label>
+            默认关联集群
+            <select
+              value={formClusterId}
+              onChange={(event) => setFormClusterId(event.target.value)}
+              disabled={submitting || !canManageAgents}
+            >
+              <option value="">不关联</option>
+              {clusters.map((cluster) => (
+                <option key={cluster.id} value={cluster.id}>
+                  {cluster.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Agent Prometheus 地址
+            <input
+              type="text"
+              value={formPrometheusUrl}
+              onChange={(event) => setFormPrometheusUrl(event.target.value)}
+              disabled={submitting || !canManageAgents}
+              placeholder="可选：覆盖集群 Prometheus 地址"
+            />
+          </label>
+          {formError && <div className="feedback error">{formError}</div>}
+          <div className="agent-create-actions">
+            <button
+              type="submit"
+              className="primary"
+              disabled={submitting || !canManageAgents}
+            >
+              {submitting ? "创建中..." : "创建 Agent"}
+            </button>
+          </div>
+        </form>
+        {generatedToken && (
+          <div className="agent-token-box">
+            <p>创建成功！请立即保存以下 Token，该页面关闭后将无法再次查看。</p>
+            <code>{generatedToken}</code>
+            <button
+              type="button"
+              className="secondary"
+              onClick={onClearToken}
+            >
+              我已保存 Token
+            </button>
+          </div>
+        )}
+      </section>
+      <section className="agent-list-section">
+        <h4>已注册 Agent</h4>
+        <div className="table-wrapper">
+          {agents.length === 0 ? (
+            <div className="placeholder">
+              {loading ? "Agent 列表加载中..." : "暂无 Agent，请先创建。"}
+            </div>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>状态</th>
+                  <th>绑定集群</th>
+                  <th>最后心跳</th>
+                  <th>Prometheus</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {agents.map((agent) => (
+                  <tr key={agent.id}>
+                    <td>
+                      <div className="agent-name">{agent.name}</div>
+                      {agent.description && (
+                        <div className="agent-desc">{agent.description}</div>
+                      )}
+                    </td>
+                    <td>
+                      <span
+                        className={`status-pill ${
+                          agent.is_enabled ? "success" : "cancelled"
+                        }`}
+                      >
+                        {agent.is_enabled ? "启用" : "已禁用"}
+                      </span>
+                    </td>
+                    <td>{resolveClusterLabel(agent)}</td>
+                    <td>{formatDate(agent.last_seen_at)}</td>
+                    <td>{agent.prometheus_url || "-"}</td>
+                    <td className="actions">
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={() => void handleToggleAgent(agent)}
+                        disabled={submitting || !canManageAgents}
+                      >
+                        {agent.is_enabled ? "禁用" : "启用"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+};
+
 interface ClusterEditModalProps {
   cluster: ClusterConfig;
   submitting: boolean;
@@ -4365,6 +5065,7 @@ const ClusterEditModal = ({
 
 const App = () => {
   const [clusters, setClusters] = useState<ClusterConfig[]>([]);
+  const [agents, setAgents] = useState<InspectionAgent[]>([]);
   const [runs, setRuns] = useState<InspectionRunListItem[]>([]);
   const [items, setItems] = useState<InspectionItem[]>([]);
 
@@ -4390,6 +5091,10 @@ const showClusterNotice = useCallback(
 const [clusterUploading, setClusterUploading] = useState(false);
   const [clusterNameInput, setClusterNameInput] = useState("");
   const [clusterPromInput, setClusterPromInput] = useState("");
+  const [clusterExecutionModeInput, setClusterExecutionModeInput] =
+    useState<ExecutionMode>("server");
+  const [clusterDefaultAgentIdInput, setClusterDefaultAgentIdInput] =
+    useState<number | null>(null);
   const [kubeconfigModalOpen, setKubeconfigModalOpen] = useState(false);
   const [kubeconfigText, setKubeconfigText] = useState("");
   const [kubeconfigFile, setKubeconfigFile] = useState<File | null>(null);
@@ -4420,6 +5125,13 @@ const [clusterUploading, setClusterUploading] = useState(false);
     useState<ClusterConfig | null>(null);
   const [clusterEditSubmitting, setClusterEditSubmitting] = useState(false);
   const [clusterEditError, setClusterEditError] = useState<string | null>(null);
+  const [agentLoading, setAgentLoading] = useState(false);
+  const [agentNotice, setAgentNotice] = useState<string | null>(null);
+  const [agentError, setAgentError] = useState<string | null>(null);
+  const [agentSubmitting, setAgentSubmitting] = useState(false);
+  const [generatedAgentToken, setGeneratedAgentToken] = useState<string | null>(
+    null
+  );
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSubmitting, setSettingsSubmitting] = useState(false);
@@ -4447,6 +5159,9 @@ const [clusterUploading, setClusterUploading] = useState(false);
   const canManageClusters = licenseValid && licenseFeatureSet.has("clusters");
   const canRunInspections =
     licenseValid && licenseFeatureSet.has("inspections");
+  const canManageAgents =
+    licenseValid &&
+    (licenseFeatureSet.has("agents") || licenseFeatureSet.has("inspections"));
   const canDownloadReports =
     licenseValid && licenseFeatureSet.has("reports");
   const licenseReason = licenseValid
@@ -4460,6 +5175,7 @@ const [clusterUploading, setClusterUploading] = useState(false);
       reason: licenseReason,
       features: licenseStatus?.features ?? [],
       canManageClusters,
+      canManageAgents,
       canRunInspections,
       canDownloadReports,
       status: licenseStatus,
@@ -4470,10 +5186,26 @@ const [clusterUploading, setClusterUploading] = useState(false);
       licenseReason,
       licenseStatus,
       canManageClusters,
+      canManageAgents,
       canRunInspections,
       canDownloadReports,
     ]
   );
+
+  useEffect(() => {
+    if (
+      !licenseCapabilities.canManageAgents &&
+      clusterExecutionModeInput === "agent"
+    ) {
+      setClusterExecutionModeInput("server");
+      setClusterDefaultAgentIdInput(null);
+    }
+  }, [
+    licenseCapabilities.canManageAgents,
+    clusterExecutionModeInput,
+    setClusterExecutionModeInput,
+    setClusterDefaultAgentIdInput,
+  ]);
 
   const refreshLicenseStatus = useCallback(async (): Promise<LicenseStatus | null> => {
     setLicenseLoading(true);
@@ -4496,6 +5228,29 @@ const [clusterUploading, setClusterUploading] = useState(false);
   useEffect(() => {
     void refreshLicenseStatus();
   }, [refreshLicenseStatus]);
+
+  const refreshAgents = useCallback(async () => {
+    setAgentLoading(true);
+    try {
+      logWithTimestamp("info", "开始获取 Agent 列表");
+      const data = await getAgents();
+      setAgents(data);
+      setAgentError(null);
+      return data;
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "获取 Agent 列表失败";
+      logWithTimestamp("error", "获取 Agent 列表失败: %s", message);
+      setAgentError(message);
+      return null;
+    } finally {
+      setAgentLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshAgents();
+  }, [refreshAgents]);
 
   const handleUploadLicenseFile = useCallback(
     async (file: File) => {
@@ -4656,6 +5411,18 @@ const backgroundLocation =
     };
   }, [settingsNotice]);
 
+  useEffect(() => {
+    if (!agentNotice || typeof window === "undefined") {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setAgentNotice(null);
+    }, 5000);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [agentNotice]);
+
   const handleTestClusterConnection = useCallback(
     async (clusterId: number) => {
       clearClusterNotice();
@@ -4747,12 +5514,98 @@ const backgroundLocation =
     }
   }, [currentNoticeScope, showClusterNotice]);
 
+  const handleCreateAgent = useCallback(
+    async (payload: {
+      name: string;
+      description?: string;
+      cluster_id?: number | null;
+      prometheus_url?: string | null;
+    }) => {
+      if (!licenseCapabilities.canManageAgents) {
+        setAgentError(
+          licenseCapabilities.reason ?? "当前 License 不支持 Agent 管理。"
+        );
+        return;
+      }
+      setAgentSubmitting(true);
+      setAgentNotice(null);
+      setAgentError(null);
+      try {
+        const response = await apiCreateAgent(payload);
+        setGeneratedAgentToken(response.token);
+        setAgentNotice(
+          `Agent ${response.name} 创建成功，请妥善保存 Token。`
+        );
+        await refreshAgents();
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "创建 Agent 失败";
+        setAgentError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setAgentSubmitting(false);
+      }
+    },
+    [licenseCapabilities, refreshAgents]
+  );
+
+  const handleUpdateAgent = useCallback(
+    async (
+      agentId: number,
+      payload: {
+        name?: string;
+        description?: string;
+        is_enabled?: boolean;
+        cluster_id?: number | null;
+        prometheus_url?: string | null;
+      }
+    ) => {
+      if (!licenseCapabilities.canManageAgents) {
+        setAgentError(
+          licenseCapabilities.reason ?? "当前 License 不支持 Agent 管理。"
+        );
+        return null;
+      }
+      setAgentSubmitting(true);
+      setAgentNotice(null);
+      setAgentError(null);
+      try {
+        const updated = await apiUpdateAgent(agentId, payload);
+        setAgents((prev) =>
+          prev.map((agent) => (agent.id === updated.id ? updated : agent))
+        );
+        if (payload.is_enabled !== undefined) {
+          setAgentNotice(
+            payload.is_enabled
+              ? `Agent ${updated.name} 已启用`
+              : `Agent ${updated.name} 已禁用`
+          );
+        } else {
+          setAgentNotice(`Agent ${updated.name} 信息已更新`);
+        }
+        return updated;
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "更新 Agent 失败";
+        setAgentError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setAgentSubmitting(false);
+      }
+    },
+    [licenseCapabilities]
+  );
+
+  const handleClearAgentToken = useCallback(() => {
+    setGeneratedAgentToken(null);
+  }, []);
+
   const hasRunningRuns = useMemo(
     () =>
       runs.some(
         (run) =>
           run.status === "running" ||
-          run.status === "paused" ||
+            run.status === "queued" ||
           (!run.report_path && run.progress >= 100)
       ),
     [runs]
@@ -4773,7 +5626,7 @@ const backgroundLocation =
         data?.some(
           (run) =>
             run.status === "running" ||
-            run.status === "paused" ||
+            run.status === "queued" ||
             (!run.report_path && run.progress >= 100)
         ) ?? false;
       if (shouldContinue && !cancelled) {
@@ -4849,6 +5702,8 @@ const backgroundLocation =
   const resetClusterUploadForm = () => {
     setClusterNameInput("");
     setClusterPromInput("");
+    setClusterExecutionModeInput("server");
+    setClusterDefaultAgentIdInput(null);
     setKubeconfigText("");
     setKubeconfigFile(null);
     setKubeconfigFileName(null);
@@ -4916,10 +5771,25 @@ const backgroundLocation =
   const handleUploadCluster = useCallback(async () => {
     if (!licenseCapabilities.canManageClusters) {
       setClusterError(
-        licenseCapabilities.reason ?? "当前 License 不支持集群管理。"
+        licenseCapabilities.reason ?? \"当前 License 不支持集群管理。\"
       );
       return;
     }
+    if (clusterExecutionModeInput === \"agent\" && !licenseCapabilities.canManageAgents) {
+      setClusterError(
+        licenseCapabilities.reason ?? \"当前 License 不支持 Agent 管理。\"
+      );
+      return;
+    }
+
+    if (
+      clusterExecutionModeInput === \"agent\" &&
+      (clusterDefaultAgentIdInput === null || Number.isNaN(clusterDefaultAgentIdInput))
+    ) {
+      setClusterError(\"请选择默认 Agent。\");
+      return;
+    }
+
     const hasText = kubeconfigText.trim().length > 0;
     let fileToUpload: File | null = null;
 
@@ -4928,25 +5798,29 @@ const backgroundLocation =
     } else if (hasText) {
       const filename =
         (kubeconfigFileName && kubeconfigFileName.trim()) ||
-        "kubeconfig.yaml";
+        \"kubeconfig.yaml\";
       fileToUpload = new File([kubeconfigText], filename, {
-        type: "application/x-yaml",
+        type: \"application/x-yaml\",
       });
     }
 
     if (!fileToUpload) {
-      setClusterError("请先导入或粘贴 kubeconfig 内容");
+      setClusterError(\"请先导入或粘贴 kubeconfig 内容\");
       setKubeconfigModalOpen(true);
       return;
     }
 
     const formData = new FormData();
-    formData.append("file", fileToUpload);
+    formData.append(\"file\", fileToUpload);
     if (clusterNameInput.trim()) {
-      formData.append("name", clusterNameInput.trim());
+      formData.append(\"name\", clusterNameInput.trim());
     }
     if (clusterPromInput.trim()) {
-      formData.append("prometheus_url", clusterPromInput.trim());
+      formData.append(\"prometheus_url\", clusterPromInput.trim());
+    }
+    formData.append(\"execution_mode\", clusterExecutionModeInput);
+    if (clusterExecutionModeInput === \"agent\" && clusterDefaultAgentIdInput !== null) {
+      formData.append(\"default_agent_id\", String(clusterDefaultAgentIdInput));
     }
 
     setClusterUploading(true);
@@ -4955,20 +5829,21 @@ const backgroundLocation =
 
     try {
       logWithTimestamp(
-        "info",
-        "上传集群: %s",
+        \"info\",
+        \"上传集群: %s\",
         clusterNameInput || fileToUpload.name
       );
       await registerCluster(formData);
       resetClusterUploadForm();
       await refreshClusters();
       await refreshRuns();
-      showClusterNotice(currentNoticeScope, "集群注册成功", "success");
-      logWithTimestamp("info", "集群注册成功");
+      await refreshAgents();
+      showClusterNotice(currentNoticeScope, \"集群注册成功\", \"success\");
+      logWithTimestamp(\"info\", \"集群注册成功\");
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "上传集群失败";
-      logWithTimestamp("error", "上传集群失败: %s", message);
+        err instanceof Error ? err.message : \"上传集群失败\";
+      logWithTimestamp(\"error\", \"上传集群失败: %s\", message);
       setClusterError(message);
     } finally {
       setClusterUploading(false);
@@ -4976,19 +5851,74 @@ const backgroundLocation =
   }, [
     clusterNameInput,
     clusterPromInput,
+    clusterExecutionModeInput,
+    clusterDefaultAgentIdInput,
     kubeconfigEdited,
     kubeconfigFile,
     kubeconfigFileName,
     kubeconfigText,
     refreshClusters,
     refreshRuns,
+    refreshAgents,
     clearClusterNotice,
     currentNoticeScope,
     showClusterNotice,
     licenseCapabilities,
   ]);
 
-  const hasManualKubeconfig = useMemo(
+  const handleUpdateClusterExecution = useCallback(
+    async (
+      clusterId: number,
+      payload: { executionMode: ExecutionMode; defaultAgentId: number | null }
+    ) => {
+      if (!licenseCapabilities.canManageClusters) {
+        const reason =
+          licenseCapabilities.reason ?? "当前 License 不支持集群管理。";
+        setClusterError(reason);
+        throw new Error(reason);
+      }
+      if (
+        payload.executionMode === "agent" &&
+        !licenseCapabilities.canManageAgents
+      ) {
+        const reason =
+          licenseCapabilities.reason ?? "当前 License 不支持 Agent 管理。";
+        setClusterError(reason);
+        throw new Error(reason);
+      }
+      const formData = new FormData();
+      formData.append("execution_mode", payload.executionMode);
+      if (
+        payload.executionMode === "agent" &&
+        payload.defaultAgentId !== null
+      ) {
+        formData.append("default_agent_id", String(payload.defaultAgentId));
+      }
+
+      try {
+        logWithTimestamp("info", "更新集群执行配置: %s", clusterId);
+        await updateCluster(clusterId, formData);
+        await refreshClusters();
+        await refreshRuns();
+        await refreshAgents();
+        showClusterNotice("clusterDetail", "执行配置已更新", "success");
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "更新执行配置失败";
+        logWithTimestamp("error", "更新执行配置失败: %s", message);
+        setClusterError(message);
+        throw err instanceof Error ? err : new Error(message);
+      }
+    },
+    [
+      licenseCapabilities,
+      refreshClusters,
+      refreshRuns,
+      refreshAgents,
+      showClusterNotice,
+    ]
+  );
+const hasManualKubeconfig = useMemo(
     () => kubeconfigEdited && kubeconfigText.trim().length > 0,
     [kubeconfigEdited, kubeconfigText]
   );
@@ -5601,6 +6531,26 @@ const backgroundLocation =
         ),
       },
       {
+        id: "agents",
+        label: "Agent 管理",
+        render: () => (
+          <AgentSettingsPanel
+            agents={agents}
+            clusters={clusters}
+            loading={agentLoading}
+            submitting={agentSubmitting}
+            notice={agentNotice}
+            error={agentError}
+            generatedToken={generatedAgentToken}
+            onRefresh={refreshAgents}
+            onCreate={handleCreateAgent}
+            onUpdate={handleUpdateAgent}
+            onClearToken={handleClearAgentToken}
+            canManageAgents={licenseCapabilities.canManageAgents}
+          />
+        ),
+      },
+      {
         id: "license",
         label: "License 管理",
         render: () => (
@@ -5625,6 +6575,17 @@ const backgroundLocation =
       handleDeleteInspectionItemsBulk,
       handleExportInspectionItems,
       handleImportInspectionItems,
+      agents,
+      clusters,
+      agentLoading,
+      agentSubmitting,
+      agentNotice,
+      agentError,
+      generatedAgentToken,
+      refreshAgents,
+      handleCreateAgent,
+      handleUpdateAgent,
+      handleClearAgentToken,
       licenseCapabilities,
       licenseUploading,
       licenseTextUploading,
@@ -5779,6 +6740,14 @@ const backgroundLocation =
       openKubeconfigModal={handleOpenKubeconfigModal}
       kubeconfigSummary={kubeconfigSummary}
       kubeconfigReady={kubeconfigReady}
+      clusterExecutionModeInput={clusterExecutionModeInput}
+      setClusterExecutionModeInput={setClusterExecutionModeInput}
+      clusterDefaultAgentIdInput={clusterDefaultAgentIdInput}
+      setClusterDefaultAgentIdInput={setClusterDefaultAgentIdInput}
+      agents={agents}
+      agentLoading={agentLoading}
+      agentError={agentError}
+      onRefreshAgents={refreshAgents}
       onUpload={handleUploadCluster}
       onEditCluster={handleEditCluster}
       onDeleteCluster={handleDeleteCluster}
@@ -5852,6 +6821,11 @@ const backgroundLocation =
                 onTestClusterConnection={handleTestClusterConnection}
                 testingClusterIds={testingClusterIds}
                 license={licenseCapabilities}
+                agents={agents}
+                agentLoading={agentLoading}
+                agentError={agentError}
+                onRefreshAgents={refreshAgents}
+                onUpdateClusterExecution={handleUpdateClusterExecution}
               />
             }
           />
@@ -5922,3 +6896,9 @@ const backgroundLocation =
 };
 
 export default App;
+
+
+
+
+
+
