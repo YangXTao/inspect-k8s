@@ -5771,22 +5771,22 @@ const backgroundLocation =
   const handleUploadCluster = useCallback(async () => {
     if (!licenseCapabilities.canManageClusters) {
       setClusterError(
-        licenseCapabilities.reason ?? \"当前 License 不支持集群管理。\"
+        licenseCapabilities.reason ?? "当前 License 不支持集群管理。"
       );
       return;
     }
-    if (clusterExecutionModeInput === \"agent\" && !licenseCapabilities.canManageAgents) {
+    if (clusterExecutionModeInput === "agent" && !licenseCapabilities.canManageAgents) {
       setClusterError(
-        licenseCapabilities.reason ?? \"当前 License 不支持 Agent 管理。\"
+        licenseCapabilities.reason ?? "当前 License 不支持 Agent 管理。"
       );
       return;
     }
 
     if (
-      clusterExecutionModeInput === \"agent\" &&
+      clusterExecutionModeInput === "agent" &&
       (clusterDefaultAgentIdInput === null || Number.isNaN(clusterDefaultAgentIdInput))
     ) {
-      setClusterError(\"请选择默认 Agent。\");
+      setClusterError("请选择默认 Agent。");
       return;
     }
 
@@ -5798,29 +5798,29 @@ const backgroundLocation =
     } else if (hasText) {
       const filename =
         (kubeconfigFileName && kubeconfigFileName.trim()) ||
-        \"kubeconfig.yaml\";
+        "kubeconfig.yaml";
       fileToUpload = new File([kubeconfigText], filename, {
-        type: \"application/x-yaml\",
+        type: "application/x-yaml",
       });
     }
 
     if (!fileToUpload) {
-      setClusterError(\"请先导入或粘贴 kubeconfig 内容\");
+      setClusterError("请先导入或粘贴 kubeconfig 内容");
       setKubeconfigModalOpen(true);
       return;
     }
 
     const formData = new FormData();
-    formData.append(\"file\", fileToUpload);
+    formData.append("file", fileToUpload);
     if (clusterNameInput.trim()) {
-      formData.append(\"name\", clusterNameInput.trim());
+      formData.append("name", clusterNameInput.trim());
     }
     if (clusterPromInput.trim()) {
-      formData.append(\"prometheus_url\", clusterPromInput.trim());
+      formData.append("prometheus_url", clusterPromInput.trim());
     }
-    formData.append(\"execution_mode\", clusterExecutionModeInput);
-    if (clusterExecutionModeInput === \"agent\" && clusterDefaultAgentIdInput !== null) {
-      formData.append(\"default_agent_id\", String(clusterDefaultAgentIdInput));
+    formData.append("execution_mode", clusterExecutionModeInput);
+    if (clusterExecutionModeInput === "agent" && clusterDefaultAgentIdInput !== null) {
+      formData.append("default_agent_id", String(clusterDefaultAgentIdInput));
     }
 
     setClusterUploading(true);
@@ -5829,8 +5829,8 @@ const backgroundLocation =
 
     try {
       logWithTimestamp(
-        \"info\",
-        \"上传集群: %s\",
+        "info",
+        "上传集群: %s",
         clusterNameInput || fileToUpload.name
       );
       await registerCluster(formData);
@@ -5838,12 +5838,12 @@ const backgroundLocation =
       await refreshClusters();
       await refreshRuns();
       await refreshAgents();
-      showClusterNotice(currentNoticeScope, \"集群注册成功\", \"success\");
-      logWithTimestamp(\"info\", \"集群注册成功\");
+      showClusterNotice(currentNoticeScope, "集群注册成功", "success");
+      logWithTimestamp("info", "集群注册成功");
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : \"上传集群失败\";
-      logWithTimestamp(\"error\", \"上传集群失败: %s\", message);
+        err instanceof Error ? err.message : "上传集群失败";
+      logWithTimestamp("error", "上传集群失败: %s", message);
       setClusterError(message);
     } finally {
       setClusterUploading(false);
@@ -6896,6 +6896,10 @@ const hasManualKubeconfig = useMemo(
 };
 
 export default App;
+
+
+
+
 
 
 
