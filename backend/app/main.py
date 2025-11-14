@@ -6,6 +6,8 @@ import re
 import secrets
 import threading
 from dataclasses import dataclass, field
+import base64
+import binascii
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Any, Generator
@@ -1169,6 +1171,7 @@ def register_agent(
         cluster=cluster,
         description=payload.description,
         is_enabled=True,
+        prometheus_url=payload.prometheus_url,
     )
     return schemas.AgentRegisterOut(
         id=agent.id,
@@ -1176,6 +1179,86 @@ def register_agent(
         token=token,
         cluster_id=agent.cluster_id,
     )
+
+
+@agent_router.post("/bootstrap", response_model=schemas.InspectionAgentOut)
+def agent_bootstrap(
+    payload: schemas.AgentBootstrapIn,
+):
+    token_value = (payload.registration_token or "").strip()
+    if not token_value:
+        raise HTTPException(status_code=400, detail="Agent token 缺失。")
+
+    db = SessionLocal()
+    try:
+        agent = crud.get_inspection_agent_by_token(db, token_value)
+        if not agent:
+            raise HTTPException(status_code=401, detail="Agent token 无效。")
+
+        cluster_payload = payload.cluster
+        cluster_name = (cluster_payload.name or "").strip()
+        if not cluster_name:
+            raise HTTPException(status_code=400, detail="集群名称不能为空。")
+
+        cluster = agent.cluster or crud.get_cluster_by_name(db, cluster_name)
+        kubeconfig_path: Optional[str] = None
+        contexts_json: Optional[str] = None
+        kubeconfig_bytes: Optional[bytes] = None
+        if cluster_payload.kubeconfig_b64:
+            try:
+                kubeconfig_bytes = base64.b64decode(cluster_payload.kubeconfig_b64)
+            except (binascii.Error, ValueError):
+                raise HTTPException(status_code=400, detail="kubeconfig 编码无效。")
+            filename = cluster_payload.kubeconfig_name or f"{cluster_name}.yaml"
+            kubeconfig_path = _store_kubeconfig(kubeconfig_bytes, filename)
+            try:
+                kubeconfig_text = kubeconfig_bytes.decode("utf-8")
+                contexts = _extract_contexts(kubeconfig_text)
+            except UnicodeDecodeError:
+                contexts = []
+            if contexts:
+                contexts_json = json.dumps(contexts, ensure_ascii=False)
+
+        if cluster is None:
+            if not kubeconfig_path:
+                raise HTTPException(
+                    status_code=400, detail="首次注册必须提供 kubeconfig。"
+                )
+            cluster = crud.create_cluster(
+                db,
+                name=cluster_name,
+                kubeconfig_path=kubeconfig_path,
+                contexts_json=contexts_json,
+                prometheus_url=None,
+                connection_status="unknown",
+                execution_mode="agent",
+                default_agent_id=agent.id,
+            )
+        else:
+            update_kwargs: dict[str, Any] = {
+                "execution_mode": "agent",
+                "default_agent_id": agent.id,
+            }
+            if kubeconfig_path:
+                _remove_file_safely(cluster.kubeconfig_path)
+                update_kwargs["kubeconfig_path"] = kubeconfig_path
+                update_kwargs["contexts_json"] = contexts_json
+            cluster = crud.update_cluster(db, cluster, **update_kwargs)
+
+        agent = crud.update_inspection_agent(
+            db,
+            agent,
+            cluster=cluster,
+            is_enabled=True,
+            prometheus_url=_normalize_prometheus_url(payload.prometheus_url),
+        )
+        crud.record_agent_heartbeat(db, agent, seen_at=datetime.utcnow())
+        refreshed = crud.get_inspection_agent(db, agent.id)
+        if not refreshed:
+            raise HTTPException(status_code=500, detail="Agent 注册失败。")
+        return _serialize_agent(refreshed)
+    finally:
+        db.close()
 
 
 @agent_router.post("/heartbeat", response_model=schemas.InspectionAgentOut)

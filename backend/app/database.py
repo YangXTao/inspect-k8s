@@ -69,6 +69,7 @@ def init_db() -> None:
     _ensure_inspection_runs_schema()
     _ensure_inspection_results_schema()
     _ensure_audit_log_schema()
+    _ensure_inspection_agents_schema()
 
 
 @contextmanager
@@ -441,3 +442,19 @@ def _ensure_audit_log_schema() -> None:
     with engine.begin() as connection:
         for statement in statements:
             connection.execute(text(statement))
+
+
+def _ensure_inspection_agents_schema() -> None:
+    inspector = inspect(engine)
+    if "inspection_agents" not in inspector.get_table_names():
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("inspection_agents")}
+    if "prometheus_url" in columns:
+        return
+
+    dialect = engine.dialect.name
+    column_type = "TEXT" if dialect == "sqlite" else "VARCHAR(255)"
+    statement = f"ALTER TABLE inspection_agents ADD COLUMN prometheus_url {column_type} NULL"
+    with engine.begin() as connection:
+        connection.execute(text(statement))

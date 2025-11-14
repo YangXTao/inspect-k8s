@@ -41,24 +41,26 @@
 ```yaml
 server:
   base_url: http://backend:8000     # Server API 地址
-  register:
-    name: demo-agent                # 首次注册使用的 Agent 名称
-    cluster_id: 1                   # 绑定的集群 ID（可选）
-  token_file: ./state/agent.token   # 缓存 Token 的路径，可选
+  registration_token: REPLACE_WITH_TOKEN  # Server 端生成的 Agent Token
+  token_file: ./state/agent.token   # Token 缓存路径，可选
 agent:
   poll_interval: 10                 # 无任务时的轮询间隔（秒）
   batch_size: 1                     # 每次拉取的任务数
   verify_ssl: true                  # 是否校验 Server 证书
   request_timeout: 15               # HTTP 请求超时（秒）
+cluster:
+  name: demo-cluster               # Agent 所覆盖的集群名称
+  kubeconfig_path: ./config/kubeconfig.yaml  # 首次注册时上传的 kubeconfig
 prometheus:
-  base_url: http://prometheus:9090  # Prometheus 查询入口
+  base_url: http://prometheus:9090  # Prometheus 查询入口（可选）
 ```
 
-- 若已手动在 Server 侧创建 Agent 并获取 Token，可直接通过环境变量或 `server.token` 字段传入；
-- 若未提供 Token，Agent 会使用 `register` 块中的信息尝试注册，并将新 Token 写入 `token_file`；
+- 在 Server 端生成注册 Token 后，将其填入 `server.registration_token`，或通过环境变量 `INSPECT_AGENT_REGISTRATION_TOKEN` 提供。
+- `token_file` 会缓存服务器分配的 Token，Agent 重启时会优先从文件加载。
 - 支持以下环境变量覆盖配置：
   - `INSPECT_AGENT_SERVER`、`INSPECT_AGENT_TOKEN`、`INSPECT_AGENT_TOKEN_FILE`
-  - `INSPECT_AGENT_NAME`、`INSPECT_AGENT_CLUSTER_ID`
+  - `INSPECT_AGENT_REGISTRATION_TOKEN`
+  - `INSPECT_AGENT_CLUSTER_NAME`、`INSPECT_AGENT_KUBECONFIG`
   - `INSPECT_AGENT_PROM_URL`
   - `INSPECT_AGENT_POLL_INTERVAL`、`INSPECT_AGENT_BATCH_SIZE`
   - `INSPECT_AGENT_INSECURE`（为 `true` 时跳过 SSL 校验）
