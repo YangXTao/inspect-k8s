@@ -176,6 +176,13 @@ class AgentClient:
                 category=requests.packages.urllib3.exceptions.InsecureRequestWarning  # type: ignore[attr-defined]
             )
 
+    def load_token_from_disk(self) -> None:
+        cached = self.config.load_token()
+        if cached:
+            self.token = cached
+            self.config.token = cached
+            LOG.info("已从本地缓存加载 Agent Token。")
+
     def _headers(self) -> Dict[str, str]:
         if not self.token:
             raise RuntimeError("缺少 Agent Token。")
