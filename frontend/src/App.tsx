@@ -185,8 +185,8 @@ const formatDate = (value?: string | null) => {
 };
 
 const EXECUTION_MODE_LABELS: Record<ExecutionMode, string> = {
-  server: "服务端",
-  agent: "Agent",
+  server: "Agent 执行",
+  agent: "Agent 执行",
 };
 
 const describeExecutor = (
@@ -195,7 +195,7 @@ const describeExecutor = (
   agentId?: number | null
 ) => {
   if (executor === "server") {
-    return "服务端 (Server)";
+    return "Agent 执行";
   }
   const trimmedName = agentName?.trim();
   if (trimmedName) {
@@ -617,7 +617,6 @@ interface OverviewProps {
   kubeconfigSummary: string | null;
   kubeconfigReady: boolean;
   clusterExecutionModeInput: ExecutionMode;
-  setClusterExecutionModeInput: (value: ExecutionMode) => void;
   clusterDefaultAgentIdInput: number | null;
   setClusterDefaultAgentIdInput: (value: number | null) => void;
   agents: InspectionAgent[];
@@ -649,7 +648,6 @@ const OverviewView = ({
   kubeconfigSummary,
   kubeconfigReady,
   clusterExecutionModeInput,
-  setClusterExecutionModeInput,
   clusterDefaultAgentIdInput,
   setClusterDefaultAgentIdInput,
   agents,
@@ -672,16 +670,6 @@ const OverviewView = ({
   );
   const agentModeDisabled =
     !license.canManageAgents || enabledAgents.length === 0;
-
-  const handleExecutionModeChange = useCallback(
-    (mode: ExecutionMode) => {
-      setClusterExecutionModeInput(mode);
-      if (mode !== "agent") {
-        setClusterDefaultAgentIdInput(null);
-      }
-    },
-    [setClusterExecutionModeInput, setClusterDefaultAgentIdInput]
-  );
 
   const handleDefaultAgentSelect = useCallback(
     (event: ChangeEvent<HTMLSelectElement>) => {
@@ -890,21 +878,10 @@ const OverviewView = ({
               disabled={!license.canManageClusters}
               onChange={(event) => setClusterPromInput(event.target.value)}
             />
-            <label className="cluster-upload-label">
-              执行模式
-              <select
-                value={clusterExecutionModeInput}
-                onChange={(event) =>
-                  handleExecutionModeChange(event.target.value as ExecutionMode)
-                }
-                disabled={!license.canManageClusters}
-              >
-                <option value="server">服务端执行</option>
-                <option value="agent" disabled={agentModeDisabled}>
-                  Agent 执行
-                </option>
-              </select>
-            </label>
+            <div className="cluster-upload-label">
+              <span>执行模式</span>
+              <strong>Agent 执行</strong>
+            </div>
             {clusterExecutionModeInput === "agent" && (
               <label className="cluster-upload-label">
                 默认 Agent
@@ -1505,7 +1482,6 @@ const HistoryView = ({
                 onChange={handleExecutorFilterChange}
               >
                 <option value="all">全部</option>
-                <option value="server">服务端</option>
                 <option value="agent">Agent</option>
               </select>
             </label>
@@ -1874,9 +1850,6 @@ const ClusterDetailContent = ({
   const shouldShowNotice =
     notice && noticeType && clusterNoticeScope === "clusterDetail";
 
-  const [executionModeInput, setExecutionModeInput] = useState<ExecutionMode>(
-    cluster.execution_mode
-  );
   const [defaultAgentIdInput, setDefaultAgentIdInput] = useState<number | null>(
     cluster.default_agent_id ?? null
   );
@@ -1906,11 +1879,7 @@ const ClusterDetailContent = ({
   const agentOptions = useMemo(() => {
     const map = new Map<number, InspectionAgent>();
     availableAgents.forEach((agent) => map.set(agent.id, agent));
-    if (
-      executionModeInput === "agent" &&
-      defaultAgentIdInput !== null &&
-      !map.has(defaultAgentIdInput)
-    ) {
+    if (defaultAgentIdInput !== null && !map.has(defaultAgentIdInput)) {
       const fallback = agents.find(
         (agent) => agent.id === defaultAgentIdInput
       );
@@ -1921,24 +1890,13 @@ const ClusterDetailContent = ({
     return Array.from(map.values()).sort((a, b) =>
       a.name.localeCompare(b.name, "zh-Hans-CN", { sensitivity: "base" })
     );
-  }, [availableAgents, agents, executionModeInput, defaultAgentIdInput]);
+  }, [availableAgents, agents, defaultAgentIdInput]);
 
   useEffect(() => {
-    setExecutionModeInput(cluster.execution_mode);
     setDefaultAgentIdInput(cluster.default_agent_id ?? null);
     setExecutionError(null);
-  }, [cluster.execution_mode, cluster.default_agent_id, cluster.id]);
+  }, [cluster.default_agent_id, cluster.id]);
 
-  const agentModeDisabled =
-    !license.canManageAgents || availableAgents.length === 0;
-
-  const handleExecutionModeSelect = (event: ChangeEvent<HTMLSelectElement>) => {
-    const nextMode = event.target.value as ExecutionMode;
-    setExecutionModeInput(nextMode);
-    if (nextMode !== "agent") {
-      setDefaultAgentIdInput(null);
-    }
-  };
 
   const handleDefaultAgentSelect = (event: ChangeEvent<HTMLSelectElement>) => {
     const raw = event.target.value;
@@ -1956,25 +1914,22 @@ const ClusterDetailContent = ({
       setExecutionError("当前 License 不支持修改集群配置。");
       return;
     }
-    if (executionModeInput === "agent") {
-      if (!license.canManageAgents) {
-        setExecutionError("当前 License 不支持 Agent 管理。");
-        return;
-      }
-      if (
-        defaultAgentIdInput === null ||
-        !availableAgents.some((agent) => agent.id === defaultAgentIdInput)
-      ) {
-        setExecutionError("请选择可用的默认 Agent。");
-        return;
-      }
+    if (!license.canManageAgents) {
+      setExecutionError("当前 License 不支持 Agent 管理。");
+      return;
+    }
+    if (
+      defaultAgentIdInput === null ||
+      !availableAgents.some((agent) => agent.id === defaultAgentIdInput)
+    ) {
+      setExecutionError("请选择可用的默认 Agent。");
+      return;
     }
     setSavingExecution(true);
     try {
       await onUpdateClusterExecution(cluster.id, {
-        executionMode: executionModeInput,
-        defaultAgentId:
-          executionModeInput === "agent" ? defaultAgentIdInput : null,
+        executionMode: "agent",
+        defaultAgentId: defaultAgentIdInput,
       });
     } catch (err) {
       const message =
@@ -2255,12 +2210,10 @@ const ClusterDetailContent = ({
             </div>
             <div>
               <strong>默认 Agent: </strong>
-              {cluster.execution_mode === "agent"
-                ? cluster.default_agent_name ??
-                  (cluster.default_agent_id != null
-                    ? `#${cluster.default_agent_id}`
-                    : "未配置")
-                : "-"}
+              {cluster.default_agent_name ??
+                (cluster.default_agent_id != null
+                  ? `#${cluster.default_agent_id}`
+                  : "未配置")}
             </div>
             <div>
               <strong>创建时间: </strong>
@@ -2287,55 +2240,40 @@ const ClusterDetailContent = ({
         <div className="detail-card">
           <h2>执行设置</h2>
           <div className="execution-settings">
+            <div className="execution-mode-static">
+              <span>执行模式</span>
+              <strong>Agent 执行</strong>
+            </div>
             <label>
-              执行模式
+              默认 Agent
               <select
-                value={executionModeInput}
-                onChange={handleExecutionModeSelect}
+                value={
+                  defaultAgentIdInput !== null
+                    ? String(defaultAgentIdInput)
+                    : ""
+                }
+                onChange={handleDefaultAgentSelect}
                 disabled={
-                  savingExecution || !license.canManageClusters
+                  savingExecution ||
+                  !license.canManageClusters ||
+                  !license.canManageAgents ||
+                  agentLoading
                 }
               >
-                <option value="server">服务端执行</option>
-                <option value="agent" disabled={agentModeDisabled}>
-                  Agent 执行
-                </option>
+                <option value="">请选择可用 Agent</option>
+                {agentOptions.map((agent) => (
+                  <option
+                    key={agent.id}
+                    value={agent.id}
+                    disabled={!agent.is_enabled}
+                  >
+                    {agent.name}
+                    {agent.cluster_name ? `（${agent.cluster_name}）` : ""}
+                    {!agent.is_enabled ? "（已禁用）" : ""}
+                  </option>
+                ))}
               </select>
             </label>
-            {executionModeInput === "agent" && (
-              <label>
-                默认 Agent
-                <select
-                  value={
-                    defaultAgentIdInput !== null
-                      ? String(defaultAgentIdInput)
-                      : ""
-                  }
-                  onChange={handleDefaultAgentSelect}
-                  disabled={
-                    savingExecution ||
-                    !license.canManageClusters ||
-                    !license.canManageAgents ||
-                    agentLoading
-                  }
-                >
-                  <option value="">请选择可用 Agent</option>
-                  {agentOptions.map((agent) => (
-                    <option
-                      key={agent.id}
-                      value={agent.id}
-                      disabled={!agent.is_enabled}
-                    >
-                      {agent.name}
-                      {agent.cluster_name
-                        ? `（${agent.cluster_name}）`
-                        : ""}
-                      {!agent.is_enabled ? "（已禁用）" : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
             <div className="execution-settings-actions">
               <button
                 type="button"
@@ -2352,8 +2290,7 @@ const ClusterDetailContent = ({
                 disabled={
                   savingExecution ||
                   !license.canManageClusters ||
-                  (executionModeInput === "agent" &&
-                    !license.canManageAgents)
+                  !license.canManageAgents
                 }
               >
                 {savingExecution ? "保存中..." : "保存设置"}
@@ -2364,8 +2301,7 @@ const ClusterDetailContent = ({
                 当前 License 不支持 Agent 管理。
               </div>
             )}
-            {executionModeInput === "agent" &&
-              license.canManageAgents &&
+            {license.canManageAgents &&
               !agentLoading &&
               availableAgents.length === 0 && (
                 <div className="feedback warning">
@@ -5092,7 +5028,7 @@ const [clusterUploading, setClusterUploading] = useState(false);
   const [clusterNameInput, setClusterNameInput] = useState("");
   const [clusterPromInput, setClusterPromInput] = useState("");
   const [clusterExecutionModeInput, setClusterExecutionModeInput] =
-    useState<ExecutionMode>("server");
+    useState<ExecutionMode>("agent");
   const [clusterDefaultAgentIdInput, setClusterDefaultAgentIdInput] =
     useState<number | null>(null);
   const [kubeconfigModalOpen, setKubeconfigModalOpen] = useState(false);
@@ -5191,21 +5127,6 @@ const [clusterUploading, setClusterUploading] = useState(false);
       canDownloadReports,
     ]
   );
-
-  useEffect(() => {
-    if (
-      !licenseCapabilities.canManageAgents &&
-      clusterExecutionModeInput === "agent"
-    ) {
-      setClusterExecutionModeInput("server");
-      setClusterDefaultAgentIdInput(null);
-    }
-  }, [
-    licenseCapabilities.canManageAgents,
-    clusterExecutionModeInput,
-    setClusterExecutionModeInput,
-    setClusterDefaultAgentIdInput,
-  ]);
 
   const refreshLicenseStatus = useCallback(async (): Promise<LicenseStatus | null> => {
     setLicenseLoading(true);
@@ -5702,7 +5623,7 @@ const backgroundLocation =
   const resetClusterUploadForm = () => {
     setClusterNameInput("");
     setClusterPromInput("");
-    setClusterExecutionModeInput("server");
+    setClusterExecutionModeInput("agent");
     setClusterDefaultAgentIdInput(null);
     setKubeconfigText("");
     setKubeconfigFile(null);
@@ -6741,7 +6662,6 @@ const hasManualKubeconfig = useMemo(
       kubeconfigSummary={kubeconfigSummary}
       kubeconfigReady={kubeconfigReady}
       clusterExecutionModeInput={clusterExecutionModeInput}
-      setClusterExecutionModeInput={setClusterExecutionModeInput}
       clusterDefaultAgentIdInput={clusterDefaultAgentIdInput}
       setClusterDefaultAgentIdInput={setClusterDefaultAgentIdInput}
       agents={agents}
