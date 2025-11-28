@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import requests
 import yaml
@@ -35,6 +35,136 @@ def _as_int(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _read_kubeconfig_bytes(path: Path, *, strict: bool) -> Optional[bytes]:
+    try:
+        return path.read_bytes()
+    except FileNotFoundError as exc:
+        if strict:
+            raise RuntimeError(f"无法读取 kubeconfig 文件：{path}") from exc
+        LOG.debug("未找到 kubeconfig 文件 %s", path)
+    except OSError as exc:
+        if strict:
+            raise RuntimeError(f"读取 kubeconfig 文件失败：{path}: {exc}") from exc
+        LOG.warning("读取 kubeconfig 文件失败 %s: %s", path, exc)
+    return None
+
+
+def _build_incluster_kubeconfig() -> Optional[Tuple[bytes, str]]:
+    host = os.getenv("KUBERNETES_SERVICE_HOST")
+    if not host:
+        return None
+    port = os.getenv("KUBERNETES_SERVICE_PORT_HTTPS") or os.getenv(
+        "KUBERNETES_SERVICE_PORT", "443"
+    )
+    token_path = Path(
+        os.getenv(
+            "KUBERNETES_TOKEN_FILE",
+            "/var/run/secrets/kubernetes.io/serviceaccount/token",
+        )
+    )
+    ca_path = Path(
+        os.getenv(
+            "KUBERNETES_CA_FILE",
+            "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
+        )
+    )
+    namespace_path = Path(
+        os.getenv(
+            "KUBERNETES_NAMESPACE_FILE",
+            "/var/run/secrets/kubernetes.io/serviceaccount/namespace",
+        )
+    )
+    if not token_path.exists() or not ca_path.exists():
+        return None
+    try:
+        token = token_path.read_text(encoding="utf-8").strip()
+        if not token:
+            return None
+        ca_data = base64.b64encode(ca_path.read_bytes()).decode("utf-8")
+        namespace = "default"
+        if namespace_path.exists():
+            ns_value = namespace_path.read_text(encoding="utf-8").strip()
+            if ns_value:
+                namespace = ns_value
+    except OSError as exc:
+        LOG.warning("无法读取集群 ServiceAccount 认证文件: %s", exc)
+        return None
+
+    server = f"https://{host}:{port}"
+    kubeconfig = {
+        "apiVersion": "v1",
+        "kind": "Config",
+        "clusters": [
+            {
+                "name": "in-cluster",
+                "cluster": {
+                    "certificate-authority-data": ca_data,
+                    "server": server,
+                },
+            }
+        ],
+        "contexts": [
+            {
+                "name": "in-cluster",
+                "context": {
+                    "cluster": "in-cluster",
+                    "user": "in-cluster",
+                    "namespace": namespace,
+                },
+            }
+        ],
+        "current-context": "in-cluster",
+        "users": [
+            {
+                "name": "in-cluster",
+                "user": {
+                    "token": token,
+                },
+            }
+        ],
+    }
+    dumped = yaml.safe_dump(kubeconfig, allow_unicode=True).encode("utf-8")
+    return dumped, "in-cluster"
+
+
+def _resolve_kubeconfig_bytes(
+    config: "AgentConfig",
+) -> Tuple[Optional[bytes], Optional[str]]:
+    if config.kubeconfig_path:
+        data = _read_kubeconfig_bytes(config.kubeconfig_path, strict=True)
+        if data:
+            return data, config.kubeconfig_path.name
+        return None, None
+
+    candidates: List[Path] = []
+    kubeconfig_env = os.getenv("KUBECONFIG")
+    if kubeconfig_env:
+        for chunk in kubeconfig_env.split(os.pathsep):
+            cleaned = chunk.strip()
+            if not cleaned:
+                continue
+            candidates.append(Path(cleaned).expanduser())
+    candidates.append(Path.home() / ".kube" / "config")
+
+    seen: Set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        data = _read_kubeconfig_bytes(candidate, strict=False)
+        if data:
+            LOG.info("自动使用 kubeconfig: %s", candidate)
+            return data, candidate.name or "kubeconfig"
+
+    incluster = _build_incluster_kubeconfig()
+    if incluster:
+        LOG.info("已根据 ServiceAccount 自动生成 kubeconfig。")
+        return incluster
+
+    return None, None
 
 
 @dataclass
@@ -302,14 +432,17 @@ class AgentRunner:
         if self.config.cluster_name is None:
             return None
         payload: Dict[str, Any] = {"name": self.config.cluster_name}
-        path = self.config.kubeconfig_path
-        if path:
-            try:
-                data = path.read_bytes()
-            except FileNotFoundError as exc:
-                raise RuntimeError(f"无法读取 kubeconfig 文件：{path}") from exc
-            payload["kubeconfig_b64"] = base64.b64encode(data).decode("utf-8")
-            payload["kubeconfig_name"] = path.name
+        kubeconfig_data, kubeconfig_name = _resolve_kubeconfig_bytes(self.config)
+        if kubeconfig_data:
+            payload["kubeconfig_b64"] = base64.b64encode(kubeconfig_data).decode(
+                "utf-8"
+            )
+            if kubeconfig_name:
+                payload["kubeconfig_name"] = kubeconfig_name
+        else:
+            LOG.warning(
+                "未找到可用的 kubeconfig，首次注册可能无法通过连接校验。"
+            )
         return payload
 
     def run_forever(self, once: bool = False) -> None:
