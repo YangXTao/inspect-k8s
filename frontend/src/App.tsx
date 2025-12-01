@@ -99,6 +99,17 @@ interface ConfirmDialogState {
   options?: ConfirmDialogOption[];
 }
 
+interface SettingsModalTabRenderContext {
+  close: () => void;
+  selectTab: (tabId: string) => void;
+}
+
+interface SettingsModalTab {
+  id: string;
+  label: string;
+  render: (context: SettingsModalTabRenderContext) => ReactNode;
+}
+
 const CLUSTER_ID_STORAGE_KEY = "clusterDisplayIdMap.v1";
 const CLUSTER_PAGE_SIZE = 10;
 const RUN_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
@@ -2402,6 +2413,675 @@ const ConfirmationModal = ({ state, onClose }: ConfirmationModalProps) => {
           </button>
         </div>
       </div>
+    </div>
+  );
+};
+
+interface SettingsModalProps {
+  open: boolean;
+  tabs: SettingsModalTab[];
+  initialTabId?: string;
+  activeTabId: string;
+  onTabChange: (tabId: string) => void;
+  onClose: () => void;
+  confirmState?: ConfirmDialogState | null;
+  onConfirmClose?: () => void;
+}
+
+const SettingsModal = ({
+  open,
+  tabs,
+  initialTabId,
+  activeTabId,
+  onTabChange,
+  onClose,
+  confirmState,
+  onConfirmClose,
+}: SettingsModalProps) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const hasTabs = tabs.length > 0;
+  const fallbackTabId =
+    tabs.find((tab) => tab.id === (initialTabId ?? ""))?.id ??
+    tabs[0]?.id ??
+    "overview";
+  const effectiveTabId = tabs.some((tab) => tab.id === activeTabId)
+    ? activeTabId
+    : fallbackTabId;
+  const currentTab =
+    tabs.find((tab) => tab.id === effectiveTabId) ?? tabs[0] ?? null;
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (confirmState && onConfirmClose) {
+          onConfirmClose();
+        } else {
+          onClose();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, confirmState, onClose, onConfirmClose]);
+
+  useEffect(() => {
+    if (!open || !containerRef.current) {
+      return;
+    }
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    containerRef.current.focus();
+    return () => {
+      previouslyFocused?.focus?.();
+    };
+  }, [open]);
+
+  if (!open || !hasTabs || !currentTab) {
+    return null;
+  }
+
+  const selectTab = (tabId: string) => {
+    onTabChange(tabId);
+  };
+
+  return (
+    <div className="modal-backdrop settings-confirm-backdrop" aria-modal="true">
+      <div
+        className="settings-modal"
+        role="dialog"
+        aria-label="系统设置"
+        ref={containerRef}
+        tabIndex={-1}
+      >
+        <div className="settings-modal-header">
+          <div>
+            <h2>系统设置</h2>
+            <p>管理巡检项、Agent 以及 License 授权信息。</p>
+          </div>
+          <button
+            type="button"
+            className="link-button"
+            onClick={onClose}
+            aria-label="关闭设置"
+          >
+            关闭
+          </button>
+        </div>
+        <div className="settings-modal-shell">
+          <nav className="settings-modal-nav">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={`settings-nav-button${
+                  tab.id === effectiveTabId ? " active" : ""
+                }`}
+                onClick={() => selectTab(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+          <section className="settings-modal-main">
+            {currentTab.render({
+              close: onClose,
+              selectTab,
+            })}
+          </section>
+        </div>
+      </div>
+      {confirmState && (
+        <ConfirmationModal
+          state={confirmState}
+          onClose={onConfirmClose ?? onClose}
+        />
+      )}
+    </div>
+  );
+};
+
+interface SettingsOverviewPanelProps {
+  onOpenInspection: () => void;
+  onOpenLicense: () => void;
+  license: LicenseCapabilities;
+}
+
+const SettingsOverviewPanel = ({
+  onOpenInspection,
+  onOpenLicense,
+  license,
+}: SettingsOverviewPanelProps) => {
+  const featureList = license.features ?? [];
+  return (
+    <div className="settings-overview">
+      <div className="settings-branding">
+        {appConfig.branding.logoUrl ? (
+          <img
+            src={appConfig.branding.logoUrl}
+            alt="logo"
+            className="settings-branding-logo"
+          />
+        ) : (
+          <div className="settings-branding-name">
+            {appConfig.branding.logoText ?? "K8s Inspection Center"}
+          </div>
+        )}
+        <div>
+          <h3>{appConfig.branding.logoText ?? "Kubernetes 巡检中心"}</h3>
+          <p>统一管理巡检配置、Agent 节点与授权。</p>
+        </div>
+      </div>
+      <section className="settings-overview-section">
+        <h4>License 状态</h4>
+        <div className="settings-overview-status">
+          <span className={`status-pill ${license.valid ? "success" : "warning"}`}>
+            {license.valid ? "已激活" : "未激活"}
+          </span>
+          {license.reason && (
+            <span className="settings-overview-hint">{license.reason}</span>
+          )}
+        </div>
+        <div className="settings-overview-list">
+          <strong>已启用特性：</strong>
+          {featureList.length === 0 ? (
+            <span>暂无授权功能</span>
+          ) : (
+            <div className="chip-group">
+              {featureList.map((feature) => (
+                <span key={feature} className="chip">
+                  {feature}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="settings-overview-actions">
+          <button type="button" className="primary" onClick={onOpenInspection}>
+            管理巡检项
+          </button>
+          <button type="button" className="secondary" onClick={onOpenLicense}>
+            查看 License
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+};
+
+interface InspectionSettingsPanelProps {
+  items: InspectionItem[];
+  submitting: boolean;
+  notice: string | null;
+  error: string | null;
+  onClose: () => void;
+  onSave: (payload: {
+    id?: number;
+    name: string;
+    description?: string;
+    check_type: string;
+    config: Record<string, unknown>;
+  }) => Promise<void>;
+  onDelete: (item: InspectionItem) => void;
+  onDeleteMany: (ids: number[]) => void;
+  onExport: () => Promise<void> | void;
+  onImport: (file: File) => Promise<void>;
+}
+
+const InspectionSettingsPanel = ({
+  items,
+  submitting,
+  notice,
+  error,
+  onClose,
+  onSave,
+  onDelete,
+  onDeleteMany,
+  onExport,
+  onImport,
+}: InspectionSettingsPanelProps) => {
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [editingItem, setEditingItem] = useState<InspectionItem | null>(null);
+  const [formName, setFormName] = useState("");
+  const [formDescription, setFormDescription] = useState("");
+  const [formCheckType, setFormCheckType] = useState("custom");
+  const [configText, setConfigText] = useState("{}");
+  const [formError, setFormError] = useState<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!editingItem) {
+      setFormName("");
+      setFormDescription("");
+      setFormCheckType("custom");
+      setConfigText("{}");
+      setFormError(null);
+    }
+  }, [editingItem]);
+
+  const startEdit = (item: InspectionItem) => {
+    setEditingItem(item);
+    setFormName(item.name ?? "");
+    setFormDescription(item.description ?? "");
+    setFormCheckType(item.check_type ?? "custom");
+    setConfigText(
+      item.config ? JSON.stringify(item.config, null, 2) : "{}"
+    );
+  };
+
+  const resetForm = () => {
+    setEditingItem(null);
+    setFormName("");
+    setFormDescription("");
+    setFormCheckType("custom");
+    setConfigText("{}");
+    setFormError(null);
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!formName.trim()) {
+      setFormError("巡检项名称不能为空");
+      return;
+    }
+    let parsedConfig: Record<string, unknown> = {};
+    if (configText.trim()) {
+      try {
+        parsedConfig = JSON.parse(configText);
+      } catch (err) {
+        setFormError("Config 必须是合法的 JSON");
+        return;
+      }
+    }
+    setFormError(null);
+    await onSave({
+      id: editingItem?.id,
+      name: formName.trim(),
+      description: formDescription.trim() || undefined,
+      check_type: formCheckType.trim() || "custom",
+      config: parsedConfig,
+    });
+    resetForm();
+  };
+
+  const toggleSelection = (id: number) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((itemId) => itemId !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === items.length) {
+      setSelectedIds([]);
+      return;
+    }
+    setSelectedIds(items.map((item) => item.id));
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedIds.length === 0) {
+      return;
+    }
+    onDeleteMany(selectedIds);
+  };
+
+  const handleImportClick = () => {
+    importInputRef.current?.click();
+  };
+
+  const handleImportChange = async (
+    event: ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) {
+      return;
+    }
+    await onImport(file);
+  };
+
+  const currentSummary = editingItem
+    ? `正在编辑：${editingItem.name}`
+    : "新增巡检项";
+
+  return (
+    <div className="settings-content inspection-settings-panel">
+      <div className="settings-header">
+        <div>
+          <h3>巡检项管理</h3>
+          <p>{currentSummary}</p>
+        </div>
+        <div className="settings-actions">
+          <button type="button" className="secondary" onClick={onClose}>
+            关闭
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => onExport()}
+            disabled={submitting}
+          >
+            导出
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={handleImportClick}
+            disabled={submitting}
+          >
+            导入
+          </button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".json"
+            hidden
+            onChange={handleImportChange}
+          />
+        </div>
+      </div>
+      {notice && <div className="feedback success">{notice}</div>}
+      {error && <div className="feedback error">{error}</div>}
+      {formError && <div className="feedback error">{formError}</div>}
+      <div className="settings-content grid">
+        <div className="settings-list">
+          <div className="settings-actions">
+            <label className="table-checkbox">
+              <input
+                type="checkbox"
+                checked={selectedIds.length === items.length && items.length > 0}
+                onChange={toggleSelectAll}
+              />
+              <span>全选</span>
+            </label>
+            <span>已选 {selectedIds.length} / {items.length}</span>
+            <button
+              type="button"
+              className="link-button danger"
+              onClick={handleDeleteSelected}
+              disabled={selectedIds.length === 0}
+            >
+              批量删除
+            </button>
+          </div>
+          <div className="table-wrapper">
+            {items.length === 0 ? (
+              <div className="placeholder">暂无巡检项</div>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>名称</th>
+                    <th>类型</th>
+                    <th>更新时间</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item) => (
+                    <tr key={item.id}>
+                      <td>
+                        <label className="table-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.includes(item.id)}
+                            onChange={() => toggleSelection(item.id)}
+                          />
+                          <span>{item.name}</span>
+                        </label>
+                      </td>
+                      <td>{item.check_type}</td>
+                      <td>{formatDate(item.updated_at)}</td>
+                      <td className="actions">
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={() => startEdit(item)}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          type="button"
+                          className="link-button danger"
+                          onClick={() => onDelete(item)}
+                        >
+                          删除
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+        <form className="settings-form" onSubmit={handleSubmit}>
+          <h4>{editingItem ? "编辑巡检项" : "新增巡检项"}</h4>
+          <label>
+            名称
+            <input
+              type="text"
+              value={formName}
+              onChange={(event) => setFormName(event.target.value)}
+              disabled={submitting}
+              placeholder="例如：etcd-health"
+            />
+          </label>
+          <label>
+            类型
+            <input
+              type="text"
+              value={formCheckType}
+              onChange={(event) => setFormCheckType(event.target.value)}
+              disabled={submitting}
+              placeholder="custom"
+            />
+          </label>
+          <label>
+            描述
+            <input
+              type="text"
+              value={formDescription}
+              onChange={(event) => setFormDescription(event.target.value)}
+              disabled={submitting}
+              placeholder="可选"
+            />
+          </label>
+          <label>
+            Config (JSON)
+            <textarea
+              value={configText}
+              onChange={(event) => setConfigText(event.target.value)}
+              rows={6}
+              disabled={submitting}
+            />
+          </label>
+          <div className="settings-actions">
+            <button
+              type="button"
+              className="secondary"
+              onClick={resetForm}
+              disabled={submitting}
+            >
+              重置
+            </button>
+            <button type="submit" className="primary" disabled={submitting}>
+              {editingItem ? "保存修改" : "新增"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+interface LicenseSettingsPanelProps {
+  status: LicenseCapabilities;
+  uploading: boolean;
+  textUploading: boolean;
+  onUpload: (file: File) => Promise<LicenseStatus | null>;
+  onUploadText: (value: string) => Promise<LicenseStatus | null>;
+  onRefresh: () => Promise<LicenseStatus | null>;
+}
+
+const LicenseSettingsPanel = ({
+  status,
+  uploading,
+  textUploading,
+  onUpload,
+  onUploadText,
+  onRefresh,
+}: LicenseSettingsPanelProps) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [textValue, setTextValue] = useState("");
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const handleFileChange = async (
+    event: ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) {
+      return;
+    }
+    try {
+      setLocalError(null);
+      await onUpload(file);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "上传 License 失败";
+      setLocalError(message);
+    }
+  };
+
+  const handleSubmitText = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const content = textValue.trim();
+    if (!content) {
+      setLocalError("License 内容不能为空");
+      return;
+    }
+    try {
+      setLocalError(null);
+      await onUploadText(content);
+      setTextValue("");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "导入 License 失败";
+      setLocalError(message);
+    }
+  };
+
+  const handleRefresh = async () => {
+    try {
+      setLocalError(null);
+      await onRefresh();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "刷新 License 状态失败";
+      setLocalError(message);
+    }
+  };
+
+  const licenseStatus = status.status;
+
+  return (
+    <div className="settings-content">
+      <div className="settings-header">
+        <div>
+          <h3>License 管理</h3>
+          <p>更新 License 文件或粘贴授权文本。</p>
+        </div>
+        <div className="settings-actions">
+          <button
+            type="button"
+            className="secondary"
+            onClick={handleRefresh}
+          >
+            刷新状态
+          </button>
+        </div>
+      </div>
+      {status.reason && !status.valid && (
+        <div className="feedback warning">{status.reason}</div>
+      )}
+      {localError && <div className="feedback error">{localError}</div>}
+      <section className="settings-list">
+        <table>
+          <tbody>
+            <tr>
+              <th>状态</th>
+              <td>{status.valid ? "已激活" : "未激活"}</td>
+            </tr>
+            <tr>
+              <th>授权对象</th>
+              <td>{licenseStatus?.licensee ?? "-"}</td>
+            </tr>
+            <tr>
+              <th>产品</th>
+              <td>{licenseStatus?.product ?? "-"}</td>
+            </tr>
+            <tr>
+              <th>有效期</th>
+              <td>
+                {licenseStatus?.not_before ?? "-"} ~{" "}
+                {licenseStatus?.expires_at ?? "-"}
+              </td>
+            </tr>
+            <tr>
+              <th>特性</th>
+              <td>
+                {status.features.length === 0 ? (
+                  "-"
+                ) : (
+                  <div className="chip-group">
+                    {status.features.map((feature) => (
+                      <span key={feature} className="chip">
+                        {feature}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+      <section className="settings-form">
+        <h4>上传 License 文件</h4>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".lic,.txt,.json"
+          onChange={handleFileChange}
+          disabled={uploading}
+        />
+        <p className="settings-overview-hint">
+          支持 .lic / .txt / .json 文件，上传后立即生效。
+        </p>
+      </section>
+      <section className="settings-form">
+        <h4>粘贴 License 内容</h4>
+        <form onSubmit={handleSubmitText}>
+          <textarea
+            rows={6}
+            value={textValue}
+            onChange={(event) => setTextValue(event.target.value)}
+            placeholder="-----BEGIN LICENSE-----"
+            disabled={textUploading}
+          />
+          <div className="settings-actions">
+            <button
+              type="submit"
+              className="primary"
+              disabled={textUploading}
+            >
+              {textUploading ? "导入中..." : "导入文本"}
+            </button>
+          </div>
+        </form>
+      </section>
     </div>
   );
 };
