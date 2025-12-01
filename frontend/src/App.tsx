@@ -2448,30 +2448,39 @@ const SettingsOverviewPanel = ({
   onOpenLicense,
   license,
 }: SettingsOverviewPanelProps) => {
-  const featureList = license.features ?? [];
+  const featureList = (license.features ?? [])
+    .map((feature) => feature.trim())
+    .filter((feature) => feature.length > 0);
+  const licenseStatus = license.status;
+  const statusRows: Array<{ label: string; value: string }> = [
+    { label: "授权对象", value: licenseStatus?.licensee ?? "未填写" },
+    { label: "产品", value: licenseStatus?.product ?? "未填写" },
+    { label: "生效时间", value: licenseStatus?.not_before ?? "-" },
+    { label: "到期时间", value: licenseStatus?.expires_at ?? "-" },
+  ];
+
   return (
     <div className="settings-overview">
-      <div className="settings-branding">
-        {appConfig.branding.logoUrl ? (
-          <img
-            src={appConfig.branding.logoUrl}
-            alt="logo"
-            className="settings-branding-logo"
-          />
-        ) : (
-          <div className="settings-branding-name">
-            {appConfig.branding.logoText ?? "K8s Inspection Center"}
+      <div className="settings-overview-card">
+        <div className="settings-overview-headline">
+          {appConfig.branding.logoUrl ? (
+            <img
+              src={appConfig.branding.logoUrl}
+              alt="品牌 Logo"
+              className="settings-branding-logo"
+            />
+          ) : (
+            <div className="settings-branding-name">
+              {appConfig.branding.logoText ?? "K8s"}
+            </div>
+          )}
+          <div>
+            <h3>{appConfig.branding.logoText ?? "Kubernetes 巡检中心"}</h3>
+            <p>统一管理巡检项、Agent 节点以及 License 授权。</p>
           </div>
-        )}
-        <div>
-          <h3>{appConfig.branding.logoText ?? "Kubernetes 巡检中心"}</h3>
-          <p>统一管理巡检配置、Agent 节点与授权。</p>
         </div>
-      </div>
-      <section className="settings-overview-section">
-        <h4>License 状态</h4>
         <div className="settings-overview-status">
-          <span className={`status-pill ${license.valid ? "success" : "warning"}`}>
+          <span className={status-pill }>
             {license.valid ? "已激活" : "未激活"}
           </span>
           {license.reason && (
@@ -2479,11 +2488,11 @@ const SettingsOverviewPanel = ({
           )}
         </div>
         <div className="settings-overview-list">
-          <strong>已启用特性：</strong>
+          <strong>已启用特性</strong>
           {featureList.length === 0 ? (
-            <span>暂无授权功能</span>
+            <span className="settings-overview-hint">暂无启用功能</span>
           ) : (
-            <div className="chip-group">
+            <div className="chip-group settings-overview-badges">
               {featureList.map((feature) => (
                 <span key={feature} className="chip">
                   {feature}
@@ -2500,7 +2509,42 @@ const SettingsOverviewPanel = ({
             查看 License
           </button>
         </div>
-      </section>
+      </div>
+      <div className="settings-overview-card">
+        <h4>License 详情</h4>
+        <div className="settings-overview-status">
+          <span className={status-pill }>
+            {license.valid ? "已激活" : "未激活"}
+          </span>
+          {license.reason && (
+            <span className="settings-overview-hint">{license.reason}</span>
+          )}
+        </div>
+        <table>
+          <tbody>
+            {statusRows.map((row) => (
+              <tr key={row.label}>
+                <th>{row.label}</th>
+                <td>{row.value}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="settings-overview-list">
+          <strong>功能列表</strong>
+          {featureList.length === 0 ? (
+            <span className="settings-overview-hint">未授予任何特性</span>
+          ) : (
+            <div className="chip-group settings-overview-badges">
+              {featureList.map((feature) => (
+                <span key={license-} className="chip">
+                  {feature}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
