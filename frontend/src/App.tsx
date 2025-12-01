@@ -2393,7 +2393,7 @@ const SettingsModal = ({
         <div className="settings-modal-header">
           <div>
             <h2>系统设置</h2>
-            <p>管理巡检项、Agent 以及 License 授权信息。</p>
+            <p>统一管理巡检项、Agent 节点以及 License 授权。</p>
           </div>
           <button
             type="button"
@@ -2471,7 +2471,7 @@ const SettingsOverviewPanel = ({
             />
           ) : (
             <div className="settings-branding-name">
-              {appConfig.branding.logoText ?? "K8s"}
+              {appConfig.branding.logoText ?? "Kubernetes 巡检中心"}
             </div>
           )}
           <div>
@@ -2480,11 +2480,11 @@ const SettingsOverviewPanel = ({
           </div>
         </div>
         <div className="settings-overview-status">
-          <span className={status-pill }>
+          <span className={`status-pill ${license.valid ? "已激活" : "未激活"}`} >
             {license.valid ? "已激活" : "未激活"}
           </span>
           {license.reason && (
-            <span className="settings-overview-hint">{license.reason}</span>
+            <span className="settings-overview-hint">暂无启用功能</span>
           )}
         </div>
         <div className="settings-overview-list">
@@ -2502,22 +2502,18 @@ const SettingsOverviewPanel = ({
           )}
         </div>
         <div className="settings-overview-actions">
-          <button type="button" className="primary" onClick={onOpenInspection}>
-            管理巡检项
-          </button>
-          <button type="button" className="secondary" onClick={onOpenLicense}>
-            查看 License
-          </button>
+          <button type="button" className="primary" onClick={onOpenInspection}>\n            管理巡检项</button>
+          <button type="button" className="secondary" onClick={onOpenLicense}>\n            查看 License</button>
         </div>
       </div>
       <div className="settings-overview-card">
         <h4>License 详情</h4>
         <div className="settings-overview-status">
-          <span className={status-pill }>
+          <span className={`status-pill ${license.valid ? "已激活" : "未激活"}`} >
             {license.valid ? "已激活" : "未激活"}
           </span>
           {license.reason && (
-            <span className="settings-overview-hint">{license.reason}</span>
+            <span className="settings-overview-hint">暂无启用功能</span>
           )}
         </div>
         <table>
@@ -2533,11 +2529,11 @@ const SettingsOverviewPanel = ({
         <div className="settings-overview-list">
           <strong>功能列表</strong>
           {featureList.length === 0 ? (
-            <span className="settings-overview-hint">未授予任何特性</span>
+            <span className="settings-overview-hint">暂无启用功能</span>
           ) : (
             <div className="chip-group settings-overview-badges">
               {featureList.map((feature) => (
-                <span key={license-} className="chip">
+                <span key={`license-${feature}`}  className="chip">
                   {feature}
                 </span>
               ))}
@@ -2930,7 +2926,7 @@ const LicenseSettingsPanel = ({
       <div className="settings-header">
         <div>
           <h3>License 管理</h3>
-          <p>更新 License 文件或粘贴授权文本。</p>
+          <p>统一管理巡检项、Agent 节点以及 License 授权。</p>
         </div>
         <div className="settings-actions">
           <button
@@ -2988,7 +2984,7 @@ const LicenseSettingsPanel = ({
         </table>
       </section>
       <section className="settings-form">
-        <h4>上传 License 文件</h4>
+        <h4>License 详情</h4>
         <input
           ref={fileInputRef}
           type="file"
@@ -3001,7 +2997,7 @@ const LicenseSettingsPanel = ({
         </p>
       </section>
       <section className="settings-form">
-        <h4>粘贴 License 内容</h4>
+        <h4>License 详情</h4>
         <form onSubmit={handleSubmitText}>
           <textarea
             rows={6}
@@ -5671,6 +5667,8 @@ const hasManualKubeconfig = useMemo(
 };
 
 export default App;
+
+
 
 
 
