@@ -2443,21 +2443,55 @@ interface SettingsOverviewPanelProps {
   license: LicenseCapabilities;
 }
 
+const splitBrandingText = (value: string): [string, string] => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return ["", ""];
+  }
+  if (!/\s/.test(trimmed)) {
+    if (trimmed.length <= 4) {
+      return [trimmed, ""];
+    }
+    const midpoint = Math.ceil(trimmed.length / 2);
+    return [trimmed.slice(0, midpoint), trimmed.slice(midpoint)];
+  }
+  const [firstWord, ...restWords] = trimmed.split(/\s+/);
+  return [firstWord, restWords.join(" ")];
+};
+
 const SettingsOverviewPanel = ({
   onOpenInspection,
   onOpenLicense,
   license,
 }: SettingsOverviewPanelProps) => {
-  const featureList = (license.features ?? [])
-    .map((feature) => feature.trim())
-    .filter((feature) => feature.length > 0);
+  const brandingText =
+    appConfig.branding.logoText?.trim() || "Kubernetes 巡检中心";
+  const [brandingPrimary, brandingSecondary] = splitBrandingText(brandingText);
+  const featureList = Array.from(
+    new Set(
+      (license.features ?? [])
+        .map((feature) => feature.trim())
+        .filter((feature) => feature.length > 0)
+    )
+  );
   const licenseStatus = license.status;
+  const licenseStatusLabel = license.valid ? "已激活" : "未激活";
+  const licenseStatusClass = license.valid ? "success" : "danger";
+  const licenseHint =
+    license.reason?.trim() ??
+    (license.valid ? "License 已全部启用" : "请上传有效 License 文件");
   const statusRows: Array<{ label: string; value: string }> = [
-    { label: "授权对象", value: licenseStatus?.licensee ?? "未填写" },
-    { label: "产品", value: licenseStatus?.product ?? "未填写" },
-    { label: "生效时间", value: licenseStatus?.not_before ?? "-" },
-    { label: "到期时间", value: licenseStatus?.expires_at ?? "-" },
+    { label: "授权对象", value: licenseStatus?.licensee?.trim() || "未填写" },
+    { label: "产品", value: licenseStatus?.product?.trim() || "未填写" },
+    { label: "生效时间", value: formatDate(licenseStatus?.not_before) },
+    { label: "到期时间", value: formatDate(licenseStatus?.expires_at) },
   ];
+  if (licenseStatus?.issued_at) {
+    statusRows.splice(2, 0, {
+      label: "签发时间",
+      value: formatDate(licenseStatus.issued_at),
+    });
+  }
 
   return (
     <div className="settings-overview">
@@ -2470,21 +2504,26 @@ const SettingsOverviewPanel = ({
               className="settings-branding-logo"
             />
           ) : (
-            <div className="settings-branding-name">
-              {appConfig.branding.logoText ?? "Kubernetes 巡检中心"}
+            <div
+              className="settings-branding-name"
+              aria-label={brandingText}
+              role="img"
+            >
+              <span>{brandingPrimary}</span>
+              {brandingSecondary && <span>{brandingSecondary}</span>}
             </div>
           )}
-          <div>
-            <h3>{appConfig.branding.logoText ?? "Kubernetes 巡检中心"}</h3>
+          <div className="settings-branding-copy">
+            <h3>{brandingText}</h3>
             <p>统一管理巡检项、Agent 节点以及 License 授权。</p>
           </div>
         </div>
         <div className="settings-overview-status">
-          <span className={`status-pill ${license.valid ? "已激活" : "未激活"}`} >
-            {license.valid ? "已激活" : "未激活"}
+          <span className={`status-pill ${licenseStatusClass}`}>
+            {licenseStatusLabel}
           </span>
-          {license.reason && (
-            <span className="settings-overview-hint">暂无启用功能</span>
+          {licenseHint && (
+            <span className="settings-overview-hint">{licenseHint}</span>
           )}
         </div>
         <div className="settings-overview-list">
@@ -2502,30 +2541,24 @@ const SettingsOverviewPanel = ({
           )}
         </div>
         <div className="settings-overview-actions">
-          <button type="button" className="primary" onClick={onOpenInspection}>\n            管理巡检项</button>
-          <button type="button" className="secondary" onClick={onOpenLicense}>\n            查看 License</button>
+          <button type="button" className="primary" onClick={onOpenInspection}>
+            管理巡检项
+          </button>
+          <button type="button" className="secondary" onClick={onOpenLicense}>
+            查看 License
+          </button>
         </div>
       </div>
       <div className="settings-overview-card">
         <h4>License 详情</h4>
         <div className="settings-overview-status">
-          <span className={`status-pill ${license.valid ? "已激活" : "未激活"}`} >
-            {license.valid ? "已激活" : "未激活"}
+          <span className={`status-pill ${licenseStatusClass}`}>
+            {licenseStatusLabel}
           </span>
-          {license.reason && (
-            <span className="settings-overview-hint">暂无启用功能</span>
+          {licenseHint && (
+            <span className="settings-overview-hint">{licenseHint}</span>
           )}
         </div>
-        <table>
-          <tbody>
-            {statusRows.map((row) => (
-              <tr key={row.label}>
-                <th>{row.label}</th>
-                <td>{row.value}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
         <div className="settings-overview-list">
           <strong>功能列表</strong>
           {featureList.length === 0 ? (
@@ -5667,6 +5700,8 @@ const hasManualKubeconfig = useMemo(
 };
 
 export default App;
+
+
 
 
 
