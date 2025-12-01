@@ -435,6 +435,63 @@ const createRunDisplayIdMap = (
   return displayIds;
 };
 
+const resolveClusterIdFromRouteKey = (
+  clusterKey: string | undefined,
+  displayMap: Record<number, string>,
+  clusters: ClusterConfig[]
+): number | null => {
+  if (!clusterKey || !clusterKey.trim()) {
+    return null;
+  }
+  const decoded = decodeClusterKeyToId(clusterKey, displayMap, clusters);
+  if (decoded !== null) {
+    return decoded;
+  }
+  if (clusterKey.startsWith("#")) {
+    const numeric = Number(clusterKey.slice(1));
+    return Number.isInteger(numeric) ? numeric : null;
+  }
+  if (/^\d+$/.test(clusterKey)) {
+    return Number(clusterKey);
+  }
+  return null;
+};
+
+const decodeRunKeyToId = (
+  runKey: string | undefined,
+  displayMap: Record<number, string>
+): number | null => {
+  if (!runKey || !runKey.trim()) {
+    return null;
+  }
+  const trimmed = runKey.trim();
+  const lower = trimmed.toLowerCase();
+  const matchedEntry = Object.entries(displayMap).find(
+    ([, value]) => value.toLowerCase() === lower
+  );
+  if (matchedEntry) {
+    return Number(matchedEntry[0]);
+  }
+  if (/^\d+$/.test(trimmed)) {
+    return Number(trimmed);
+  }
+  if (trimmed.startsWith("#")) {
+    const numeric = Number(trimmed.slice(1));
+    return Number.isInteger(numeric) ? numeric : null;
+  }
+  return null;
+};
+
+const inspectionResultStatusMeta = {
+  passed: { label: "通过", className: "success" },
+  warning: { label: "警告", className: "warning" },
+  failed: { label: "失败", className: "danger" },
+} as const;
+
+const getInspectionResultStatusMeta = (status: InspectionResultStatus) =>
+  inspectionResultStatusMeta[status as keyof typeof inspectionResultStatusMeta] ??
+  inspectionResultStatusMeta.failed;
+
 const assignClusterDisplayIds = (
   clusters: ClusterConfig[],
   current: Record<number, string>
@@ -1594,8 +1651,649 @@ const HistoryView = ({
         )}
       </div>
     </section>
-  );};
+  );
+};
 
+interface ClusterDetailViewProps {
+  clusters: ClusterConfig[];
+  items: InspectionItem[];
+  runs: InspectionRunListItem[];
+  selectedIds: number[];
+  setSelectedIds: (updater: (prev: number[]) => number[]) => void;
+  operator: string;
+  setOperator: (value: string) => void;
+  inspectionLoading: boolean;
+  notice: string | null;
+  error: string | null;
+  clusterNotice: string | null;
+  clusterNoticeType: NoticeType;
+  clusterNoticeScope: NoticeScope | null;
+  clusterError: string | null;
+  onStartInspection: (clusterId: number) => Promise<void>;
+  onDeleteRun: (run: InspectionRunListItem) => Promise<void>;
+  onDeleteRunsBulk: (runIds: number[]) => Promise<void>;
+  onCancelRun: (run: InspectionRunListItem) => Promise<void>;
+  onEditCluster: (cluster: ClusterConfig) => void;
+  onDeleteCluster: (cluster: ClusterConfig) => Promise<void>;
+  clusterDisplayIds: Record<number, string>;
+  runDisplayIds: Record<number, string>;
+  onTestClusterConnection: (clusterId: number) => Promise<void>;
+  testingClusterIds: Record<number, boolean>;
+  license: LicenseCapabilities;
+  agents: InspectionAgent[];
+  agentLoading: boolean;
+  agentError: string | null;
+  onRefreshAgents: () => Promise<void>;
+  onUpdateClusterExecution: (
+    clusterId: number,
+    payload: { defaultAgentId: number | null }
+  ) => Promise<void>;
+}
+
+const ClusterDetailView = ({
+  clusters,
+  items,
+  runs,
+  selectedIds,
+  setSelectedIds,
+  operator,
+  setOperator,
+  inspectionLoading,
+  notice,
+  error,
+  clusterNotice,
+  clusterNoticeType,
+  clusterNoticeScope,
+  clusterError,
+  onStartInspection,
+  onDeleteRun,
+  onDeleteRunsBulk,
+  onCancelRun,
+  onEditCluster,
+  onDeleteCluster,
+  clusterDisplayIds,
+  runDisplayIds,
+  onTestClusterConnection,
+  testingClusterIds,
+  license,
+  agents,
+  agentLoading,
+  agentError,
+  onRefreshAgents,
+  onUpdateClusterExecution,
+}: ClusterDetailViewProps) => {
+  const { clusterKey } = useParams<{ clusterKey?: string }>();
+  const navigate = useNavigate();
+  const operatorInputId = useId();
+  const [selectedRunIds, setSelectedRunIds] = useState<number[]>([]);
+  const [agentConfigError, setAgentConfigError] = useState<string | null>(null);
+  const [agentConfigLoading, setAgentConfigLoading] = useState(false);
+
+  const resolvedClusterId = useMemo(
+    () =>
+      resolveClusterIdFromRouteKey(clusterKey, clusterDisplayIds, clusters),
+    [clusterKey, clusterDisplayIds, clusters]
+  );
+
+  const cluster = useMemo(() => {
+    if (resolvedClusterId === null) {
+      return null;
+    }
+    return clusters.find((item) => item.id === resolvedClusterId) ?? null;
+  }, [clusters, resolvedClusterId]);
+
+  const clusterRuns = useMemo(() => {
+    if (!cluster) {
+      return [];
+    }
+    return runs
+      .filter((run) => run.cluster_id === cluster.id)
+      .slice()
+      .sort((a, b) => {
+        const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        if (timeA === timeB) {
+          return b.id - a.id;
+        }
+        return timeB - timeA;
+      });
+  }, [cluster, runs]);
+
+  useEffect(() => {
+    setSelectedIds(() => []);
+    setSelectedRunIds([]);
+  }, [resolvedClusterId, setSelectedIds]);
+
+  useEffect(() => {
+    setSelectedRunIds((prev) =>
+      prev.filter((id) => clusterRuns.some((run) => run.id === id))
+    );
+  }, [clusterRuns]);
+
+  if (!clusterKey || resolvedClusterId === null) {
+    return (
+      <div className="detail-empty">
+        <p>未找到对应的集群标识。</p>
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => navigate("/")}
+        >
+          返回集群列表
+        </button>
+      </div>
+    );
+  }
+
+  if (!cluster) {
+    return (
+      <div className="detail-empty">
+        <p>该集群暂不可用或已被删除。</p>
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => navigate("/")}
+        >
+          返回集群列表
+        </button>
+      </div>
+    );
+  }
+
+  const statusMeta = getClusterStatusMeta(cluster.connection_status);
+  const clusterSlug = getClusterDisplayId(clusterDisplayIds, cluster.id, cluster);
+  const isTesting = Boolean(testingClusterIds[cluster.id]);
+  const contexts = cluster.contexts ?? [];
+  const enabledAgents = useMemo(
+    () => agents.filter((agent) => agent.is_enabled),
+    [agents]
+  );
+  const allItemsSelected =
+    items.length > 0 && selectedIds.length === items.length;
+  const shouldShowClusterNotice =
+    clusterNotice &&
+    clusterNoticeType &&
+    clusterNoticeScope === "clusterDetail";
+
+  const handleToggleItem = useCallback(
+    (itemId: number) => {
+      setSelectedIds((prev) =>
+        prev.includes(itemId)
+          ? prev.filter((id) => id !== itemId)
+          : [...prev, itemId]
+      );
+    },
+    [setSelectedIds]
+  );
+
+  const handleToggleAllItems = useCallback(() => {
+    setSelectedIds((prev) => {
+      if (items.length === 0) {
+        return prev;
+      }
+      if (prev.length === items.length) {
+        return [];
+      }
+      return items.map((item) => item.id);
+    });
+  }, [items, setSelectedIds]);
+
+  const handleToggleRunSelection = useCallback((runId: number) => {
+    setSelectedRunIds((prev) =>
+      prev.includes(runId)
+        ? prev.filter((id) => id !== runId)
+        : [...prev, runId]
+    );
+  }, []);
+
+  const handleToggleAllRuns = useCallback(() => {
+    setSelectedRunIds((prev) => {
+      if (clusterRuns.length === 0) {
+        return prev;
+      }
+      const visibleIds = clusterRuns.map((run) => run.id);
+      const allVisibleSelected = visibleIds.every((id) =>
+        prev.includes(id)
+      );
+      if (allVisibleSelected) {
+        return prev.filter((id) => !visibleIds.includes(id));
+      }
+      const merged = new Set(prev);
+      visibleIds.forEach((id) => merged.add(id));
+      return Array.from(merged);
+    });
+  }, [clusterRuns]);
+
+  const handleDeleteSelectedRuns = useCallback(() => {
+    if (selectedRunIds.length === 0) {
+      return;
+    }
+    const targetIds = selectedRunIds.filter((id) =>
+      clusterRuns.some((run) => run.id === id)
+    );
+    if (targetIds.length === 0) {
+      return;
+    }
+    void onDeleteRunsBulk(targetIds);
+  }, [clusterRuns, onDeleteRunsBulk, selectedRunIds]);
+
+  const handleStart = useCallback(() => {
+    void onStartInspection(cluster.id);
+  }, [cluster.id, onStartInspection]);
+
+  const handleAgentChange = useCallback(
+    async (event: ChangeEvent<HTMLSelectElement>) => {
+      if (!cluster) {
+        return;
+      }
+      const value = event.target.value;
+      const nextAgentId = value ? Number(value) : null;
+      if (
+        (cluster.default_agent_id ?? null) === (nextAgentId ?? null) &&
+        cluster.execution_mode === "agent"
+      ) {
+        return;
+      }
+      setAgentConfigError(null);
+      setAgentConfigLoading(true);
+      try {
+        await onUpdateClusterExecution(cluster.id, {
+          defaultAgentId: nextAgentId,
+        });
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "更新默认 Agent 失败";
+        setAgentConfigError(message);
+      } finally {
+        setAgentConfigLoading(false);
+      }
+    },
+    [cluster, onUpdateClusterExecution]
+  );
+
+  return (
+    <>
+      <div className="detail-header">
+        <button
+          type="button"
+          className="link-button"
+          onClick={() => navigate("/")}
+        >
+          ← 返回集群列表
+        </button>
+        <div className="detail-header-actions">
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => onEditCluster(cluster)}
+            disabled={!license.canManageClusters}
+          >
+            编辑集群
+          </button>
+          <button
+            type="button"
+            className="secondary danger"
+            onClick={() => void onDeleteCluster(cluster)}
+            disabled={!license.canManageClusters}
+          >
+            删除集群
+          </button>
+        </div>
+      </div>
+
+      {clusterError && <div className="feedback error">{clusterError}</div>}
+      {shouldShowClusterNotice && (
+        <div className={`feedback ${clusterNoticeType}`}>{clusterNotice}</div>
+      )}
+      {error && <div className="feedback error">{error}</div>}
+      {notice && <div className="feedback success">{notice}</div>}
+
+      <section className="detail-grid">
+        <div className="detail-card">
+          <div className="detail-card-header">
+            <h2>{cluster.name}</h2>
+            <span className="cluster-id-badge">{clusterSlug}</span>
+          </div>
+          <div className="cluster-summary">
+            <div>
+              <strong>连接状态：</strong>
+              <span className={`status-chip ${statusMeta.className}`}>
+                {statusMeta.label}
+              </span>
+            </div>
+            <div>
+              <strong>连接说明：</strong>
+              {cluster.connection_message || "尚未校验连接"}
+            </div>
+            <div>
+              <strong>最近校验：</strong>
+              {cluster.last_checked_at
+                ? formatDate(cluster.last_checked_at)
+                : "未校验"}
+            </div>
+            <div>
+              <strong>Prometheus：</strong>
+              {cluster.prometheus_url || "未配置"}
+            </div>
+            <div>
+              <strong>执行模式：</strong>
+              {cluster.execution_mode === "agent" ? "Agent 执行" : "服务器执行"}
+            </div>
+            <div>
+              <strong>默认 Agent：</strong>
+              {cluster.default_agent_name ||
+                (cluster.default_agent_id
+                  ? `Agent #${cluster.default_agent_id}`
+                  : "未设置")}
+            </div>
+            <div>
+              <strong>Kubernetes 版本：</strong>
+              {cluster.kubernetes_version || "未知"}
+            </div>
+            <div>
+              <strong>节点数量：</strong>
+              {typeof cluster.node_count === "number"
+                ? cluster.node_count
+                : "未知"}
+            </div>
+            <div>
+              <strong>创建时间：</strong>
+              {formatDate(cluster.created_at)}
+            </div>
+            <div>
+              <strong>更新时间：</strong>
+              {formatDate(cluster.updated_at)}
+            </div>
+          </div>
+          <div className="cluster-status-line detail-actions-inline">
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => void onTestClusterConnection(cluster.id)}
+              disabled={isTesting}
+            >
+              {isTesting ? "正在校验..." : "重新校验连接"}
+            </button>
+          </div>
+          <div className="cluster-contexts detail-contexts">
+            {contexts.length > 0 ? (
+              contexts.map((ctx) => (
+                <span key={ctx} className="chip">
+                  {ctx}
+                </span>
+              ))
+            ) : (
+              <span className="chip muted">未检测到上下文</span>
+            )}
+          </div>
+          <div className="agent-config-panel">
+            <div className="agent-config-header">
+              <h3>Agent 绑定</h3>
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => void onRefreshAgents()}
+                disabled={agentLoading}
+              >
+                {agentLoading ? "刷新中..." : "刷新列表"}
+              </button>
+            </div>
+            {!license.canManageAgents && (
+              <div className="feedback warning">
+                当前 License 不支持调整 Agent，请联系管理员升级授权。
+              </div>
+            )}
+            {agentError && <div className="feedback error">{agentError}</div>}
+            {agentConfigError && (
+              <div className="feedback error">{agentConfigError}</div>
+            )}
+            <label className="agent-config-field">
+              默认 Agent
+              <select
+                value={
+                  cluster.default_agent_id !== null &&
+                  typeof cluster.default_agent_id === "number"
+                    ? String(cluster.default_agent_id)
+                    : ""
+                }
+                onChange={handleAgentChange}
+                disabled={
+                  agentConfigLoading ||
+                  !license.canManageAgents ||
+                  cluster.execution_mode !== "agent"
+                }
+              >
+                <option value="">
+                  {cluster.execution_mode === "agent"
+                    ? "自动分配（执行时选择 Agent）"
+                    : "服务器执行模式无需设置"}
+                </option>
+                {agents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name}
+                    {!agent.is_enabled ? "（已禁用）" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="agent-config-note">
+              可用 Agent：{enabledAgents.length} / {agents.length}
+            </p>
+          </div>
+        </div>
+
+        <div className="detail-card">
+          <h2>执行巡检</h2>
+          <label htmlFor={operatorInputId} className="operator-inline">
+            巡检人
+            <input
+              id={operatorInputId}
+              placeholder="输入巡检人姓名（可选）"
+              value={operator}
+              onChange={(event) => setOperator(event.target.value)}
+            />
+          </label>
+          <div className="selection-hint">
+            已选择 {selectedIds.length} / {items.length} 个巡检项
+          </div>
+          <button
+            type="button"
+            className="secondary"
+            onClick={handleToggleAllItems}
+          >
+            {allItemsSelected ? "清除选择" : "全选"}
+          </button>
+          <ul className="item-list">
+            {items.length === 0 ? (
+              <li className="placeholder">暂无巡检项，请在设置中添加。</li>
+            ) : (
+              items.map((item) => (
+                <li key={item.id}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(item.id)}
+                      onChange={() => handleToggleItem(item.id)}
+                    />
+                    <div>
+                      <div className="item-name">{item.name}</div>
+                      <div className="item-desc">
+                        {item.description || "未提供描述"}
+                      </div>
+                    </div>
+                  </label>
+                </li>
+              ))
+            )}
+          </ul>
+          {!license.canRunInspections && (
+            <div className="feedback warning">
+              {license.reason ?? "当前 License 不支持发起巡检。"}
+            </div>
+          )}
+          {inspectionLoading && (
+            <div className="feedback info">正在创建巡检任务...</div>
+          )}
+          <div className="detail-actions">
+            <button
+              type="button"
+              className="primary"
+              onClick={handleStart}
+              disabled={
+                inspectionLoading ||
+                selectedIds.length === 0 ||
+                !license.canRunInspections
+              }
+            >
+              {inspectionLoading ? "巡检中..." : "开始巡检"}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="card history">
+        <div className="card-header">
+          <h2>{cluster.name} · 巡检记录</h2>
+          <div className="card-actions">
+            <label className="table-checkbox">
+              <input
+                type="checkbox"
+                checked={
+                  clusterRuns.length > 0 &&
+                  clusterRuns.every((run) => selectedRunIds.includes(run.id))
+                }
+                onChange={handleToggleAllRuns}
+              />
+              <span>全选</span>
+            </label>
+            <span className="selection-hint">
+              已选 {selectedRunIds.filter((id) =>
+                clusterRuns.some((run) => run.id === id)
+              ).length}{" "}
+              / {clusterRuns.length}
+            </span>
+            <button
+              type="button"
+              className="secondary danger"
+              onClick={handleDeleteSelectedRuns}
+              disabled={selectedRunIds.length === 0}
+            >
+              删除所选
+            </button>
+          </div>
+        </div>
+        <div className="table-wrapper">
+          {clusterRuns.length === 0 ? (
+            <div className="placeholder">暂无巡检记录</div>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>巡检编号</th>
+                  <th>巡检人</th>
+                  <th>执行方式</th>
+                  <th>状态</th>
+                  <th>Agent 状态</th>
+                  <th>开始时间</th>
+                  <th>结束时间</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {clusterRuns.map((run) => {
+                  const isSelected = selectedRunIds.includes(run.id);
+                  const runSlug = runDisplayIds[run.id] ?? `#${run.id}`;
+                  return (
+                    <tr key={run.id}>
+                      <td>
+                        <label className="table-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleToggleRunSelection(run.id)}
+                          />
+                          <span>{runSlug}</span>
+                        </label>
+                      </td>
+                      <td>{run.operator || "-"}</td>
+                      <td>
+                        {describeExecutor(
+                          run.executor,
+                          run.agent_name,
+                          run.agent_id
+                        )}
+                      </td>
+                      <td>
+                        {renderRunStatusBadge(
+                          run.status,
+                          run.status_label ?? run.status,
+                          run.progress
+                        )}
+                      </td>
+                      <td>
+                        {run.executor === "agent" && run.agent_status ? (
+                          <span
+                            className={agentStatusClassName(run.agent_status)}
+                          >
+                            {run.agent_status_label ??
+                              describeAgentStatus(run.agent_status)}
+                          </span>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+                      <td>{formatDate(run.created_at)}</td>
+                      <td>{formatDate(run.completed_at)}</td>
+                      <td className="actions">
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={() =>
+                            navigate(
+                              `/clusters/${clusterSlug}/runs/${runSlug}`
+                            )
+                          }
+                        >
+                          查看详情
+                        </button>
+                        {run.report_path && (
+                          <a
+                            className="link-button"
+                            href={run.report_path}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            下载报告
+                          </a>
+                        )}
+                        {run.status === "running" && (
+                          <button
+                            type="button"
+                            className="link-button"
+                            onClick={() => void onCancelRun(run)}
+                          >
+                            取消
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="link-button danger"
+                          onClick={() => void onDeleteRun(run)}
+                        >
+                          删除
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </section>
+    </>
+  );
+};
 
 interface AgentSettingsPanelProps {
   agents: InspectionAgent[];
@@ -1808,6 +2506,420 @@ const AgentSettingsPanel = ({
     </div>
   );
 };
+
+interface RunDetailViewProps {
+  clusters: ClusterConfig[];
+  items: InspectionItem[];
+  runs: InspectionRunListItem[];
+  onDeleteRun: (runId: number, redirectPath?: string) => Promise<void>;
+  onCancelRun: (runId: number, redirectPath?: string) => Promise<void>;
+  clusterDisplayIds: Record<number, string>;
+  runDisplayIds: Record<number, string>;
+  notice?: string | null;
+  noticeType?: NoticeType;
+  noticeScope?: NoticeScope | null;
+  license: LicenseCapabilities;
+}
+
+const RunDetailView = ({
+  clusters,
+  items,
+  runs,
+  onDeleteRun,
+  onCancelRun,
+  clusterDisplayIds,
+  runDisplayIds,
+  notice,
+  noticeType,
+  noticeScope,
+  license,
+}: RunDetailViewProps) => {
+  const { clusterKey, runKey } = useParams<{
+    clusterKey?: string;
+    runKey?: string;
+  }>();
+  const navigate = useNavigate();
+  const [run, setRun] = useState<InspectionRun | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<
+    InspectionResultStatus | "all"
+  >("all");
+  const [keyword, setKeyword] = useState("");
+  const [refreshIndex, setRefreshIndex] = useState(0);
+
+  const resolvedClusterId = useMemo(
+    () =>
+      resolveClusterIdFromRouteKey(clusterKey, clusterDisplayIds, clusters),
+    [clusterKey, clusterDisplayIds, clusters]
+  );
+  const resolvedRunId = useMemo(
+    () => decodeRunKeyToId(runKey, runDisplayIds),
+    [runKey, runDisplayIds]
+  );
+  const fallbackRun = useMemo(
+    () =>
+      typeof resolvedRunId === "number"
+        ? runs.find((item) => item.id === resolvedRunId) ?? null
+        : null,
+    [runs, resolvedRunId]
+  );
+
+  useEffect(() => {
+    if (resolvedRunId === null) {
+      setRun(null);
+      setError("巡检编号无效，请返回重新选择。");
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    getInspectionRun(resolvedRunId)
+      .then((data) => {
+        if (!cancelled) {
+          setRun(data);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          const message =
+            err instanceof Error ? err.message : "获取巡检详情失败";
+          setError(message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedRunId, refreshIndex]);
+
+  const effectiveClusterId =
+    run?.cluster_id ?? fallbackRun?.cluster_id ?? resolvedClusterId;
+  const cluster = useMemo(() => {
+    if (!effectiveClusterId) {
+      return null;
+    }
+    return clusters.find((item) => item.id === effectiveClusterId) ?? null;
+  }, [clusters, effectiveClusterId]);
+
+  const clusterSlug = cluster
+    ? getClusterDisplayId(clusterDisplayIds, cluster.id, cluster)
+    : clusterKey ?? "-";
+  const runSlug =
+    resolvedRunId !== null
+      ? runDisplayIds[resolvedRunId] ?? `#${resolvedRunId}`
+      : runKey ?? "-";
+  const backTarget = cluster ? `/clusters/${clusterSlug}` : "/history";
+  const summaryRun = run ?? fallbackRun;
+
+  const shouldShowNotice =
+    notice && noticeType && noticeScope === "runDetail";
+
+  const resultStats = useMemo(() => {
+    const stats = {
+      passed: 0,
+      warning: 0,
+      failed: 0,
+    };
+    (run?.results ?? []).forEach((result) => {
+      if (result.status === "passed") {
+        stats.passed += 1;
+      } else if (result.status === "warning") {
+        stats.warning += 1;
+      } else if (result.status === "failed") {
+        stats.failed += 1;
+      }
+    });
+    return stats;
+  }, [run]);
+
+  const filteredResults = useMemo(() => {
+    if (!run) {
+      return [];
+    }
+    const keywordLower = keyword.trim().toLowerCase();
+    return run.results.filter((result) => {
+      const statusOk =
+        statusFilter === "all" ? true : result.status === statusFilter;
+      if (!statusOk) {
+        return false;
+      }
+      if (!keywordLower) {
+        return true;
+      }
+      const combined = `${result.item_name ?? ""} ${result.detail ?? ""} ${
+        result.suggestion ?? ""
+      }`.toLowerCase();
+      return combined.includes(keywordLower);
+    });
+  }, [keyword, run, statusFilter]);
+
+  if (resolvedRunId === null) {
+    return (
+      <div className="detail-empty">
+        <p>巡检编号无效，无法打开详情。</p>
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => navigate("/history")}
+        >
+          返回历史记录
+        </button>
+      </div>
+    );
+  }
+
+  const totalItems =
+    run?.total_items ?? summaryRun?.total_items ?? items.length ?? 0;
+  const processedItems =
+    run?.processed_items ?? summaryRun?.processed_items ?? 0;
+  const progressValue =
+    run?.progress ?? summaryRun?.progress ??
+    (totalItems > 0 ? Math.round((processedItems / totalItems) * 100) : 0);
+  const statusLabel =
+    summaryRun?.status_label ?? summaryRun?.status ?? "未知状态";
+  const statusValue = summaryRun?.status ?? "queued";
+  const agentStatusLabel =
+    summaryRun?.agent_status_label ??
+    (summaryRun?.agent_status
+      ? describeAgentStatus(summaryRun.agent_status)
+      : null);
+  const reportUrl = run?.report_path ?? summaryRun?.report_path ?? null;
+
+  const handleRefresh = () => {
+    setRefreshIndex((prev) => prev + 1);
+  };
+
+  const handleDelete = () => {
+    if (resolvedRunId === null) {
+      return;
+    }
+    void onDeleteRun(resolvedRunId, backTarget);
+  };
+
+  const handleCancel = () => {
+    if (resolvedRunId === null) {
+      return;
+    }
+    void onCancelRun(resolvedRunId);
+  };
+
+  return (
+    <>
+      <div className="detail-header">
+        <button
+          type="button"
+          className="link-button"
+          onClick={() => navigate(backTarget)}
+        >
+          ← 返回 {cluster ? `${cluster.name}` : "历史记录"}
+        </button>
+        <div className="detail-header-actions">
+          <button
+            type="button"
+            className="secondary"
+            onClick={handleRefresh}
+            disabled={loading}
+          >
+            {loading ? "刷新中..." : "刷新"}
+          </button>
+          {summaryRun?.status === "running" && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={handleCancel}
+            >
+              取消任务
+            </button>
+          )}
+          <button
+            type="button"
+            className="secondary danger"
+            onClick={handleDelete}
+          >
+            删除
+          </button>
+        </div>
+      </div>
+
+      {shouldShowNotice && noticeType && (
+        <div className={`feedback ${noticeType}`}>{notice}</div>
+      )}
+      {error && <div className="feedback error">{error}</div>}
+      {loading && <div className="feedback info">正在加载巡检详情...</div>}
+
+      <section className="card run-detail-card">
+        <div className="run-detail-grid">
+          <div>
+            <strong>巡检编号：</strong>
+            {runSlug}
+          </div>
+          <div>
+            <strong>所属集群：</strong>
+            {cluster ? `${cluster.name}（${clusterSlug}）` : clusterSlug}
+          </div>
+          <div>
+            <strong>巡检人：</strong>
+            {summaryRun?.operator || "-"}
+          </div>
+          <div>
+            <strong>执行方式：</strong>
+            {summaryRun
+              ? describeExecutor(
+                  summaryRun.executor,
+                  summaryRun.agent_name,
+                  summaryRun.agent_id
+                )
+              : "-"}
+          </div>
+          <div>
+            <strong>Agent 状态：</strong>
+            {summaryRun?.agent_status ? (
+              <span className={agentStatusClassName(summaryRun.agent_status)}>
+                {agentStatusLabel}
+              </span>
+            ) : (
+              "-"
+            )}
+          </div>
+          <div>
+            <strong>开始时间：</strong>
+            {summaryRun?.created_at ? formatDate(summaryRun.created_at) : "-"}
+          </div>
+          <div>
+            <strong>结束时间：</strong>
+            {summaryRun?.completed_at
+              ? formatDate(summaryRun.completed_at)
+              : "-"}
+          </div>
+          <div>
+            <strong>任务进度：</strong>
+            {processedItems} / {totalItems}（{progressValue}%）
+          </div>
+        </div>
+        <div className="run-status-line">
+          {renderRunStatusBadge(statusValue, statusLabel, progressValue)}
+          {summaryRun?.summary && (
+            <p className="run-summary-text">{summaryRun.summary}</p>
+          )}
+        </div>
+        <div className="run-detail-actions">
+          {reportUrl && license.canDownloadReports ? (
+            <a
+              className="primary"
+              href={reportUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              下载报告
+            </a>
+          ) : reportUrl ? (
+            <button type="button" className="secondary" disabled>
+              License 未授权下载报告
+            </button>
+          ) : (
+            <span className="muted">暂未生成报告</span>
+          )}
+        </div>
+      </section>
+
+      <section className="card inspection-results-card">
+        <div className="card-header">
+          <h2>巡检结果</h2>
+          <div className="inspection-results-toolbar">
+            <div className="inspection-results-filters">
+              <label>
+                状态筛选
+                <select
+                  value={statusFilter}
+                  onChange={(event) =>
+                    setStatusFilter(event.target.value as
+                      | InspectionResultStatus
+                      | "all")
+                  }
+                >
+                  <option value="all">全部</option>
+                  <option value="passed">通过</option>
+                  <option value="warning">警告</option>
+                  <option value="failed">失败</option>
+                </select>
+              </label>
+              <label>
+                关键字
+                <input
+                  type="search"
+                  placeholder="按巡检项 / 详情 / 建议搜索"
+                  value={keyword}
+                  onChange={(event) => setKeyword(event.target.value)}
+                />
+              </label>
+            </div>
+          </div>
+        </div>
+        <div className="inspection-result-stats">
+          <span className="status-pill success">
+            通过 {resultStats.passed}
+          </span>
+          <span className="status-pill warning">
+            警告 {resultStats.warning}
+          </span>
+          <span className="status-pill danger">失败 {resultStats.failed}</span>
+        </div>
+
+        <div className="table-wrapper">
+          {!run ? (
+            <div className="placeholder">
+              {loading ? "结果加载中..." : "请稍候，正在获取巡检结果。"}
+            </div>
+          ) : filteredResults.length === 0 ? (
+            <div className="placeholder">暂无匹配的巡检结果</div>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>巡检项</th>
+                  <th>状态</th>
+                  <th>详情</th>
+                  <th>建议</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredResults.map((result) => {
+                  const meta = getInspectionResultStatusMeta(result.status);
+                  return (
+                    <tr key={result.id}>
+                      <td>{result.item_name}</td>
+                      <td>
+                        <span className={`status-pill ${meta.className}`}>
+                          {meta.label}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="result-detail">
+                          {result.detail || "未提供详情"}
+                        </div>
+                      </td>
+                      <td>
+                        <div className="result-actions">
+                          {result.suggestion || "未提供建议"}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </section>
+    </>
+  );
+};
+
 interface ClusterEditModalProps {
   cluster: ClusterConfig;
   submitting: boolean;
