@@ -1379,13 +1379,350 @@ const HistoryView = ({
         <div className="card-actions">
           <div className="card-actions-group history-filter-group">
             <label>
+              执行方式
+              <select value={executorFilter} onChange={handleExecutorFilterChange}>
+                <option value="all">全部</option>
+                <option value="server">服务端</option>
+                <option value="agent">Agent</option>
+              </select>
+            </label>
+            <label>
+              Agent 状态
+              <select value={agentStatusFilter} onChange={handleAgentStatusFilterChange}>
+                <option value="all">全部</option>
+                <option value="none">非 Agent / 未上报</option>
+                <option value="queued">待执行</option>
+                <option value="running">执行中</option>
+                <option value="finished">已完成</option>
+                <option value="failed">执行失败</option>
+              </select>
+            </label>
+          </div>
+          <button type="button" className="secondary" onClick={onRefreshRuns}>
+            刷新
+          </button>
+        </div>
+      </div>
+      {shouldShowNotice && noticeType && (
+        <div className={`feedback ${noticeType}`}>
+          {notice}
+        </div>
+      )}
+      <div className="history-toolbar">
+        <div className="history-selection">
+          <label className="table-checkbox">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={handleToggleAllRuns}
+            />
+            <span>当前页全选</span>
+          </label>
+          <span className="selection-hint">
+            已选 {visibleSelectedCount} / {filteredRuns.length}
+          </span>
+          <button
+            type="button"
+            className="secondary danger"
+            onClick={handleDeleteSelectedRuns}
+            disabled={selectedRunIds.length === 0}
+          >
+            删除所选
+          </button>
+        </div>
+        <div className="history-pagination-controls">
+          <label>
+            每页
+            <select
+              value={pageSize}
+              onChange={(event) =>
+                handlePageSizeChange(Number(event.target.value))
+              }
+            >
+              {RUN_PAGE_SIZE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="history-pagination-buttons">
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => handlePageChange(-1)}
+              disabled={page <= 1}
+            >
+              上一页
+            </button>
+            <span>
+              第 {page} / {totalPages} 页
+            </span>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => handlePageChange(1)}
+              disabled={page >= totalPages}
+            >
+              下一页
+            </button>
+          </div>
+          <label className="history-page-jump">
+            跳转
+            <input
+              type="number"
+              min={1}
+              value={pageInput}
+              onChange={(event) => setPageInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  handlePageJump();
+                }
+              }}
+            />
+          </label>
+          <button type="button" className="secondary" onClick={handlePageJump}>
+            确定
+          </button>
+        </div>
+      </div>
+      <div className="table-wrapper">
+        {filteredRuns.length === 0 ? (
+          <div className="placeholder">暂无巡检记录</div>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>巡检编号</th>
+                <th>集群</th>
+                <th>巡检人</th>
+                <th>执行方式</th>
+                <th>状态</th>
+                <th>Agent 状态</th>
+                <th>开始时间</th>
+                <th>结束时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pagedRuns.map((run) => {
+                const runSlug = runDisplayIds[run.id] ?? `#${run.id}`;
+                const clusterSlug =
+                  clusterDisplayIds[run.cluster_id] ?? `#${run.cluster_id}`;
+                const isSelected = selectedRunIds.includes(run.id);
+                return (
+                  <tr key={run.id}>
+                    <td>
+                      <label className="table-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => handleToggleRun(run.id)}
+                        />
+                        <span>{runSlug}</span>
+                      </label>
+                    </td>
+                    <td>{clusterSlug}</td>
+                    <td>{run.operator || "-"}</td>
+                    <td>
+                      {describeExecutor(
+                        run.executor,
+                        run.agent_name,
+                        run.agent_id
+                      )}
+                    </td>
+                    <td>
+                      <span className={statusClass(run.status)}>
+                        {run.status_label ?? run.status}
+                      </span>
+                    </td>
+                    <td>
+                      {run.executor === "agent" && run.agent_status ? (
+                        <span className={agentStatusClassName(run.agent_status)}>
+                          {run.agent_status_label ??
+                            describeAgentStatus(run.agent_status)}
+                        </span>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+                    <td>{formatDate(run.created_at)}</td>
+                    <td>{formatDate(run.completed_at)}</td>
+                    <td className="actions">
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={() =>
+                          navigate(`/clusters/${clusterSlug}/runs/${runSlug}`)
+                        }
+                      >
+                        查看详情
+                      </button>
+                      {run.report_path && (
+                        <a
+                          className="link-button"
+                          href={run.report_path}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          下载报告
+                        </a>
+                      )}
+                      {run.status === "running" && (
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={() => void onCancelRun(run)}
+                        >
+                          取消
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="link-button danger"
+                        onClick={() => void onDeleteRun(run)}
+                      >
+                        删除
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </section>
+  );};
+
+
+interface AgentSettingsPanelProps {
+  agents: InspectionAgent[];
+  loading: boolean;
+  submitting: boolean;
+  notice: string | null;
+  error: string | null;
+  generatedToken: string | null;
+  onRefresh: () => Promise<void>;
+  onCreate: (payload: {
+    name: string;
+    description?: string;
+    prometheus_url?: string | null;
+  }) => Promise<void>;
+  onUpdate: (
+    agentId: number,
+    payload: {
+      name?: string;
+      description?: string;
+      is_enabled?: boolean;
+      prometheus_url?: string | null;
+    }
+  ) => Promise<InspectionAgent | null>;
+  onClearToken: () => void;
+  canManageAgents: boolean;
+}
+
+const AgentSettingsPanel = ({
+  agents,
+  loading,
+  submitting,
+  notice,
+  error,
+  generatedToken,
+  onRefresh,
+  onCreate,
+  onUpdate,
+  onClearToken,
+  canManageAgents,
+}: AgentSettingsPanelProps) => {
+  const [formName, setFormName] = useState("");
+  const [formDescription, setFormDescription] = useState("");
+  const [formPrometheusUrl, setFormPrometheusUrl] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmedName = formName.trim();
+    if (!trimmedName) {
+      setFormError("Agent 名称不能为空");
+      return;
+    }
+    setFormError(null);
+    try {
+      await onCreate({
+        name: trimmedName,
+        description: formDescription.trim() || undefined,
+        prometheus_url: formPrometheusUrl.trim() || undefined,
+      });
+      setFormName("");
+      setFormDescription("");
+      setFormPrometheusUrl("");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "创建 Agent 失败";
+      setFormError(message);
+    }
+  };
+
+  const handleToggleAgent = async (agent: InspectionAgent) => {
+    try {
+      await onUpdate(agent.id, { is_enabled: !agent.is_enabled });
+    } catch {
+      /* ignore */
+    }
+  };
+
+  return (
+    <div className="agent-settings-panel">
+      <div className="agent-settings-header">
+        <h3>Agent 管理</h3>
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => void onRefresh()}
+          disabled={loading || submitting}
+        >
+          {loading ? "刷新中..." : "刷新列表"}
+        </button>
+      </div>
+      {notice && <div className="feedback success">{notice}</div>}
+      {error && <div className="feedback error">{error}</div>}
+      {!canManageAgents && (
+        <div className="feedback warning">
+          当前 License 不支持 Agent 管理，相关操作已禁用。
+        </div>
+      )}
+      <section className="agent-create-section">
+        <h4>新增 Agent</h4>
+        <form className="agent-create-form" onSubmit={handleSubmit}>
+          <label>
+            Agent 名称
+            <input
+              type="text"
+              value={formName}
+              onChange={(event) => setFormName(event.target.value)}
+              disabled={submitting || !canManageAgents}
+              placeholder="例如：beijing-agent-01"
+            />
+          </label>
+          <label>
+            描述
+            <input
+              type="text"
+              value={formDescription}
+              onChange={(event) => setFormDescription(event.target.value)}
+              disabled={submitting || !canManageAgents}
+              placeholder="可选，说明用途或位置"
+            />
+          </label>
+          <label>
             Agent Prometheus 地址
             <input
               type="text"
               value={formPrometheusUrl}
               onChange={(event) => setFormPrometheusUrl(event.target.value)}
               disabled={submitting || !canManageAgents}
-              placeholder="可选：覆盖集群 Prometheus 地址"
+              placeholder="可选，填写该 Agent 采集的 Prometheus 地址"
             />
           </label>
           {formError && <div className="feedback error">{formError}</div>}
@@ -1401,7 +1738,7 @@ const HistoryView = ({
         </form>
         {generatedToken && (
           <div className="agent-token-box">
-            <p>创建成功！请立即保存以下 Token，该页面关闭后将无法再次查看。</p>
+            <p>创建成功！请妥善保存 Token，页面关闭后将无法再次查看。</p>
             <code>{generatedToken}</code>
             <button
               type="button"
@@ -1471,7 +1808,6 @@ const HistoryView = ({
     </div>
   );
 };
-
 interface ClusterEditModalProps {
   cluster: ClusterConfig;
   submitting: boolean;
@@ -3495,6 +3831,8 @@ const hasManualKubeconfig = useMemo(
 };
 
 export default App;
+
+
 
 
 
