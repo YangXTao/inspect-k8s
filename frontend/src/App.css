@@ -1643,10 +1643,6 @@ th {
   gap: 12px;
 }
 
-.agent-settings-card {
-  display: none;
-}
-
 .execution-settings label {
   display: flex;
   flex-direction: column;
