@@ -4,6 +4,8 @@ import argparse
 import base64
 import logging
 import os
+import shutil
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -129,12 +131,44 @@ def _build_incluster_kubeconfig() -> Optional[Tuple[bytes, str]]:
     return dumped, "in-cluster"
 
 
+def _capture_kubeconfig_from_kubectl() -> Optional[Tuple[bytes, str]]:
+    kube_binary = os.getenv("KUBECTL_BINARY", "kubectl")
+    if shutil.which(kube_binary) is None:
+        return None
+    command = [kube_binary, "config", "view", "--raw"]
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        LOG.debug("执行 kubectl config view 失败: %s", exc)
+        return None
+    if result.returncode != 0:
+        LOG.warning(
+            "kubectl config view 返回异常(%s): %s",
+            result.returncode,
+            result.stderr.strip(),
+        )
+        return None
+    stdout = result.stdout.strip()
+    if not stdout:
+        LOG.warning("kubectl config view 未返回任何 kubeconfig 内容。")
+        return None
+    return stdout.encode("utf-8"), "kubectl-export"
+
+
 def _resolve_kubeconfig_bytes(
     config: "AgentConfig",
 ) -> Tuple[Optional[bytes], Optional[str]]:
     if config.kubeconfig_path:
         data = _read_kubeconfig_bytes(config.kubeconfig_path, strict=True)
         if data:
+            LOG.info("使用显式指定的 kubeconfig: %s", config.kubeconfig_path)
             return data, config.kubeconfig_path.name
         return None, None
 
@@ -147,6 +181,19 @@ def _resolve_kubeconfig_bytes(
                 continue
             candidates.append(Path(cleaned).expanduser())
     candidates.append(Path.home() / ".kube" / "config")
+    candidates.extend(
+        [
+            Path("/etc/rancher/k3s/k3s.yaml"),
+            Path("/etc/rancher/rke2/rke2.yaml"),
+            Path("/etc/kubernetes/admin.conf"),
+        ]
+    )
+    fallback_env = os.getenv("INSPECT_AGENT_KUBECONFIG_FALLBACKS")
+    if fallback_env:
+        for raw in fallback_env.split(os.pathsep):
+            cleaned = raw.strip()
+            if cleaned:
+                candidates.append(Path(cleaned).expanduser())
 
     seen: Set[str] = set()
     for candidate in candidates:
@@ -164,6 +211,12 @@ def _resolve_kubeconfig_bytes(
         LOG.info("已根据 ServiceAccount 自动生成 kubeconfig。")
         return incluster
 
+    kubectl_config = _capture_kubeconfig_from_kubectl()
+    if kubectl_config:
+        LOG.info("已通过 kubectl config view 捕获 kubeconfig。")
+        return kubectl_config
+
+    LOG.warning("未能自动发现 kubeconfig，后端可能无法完成连通性校验。")
     return None, None
 
 

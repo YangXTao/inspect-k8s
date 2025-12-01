@@ -663,30 +663,38 @@ const OverviewView = ({
   );
   const agentModeDisabled =
     !license.canManageAgents || enabledAgents.length === 0;
-
-  const handleDefaultAgentSelect = useCallback(
-    (event: ChangeEvent<HTMLSelectElement>) => {
-      const raw = event.target.value;
-      if (!raw) {
-        setClusterDefaultAgentIdInput(null);
-        return;
-      }
-      const numeric = Number(raw);
-      setClusterDefaultAgentIdInput(Number.isNaN(numeric) ? null : numeric);
-    },
-    [setClusterDefaultAgentIdInput]
-  );
   useEffect(() => {
+    if (!license.canManageAgents) {
+      setClusterDefaultAgentIdInput(null);
+      return;
+    }
     if (
       clusterDefaultAgentIdInput !== null &&
       enabledAgents.some((agent) => agent.id === clusterDefaultAgentIdInput)
     ) {
       return;
     }
-    if (enabledAgents.length === 1) {
+    if (enabledAgents.length > 0) {
       setClusterDefaultAgentIdInput(enabledAgents[0].id);
     }
-  }, [clusterDefaultAgentIdInput, enabledAgents, setClusterDefaultAgentIdInput]);
+  }, [
+    license.canManageAgents,
+    clusterDefaultAgentIdInput,
+    enabledAgents,
+    setClusterDefaultAgentIdInput,
+  ]);
+  const currentAgentLabel = useMemo(() => {
+    if (clusterDefaultAgentIdInput == null) {
+      return null;
+    }
+    const agent = enabledAgents.find(
+      (item) => item.id === clusterDefaultAgentIdInput
+    );
+    if (agent) {
+      return agent.name;
+    }
+    return `#${clusterDefaultAgentIdInput}`;
+  }, [clusterDefaultAgentIdInput, enabledAgents]);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const pageFromSearch = useMemo(() => {
@@ -861,65 +869,33 @@ const OverviewView = ({
               disabled={!license.canManageClusters}
               onChange={(event) => setClusterPromInput(event.target.value)}
             />
-            <label className="cluster-upload-label">
-              默认 Agent
-              <select
-                value={
-                  clusterDefaultAgentIdInput !== null
-                    ? String(clusterDefaultAgentIdInput)
-                    : ""
-                }
-                onChange={handleDefaultAgentSelect}
-                disabled={
-                  !license.canManageClusters ||
-                  !license.canManageAgents ||
-                  agentLoading
-                }
-              >
-                <option value="">请选择可用 Agent</option>
-                {enabledAgents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name}
-                    {agent.cluster_name ? `（${agent.cluster_name}）` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="cluster-upload-agent-meta">
+                       <div className="cluster-upload-agent-meta">
               <button
                 type="button"
                 className="link-button small"
                 onClick={() => void onRefreshAgents()}
                 disabled={agentLoading}
               >
-                刷新 Agent
+                ?? Agent
               </button>
               {agentLoading && (
-                <span className="cluster-upload-note">Agent 列表加载中...</span>
+                <span className="cluster-upload-note">Agent ?????...</span>
+              )}
+              {!agentLoading && !agentModeDisabled && currentAgentLabel && (
+                <span className="cluster-upload-note">
+                  ???? Agent?{currentAgentLabel}
+                </span>
               )}
               {!agentLoading && agentModeDisabled && (
-                  <span className="cluster-upload-note warning">
-                    {license.canManageAgents
-                      ? "暂无可用 Agent，请先在设置中创建。"
-                      : license.reason ?? "当前 License 不支持 Agent 管理。"}
-                  </span>
-                )}
+                <span className="cluster-upload-note warning">
+                  {license.canManageAgents
+                    ? "???? Agent??????????"
+                    : license.reason ?? "?? License ??? Agent ??"}
+                </span>
+              )}
               {agentError && (
                 <span className="cluster-upload-note error">{agentError}</span>
               )}
-            </div>
-            <button
-              type="button"
-              className={`cluster-upload-trigger${
-                kubeconfigReady ? " ready" : ""
-              }`}
-              onClick={openKubeconfigModal}
-              disabled={!license.canManageClusters}
-            >
-              {kubeconfigReady ? "查看 / 更新 kubeconfig" : "导入 kubeconfig"}
-            </button>
-            <div className="cluster-upload-hint">
-              {kubeconfigSummary ?? "支持上传文件或粘贴 YAML 内容"}
             </div>
             <button
               className="secondary"
@@ -2206,7 +2182,7 @@ const ClusterDetailContent = ({
           </div>
         </div>
 
-        <div className="detail-card">
+        <div className="detail-card agent-settings-card">
           <h2>Agent 设置</h2>
           <div className="execution-settings">
             <label>
