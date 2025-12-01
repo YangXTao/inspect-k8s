@@ -377,7 +377,9 @@ body {
 }
 
 .history-filter-group {
-  align-items: flex-end;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
 }
 
@@ -385,16 +387,16 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 12px;
+  font-size: 13px;
   color: #475569;
 }
 
 .history-filter-group select {
-  padding: 5px 10px;
+  padding: 6px 10px;
   border-radius: 8px;
   border: 1px solid #cbd5f5;
   background: #fff;
-  font-size: 12px;
+  font-size: 13px;
   min-width: 130px;
 }
 
@@ -1062,6 +1064,73 @@ th {
   margin-top: 8px;
 }
 
+.history-page .card-header {
+  align-items: center;
+}
+
+.history-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  margin-bottom: 16px;
+}
+
+.history-selection {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.history-selection .selection-hint {
+  font-size: 13px;
+  color: #475569;
+}
+
+.history-pagination-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.history-pagination-controls select,
+.history-pagination-controls input {
+  border-radius: 10px;
+  border: 1px solid #cbd5f5;
+  padding: 6px 10px;
+  font-size: 13px;
+  background: #fff;
+}
+
+.history-pagination-buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.history-pagination-buttons span {
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.history-selection .table-checkbox {
+  gap: 6px;
+}
+
+.history-selection .table-checkbox span {
+  font-size: 13px;
+  color: #1e293b;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1205,6 +1274,7 @@ th {
   max-width: 960px;
   position: relative;
   overflow: hidden;
+  padding: 24px;
 }
 
 .settings-confirm-backdrop {
@@ -1222,6 +1292,7 @@ th {
   display: flex;
   gap: 24px;
   align-items: flex-start;
+  width: 100%;
 }
 
 .settings-modal-nav {
@@ -1230,7 +1301,10 @@ th {
   gap: 8px;
   min-width: 168px;
   align-self: stretch;
-  padding-bottom: 12px;
+  padding: 16px 14px;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
 }
 
 .settings-nav-button {
@@ -1259,6 +1333,15 @@ th {
 .settings-modal-main {
   flex: 1;
   min-width: 0;
+  padding: 4px;
+}
+
+.settings-modal-main > * {
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 18px 20px;
+  background: #fff;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08);
 }
 
 .inspection-settings-panel {

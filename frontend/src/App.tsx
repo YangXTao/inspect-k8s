@@ -1691,14 +1691,6 @@ interface ClusterDetailViewProps {
   onTestClusterConnection: (clusterId: number) => Promise<void>;
   testingClusterIds: Record<number, boolean>;
   license: LicenseCapabilities;
-  agents: InspectionAgent[];
-  agentLoading: boolean;
-  agentError: string | null;
-  onRefreshAgents: () => Promise<void>;
-  onUpdateClusterExecution: (
-    clusterId: number,
-    payload: { defaultAgentId: number | null }
-  ) => Promise<void>;
 }
 
 const ClusterDetailView = ({
@@ -1727,18 +1719,11 @@ const ClusterDetailView = ({
   onTestClusterConnection,
   testingClusterIds,
   license,
-  agents,
-  agentLoading,
-  agentError,
-  onRefreshAgents,
-  onUpdateClusterExecution,
 }: ClusterDetailViewProps) => {
   const { clusterKey } = useParams<{ clusterKey?: string }>();
   const navigate = useNavigate();
   const operatorInputId = useId();
   const [selectedRunIds, setSelectedRunIds] = useState<number[]>([]);
-  const [agentConfigError, setAgentConfigError] = useState<string | null>(null);
-  const [agentConfigLoading, setAgentConfigLoading] = useState(false);
 
   const resolvedClusterId = useMemo(
     () =>
@@ -1815,10 +1800,6 @@ const ClusterDetailView = ({
   const clusterSlug = getClusterDisplayId(clusterDisplayIds, cluster.id, cluster);
   const isTesting = Boolean(testingClusterIds[cluster.id]);
   const contexts = cluster.contexts ?? [];
-  const enabledAgents = useMemo(
-    () => agents.filter((agent) => agent.is_enabled),
-    [agents]
-  );
   const allItemsSelected =
     items.length > 0 && selectedIds.length === items.length;
   const shouldShowClusterNotice =
@@ -1892,36 +1873,6 @@ const ClusterDetailView = ({
     void onStartInspection(cluster.id);
   }, [cluster.id, onStartInspection]);
 
-  const handleAgentChange = useCallback(
-    async (event: ChangeEvent<HTMLSelectElement>) => {
-      if (!cluster) {
-        return;
-      }
-      const value = event.target.value;
-      const nextAgentId = value ? Number(value) : null;
-      if (
-        (cluster.default_agent_id ?? null) === (nextAgentId ?? null) &&
-        cluster.execution_mode === "agent"
-      ) {
-        return;
-      }
-      setAgentConfigError(null);
-      setAgentConfigLoading(true);
-      try {
-        await onUpdateClusterExecution(cluster.id, {
-          defaultAgentId: nextAgentId,
-        });
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "更新默认 Agent 失败";
-        setAgentConfigError(message);
-      } finally {
-        setAgentConfigLoading(false);
-      }
-    },
-    [cluster, onUpdateClusterExecution]
-  );
-
   return (
     <>
       <div className="detail-header">
@@ -1933,6 +1884,14 @@ const ClusterDetailView = ({
           ← 返回集群列表
         </button>
         <div className="detail-header-actions">
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => void onTestClusterConnection(cluster.id)}
+            disabled={isTesting}
+          >
+            {isTesting ? "校验中..." : "重新校验连接"}
+          </button>
           <button
             type="button"
             className="secondary"
@@ -2016,16 +1975,6 @@ const ClusterDetailView = ({
               {formatDate(cluster.updated_at)}
             </div>
           </div>
-          <div className="cluster-status-line detail-actions-inline">
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => void onTestClusterConnection(cluster.id)}
-              disabled={isTesting}
-            >
-              {isTesting ? "正在校验..." : "重新校验连接"}
-            </button>
-          </div>
           <div className="cluster-contexts detail-contexts">
             {contexts.length > 0 ? (
               contexts.map((ctx) => (
@@ -2036,60 +1985,6 @@ const ClusterDetailView = ({
             ) : (
               <span className="chip muted">未检测到上下文</span>
             )}
-          </div>
-          <div className="agent-config-panel">
-            <div className="agent-config-header">
-              <h3>Agent 绑定</h3>
-              <button
-                type="button"
-                className="link-button"
-                onClick={() => void onRefreshAgents()}
-                disabled={agentLoading}
-              >
-                {agentLoading ? "刷新中..." : "刷新列表"}
-              </button>
-            </div>
-            {!license.canManageAgents && (
-              <div className="feedback warning">
-                当前 License 不支持调整 Agent，请联系管理员升级授权。
-              </div>
-            )}
-            {agentError && <div className="feedback error">{agentError}</div>}
-            {agentConfigError && (
-              <div className="feedback error">{agentConfigError}</div>
-            )}
-            <label className="agent-config-field">
-              默认 Agent
-              <select
-                value={
-                  cluster.default_agent_id !== null &&
-                  typeof cluster.default_agent_id === "number"
-                    ? String(cluster.default_agent_id)
-                    : ""
-                }
-                onChange={handleAgentChange}
-                disabled={
-                  agentConfigLoading ||
-                  !license.canManageAgents ||
-                  cluster.execution_mode !== "agent"
-                }
-              >
-                <option value="">
-                  {cluster.execution_mode === "agent"
-                    ? "自动分配（执行时选择 Agent）"
-                    : "服务器执行模式无需设置"}
-                </option>
-                {agents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name}
-                    {!agent.is_enabled ? "（已禁用）" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <p className="agent-config-note">
-              可用 Agent：{enabledAgents.length} / {agents.length}
-            </p>
           </div>
         </div>
 
@@ -4762,6 +4657,9 @@ const backgroundLocation =
       showClusterNotice,
     ]
   );
+  useEffect(() => {
+    // 预留引用，避免未来依赖时重新声明
+  }, [handleUpdateClusterExecution]);
 const hasManualKubeconfig = useMemo(
     () => kubeconfigEdited && kubeconfigText.trim().length > 0,
     [kubeconfigEdited, kubeconfigText]
@@ -5659,11 +5557,6 @@ const hasManualKubeconfig = useMemo(
                 onTestClusterConnection={handleTestClusterConnection}
                 testingClusterIds={testingClusterIds}
                 license={licenseCapabilities}
-                agents={agents}
-                agentLoading={agentLoading}
-                agentError={agentError}
-                onRefreshAgents={refreshAgents}
-                onUpdateClusterExecution={handleUpdateClusterExecution}
               />
             }
           />
