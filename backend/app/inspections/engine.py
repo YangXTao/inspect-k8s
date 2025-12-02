@@ -43,6 +43,29 @@ def _run_kubectl(args: Iterable[str], context: CheckContext) -> Tuple[bool, str]
     return True, result.stdout.strip()
 
 
+def _run_kubectl_version_pipeline(context: CheckContext) -> Tuple[bool, str]:
+    base_cmd = ["kubectl"]
+    if context.kubeconfig_path:
+        base_cmd.extend(["--kubeconfig", context.kubeconfig_path])
+    base_cmd.append("version")
+    pipeline = f"{shlex.join(base_cmd)} | grep Server | awk '{{print $3}}'"
+    try:
+        result = subprocess.run(
+            pipeline,
+            shell=True,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except Exception as exc:
+        return False, f"kubectl pipeline error: {exc}"
+    if result.returncode != 0:
+        message = result.stderr.strip() or result.stdout.strip()
+        return False, message or "kubectl pipeline returned non-zero exit code."
+    return True, result.stdout.strip()
+
+
 DEFAULT_COMMAND_TIMEOUT = 30
 MAX_OUTPUT_LENGTH = 2000
 
