@@ -16,6 +16,22 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 import requests
 import yaml
 
+# 确保可以引用后端共享的巡检引擎实现
+REPO_ROOT = Path(__file__).resolve().parents[1]
+BACKEND_PATH = REPO_ROOT / "backend"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+if BACKEND_PATH.exists() and str(BACKEND_PATH) not in sys.path:
+    sys.path.insert(0, str(BACKEND_PATH))
+
+try:
+    from app.inspections.engine import CheckContext, dispatch_checks
+    from app.prometheus import PrometheusClient
+except ImportError as exc:  # pragma: no cover - 环境缺失时直接失败
+    raise RuntimeError(
+        "Agent 运行需要可用的 backend/app 模块，请确保以仓库根目录运行或安装后端依赖。"
+    ) from exc
+
 LOG = logging.getLogger("inspect-agent")
 
 DEFAULT_POLL_INTERVAL = 10
@@ -447,39 +463,17 @@ class AgentClient:
         return resp.json()
 
 
-class PrometheusExecutor:
-    def __init__(self, base_url: Optional[str], session: requests.Session, timeout: int) -> None:
-        self.base_url = base_url.rstrip("/") if base_url else None
-        self.session = session
-        self.timeout = timeout
-
-    def available(self) -> bool:
-        return bool(self.base_url)
-
-    def query(self, promql: str) -> Dict[str, Any]:
-        if not self.base_url:
-            raise RuntimeError("未配置 Prometheus 地址。")
-        resp = self.session.get(
-            f"{self.base_url}/api/v1/query",
-            params={"query": promql},
-            timeout=self.timeout,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        if data.get("status") != "success":
-            raise RuntimeError(data.get("error", "Prometheus 查询失败"))
-        return data.get("data", {})
-
-
 class AgentRunner:
     def __init__(self, config: AgentConfig, client: AgentClient) -> None:
         self.config = config
         self.client = client
-        self.prom = PrometheusExecutor(
-            config.prometheus_url,
-            client.session,
-            timeout=config.request_timeout,
-        )
+        self.prom_client: Optional[PrometheusClient] = None
+        if config.prometheus_url:
+            self.prom_client = PrometheusClient(
+                config.prometheus_url,
+                timeout=float(config.request_timeout),
+                verify_ssl=config.verify_ssl,
+            )
 
     def build_bootstrap_payload(self) -> Optional[Dict[str, Any]]:
         if self.config.cluster_name is None:
@@ -552,17 +546,38 @@ class AgentRunner:
         items = task.get("items") or []
         results: List[Dict[str, Any]] = []
         cluster_id = task.get("cluster_id")
+        context = CheckContext(
+            kubeconfig_path=str(self.config.kubeconfig_path)
+            if self.config.kubeconfig_path
+            else None,
+            prom=self.prom_client,
+        )
         for item in items:
             item_id = item.get("id")
             name = item.get("name") or f"item-{item_id}"
+            check_type = (item.get("check_type") or "").strip()
             config = item.get("config") or {}
-            promql = config.get("promql")
-            if promql:
-                status, detail, suggestion = self._run_promql(name, promql, cluster_id)
-            else:
-                status = "warning"
-                detail = "未提供 PromQL 配置，任务已跳过。"
-                suggestion = "补充 promql 字段或在服务器端调整巡检逻辑。"
+            LOG.info(
+                "开始执行巡检项 %s (type=%s, cluster_id=%s)",
+                name,
+                check_type or "unknown",
+                cluster_id,
+            )
+            try:
+                status, detail, suggestion = dispatch_checks(
+                    check_type or "custom", context, config
+                )
+            except Exception as exc:  # pragma: no cover - 防御
+                LOG.exception("巡检项 %s 执行异常: %s", name, exc)
+                status = "failed"
+                detail = f"Agent 执行 {name} 失败：{exc}"
+                suggestion = "查看 Agent 日志或检查巡检配置。"
+            LOG.info(
+                "巡检项 %s 完成，状态=%s，摘要=%s",
+                name,
+                status,
+                (detail or "")[:120],
+            )
             results.append(
                 {
                     "item_id": item_id,
@@ -572,39 +587,6 @@ class AgentRunner:
                 }
             )
         return results
-
-    def _run_promql(
-        self,
-        item_name: str,
-        promql: str,
-        cluster_id: Optional[int],
-    ) -> tuple[str, str, Optional[str]]:
-        if not self.prom.available():
-            return (
-                "warning",
-                f"未配置 Prometheus 地址，无法执行 {item_name} 的 PromQL。",
-                "配置 prometheus.base_url 或在环境变量 INSPECT_AGENT_PROM_URL 中提供地址。",
-            )
-        try:
-            data = self.prom.query(promql)
-        except Exception as exc:
-            return (
-                "failed",
-                f"PromQL 查询失败：{exc}",
-                "检查 Prometheus 网络连通性与认证配置。",
-            )
-        result = data.get("result") or []
-        if result:
-            detail = (
-                f"PromQL 返回 {len(result)} 条结果。"
-                f"{' (cluster %s)' % cluster_id if cluster_id is not None else ''}"
-            )
-            return "passed", detail, None
-        return (
-            "warning",
-            "PromQL 查询成功但结果为空，可能无匹配样本。",
-            "确认 PromQL 是否正确，或调整时间窗口。",
-        )
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
