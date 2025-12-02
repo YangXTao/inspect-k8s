@@ -639,13 +639,26 @@ def agent_bootstrap(
 
         contexts_json: Optional[str] = None
         if cluster_payload.kubeconfig_b64:
+            raw_kubeconfig = cluster_payload.kubeconfig_b64
+            kubeconfig_text = raw_kubeconfig
+            decoded_bytes: Optional[bytes] = None
             try:
-                kubeconfig_bytes = base64.b64decode(cluster_payload.kubeconfig_b64)
+                decoded_bytes = base64.b64decode(
+                    raw_kubeconfig, validate=True
+                )
             except (binascii.Error, ValueError):
-                raise HTTPException(status_code=400, detail="kubeconfig 不是合法的 Base64 字符串")
-                kubeconfig_text = kubeconfig_bytes.decode("utf-8")
+                decoded_bytes = None
+            if decoded_bytes:
+                try:
+                    decoded_text = decoded_bytes.decode("utf-8")
+                except UnicodeDecodeError:
+                    decoded_text = None
+                if decoded_text:
+                    kubeconfig_text = decoded_text
+            contexts: List[str] = []
+            try:
                 contexts = _extract_contexts(kubeconfig_text)
-            except UnicodeDecodeError:
+            except yaml.YAMLError:
                 contexts = []
             if contexts:
                 contexts_json = json.dumps(contexts, ensure_ascii=False)
