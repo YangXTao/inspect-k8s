@@ -708,6 +708,7 @@ def agent_bootstrap(
         refreshed = crud.get_inspection_agent(db, agent.id)
         if not refreshed:
             raise HTTPException(status_code=500, detail="Agent 信息刷新失败")
+        return _serialize_agent(refreshed)
     finally:
         db.close()
 
