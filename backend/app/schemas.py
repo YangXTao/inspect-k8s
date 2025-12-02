@@ -339,12 +339,19 @@ class AgentRunResultIn(BaseModel):
 
 
 class AgentBootstrapCluster(BaseModel):
-    name: str = Field(..., max_length=150, description="Agent ��Ӧ�ļ�Ⱥ����")
-    kubeconfig_b64: Optional[str] = Field(
-        None, description="Base64 ����� kubeconfig ���ݣ����ѡ��"
+    name: str = Field(
+        ...,
+        max_length=150,
+        description="Agent 侧上报的集群名称",
     )
+    kubeconfig_b64: Optional[str] = Field(
+        None,
+        description="Base64 编码的 kubeconfig 内容",
+    )
+
     kubeconfig_name: Optional[str] = Field(
-        None, description="kubeconfig ԭʼ�ļ����ƣ����ѡ��"
+        None,
+        description="kubeconfig 文件名（可选）",
     )
 
 
@@ -353,20 +360,14 @@ class AgentBootstrapIn(BaseModel):
         ...,
         min_length=16,
         max_length=128,
-        description="Server �������ɵ� Agent ���� Token",
+        description="Server 端分发给 Agent 的注册 Token",
     )
     prometheus_url: Optional[str] = Field(
         None,
         max_length=255,
-        description="Agent ���ṩ�� Prometheus ��ַ����ѡ��",
+        description="Agent 采集侧上报的 Prometheus 地址（可选）",
     )
     cluster: AgentBootstrapCluster
-
-
-class InspectionItemsExportOut(BaseModel):
-    exported_at: datetime
-    items: List[InspectionItemOut]
-
 
 class InspectionItemsImportPayload(BaseModel):
     items: List[InspectionItemCreate] = Field(..., min_length=1)

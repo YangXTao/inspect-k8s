@@ -622,19 +622,18 @@ def agent_bootstrap(
 ):
     token_value = (payload.registration_token or "").strip()
     if not token_value:
-        raise HTTPException(status_code=400, detail="Agent token ȱʧ��")
+        raise HTTPException(status_code=400, detail="Agent Token 不能为空")
 
     db = SessionLocal()
     try:
         agent = crud.get_inspection_agent_by_token(db, token_value)
         if not agent:
-            raise HTTPException(status_code=401, detail="Agent token ��Ч��")
+            raise HTTPException(status_code=401, detail="Agent Token 无效或已过期")
 
         cluster_payload = payload.cluster
         cluster_name = (cluster_payload.name or "").strip()
         if not cluster_name:
-            raise HTTPException(status_code=400, detail="��Ⱥ���Ʋ���Ϊ�ա�")
-
+            raise HTTPException(status_code=400, detail="集群名称不能为空")
         cluster = agent.cluster or crud.get_cluster_by_name(db, cluster_name)
         incoming_prom_url = _normalize_prometheus_url(payload.prometheus_url)
 
@@ -643,8 +642,7 @@ def agent_bootstrap(
             try:
                 kubeconfig_bytes = base64.b64decode(cluster_payload.kubeconfig_b64)
             except (binascii.Error, ValueError):
-                raise HTTPException(status_code=400, detail="kubeconfig ������Ч��")
-            try:
+                raise HTTPException(status_code=400, detail="kubeconfig 不是合法的 Base64 字符串")
                 kubeconfig_text = kubeconfig_bytes.decode("utf-8")
                 contexts = _extract_contexts(kubeconfig_text)
             except UnicodeDecodeError:
@@ -661,7 +659,7 @@ def agent_bootstrap(
 
         now = datetime.utcnow()
         connection_status = "connected"
-        connection_message = "Agent �Ѿ�ע�ᣬServer �������� kubeconfig��"
+        connection_message = "Agent 已完成注册，Server 端已托管 kubeconfig。"
 
         if cluster is None:
             cluster = crud.create_cluster(
@@ -709,8 +707,7 @@ def agent_bootstrap(
         crud.record_agent_heartbeat(db, agent, seen_at=datetime.utcnow())
         refreshed = crud.get_inspection_agent(db, agent.id)
         if not refreshed:
-            raise HTTPException(status_code=500, detail="Agent ע��ʧ�ܡ�")
-        return _serialize_agent(refreshed)
+            raise HTTPException(status_code=500, detail="Agent 信息刷新失败")
     finally:
         db.close()
 
