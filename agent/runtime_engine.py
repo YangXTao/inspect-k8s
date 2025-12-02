@@ -372,6 +372,43 @@ def check_cluster_version(context: CheckContext):
     return CHECK_STATUS_PASSED, line.strip(), ""
 
 
+
+
+def check_connection_probe(context: CheckContext):
+    ok, version_output = _run_kubectl(["version", "--short"], context)
+    if not ok:
+        return (
+            CHECK_STATUS_FAILED,
+            _truncate(version_output),
+            "检查 kubeconfig、网络或 API Server 状态。",
+        )
+    server_line = next(
+        (
+            line
+            for line in version_output.splitlines()
+            if line.lower().startswith("server version")
+        ),
+        version_output.splitlines()[0] if version_output else "",
+    ).strip()
+    nodes_ok, nodes_output = _run_kubectl(["get", "nodes", "-o", "json"], context)
+    detail_suffix = ""
+    suggestion = ""
+    if nodes_ok:
+        try:
+            parsed = json.loads(nodes_output)
+            node_count = len(parsed.get("items", []))
+            detail_suffix = f" · 节点数 {node_count}"
+        except json.JSONDecodeError:
+            nodes_ok = False
+            detail_suffix = " · 无法解析节点信息"
+            suggestion = "确认 kubectl 输出是否为 JSON。"
+    else:
+        detail_suffix = f" · {_truncate(nodes_output)}"
+        suggestion = "检查节点可达性或 kubeconfig 权限。"
+    if nodes_ok:
+        return CHECK_STATUS_PASSED, f"{server_line}{detail_suffix}", ""
+    return CHECK_STATUS_WARNING, f"{server_line}{detail_suffix}", suggestion
+
 def check_nodes_status(context: CheckContext):
     ok, payload = _run_kubectl(["get", "nodes", "-o", "json"], context)
     if not ok:
