@@ -455,6 +455,39 @@ def check_cluster_version(context: CheckContext) -> Tuple[str, str, str]:
     return CHECK_STATUS_PASSED, server_line.strip(), ""
 
 
+
+
+def check_connection_probe(context: CheckContext) -> Tuple[str, str, str]:
+    ok, version_output = _run_kubectl(["version", "--short"], context)
+    if not ok:
+        return (
+            CHECK_STATUS_FAILED,
+            _truncate_output(version_output),
+            "检查 kubeconfig、网络或 API Server 状态。",
+        )
+    server_line = next(
+        (line for line in version_output.splitlines() if line.lower().startswith("server version")),
+        version_output.splitlines()[0] if version_output else "",
+    ).strip()
+    nodes_ok, nodes_output = _run_kubectl(["get", "nodes", "-o", "json"], context)
+    detail_suffix = ""
+    suggestion = ""
+    if nodes_ok:
+        try:
+            parsed = json.loads(nodes_output)
+            node_count = len(parsed.get("items", []))
+            detail_suffix = f" · 节点数 {node_count}"
+        except json.JSONDecodeError:
+            nodes_ok = False
+            detail_suffix = " · 无法解析节点信息"
+            suggestion = "确认 kubectl 输出格式或节点接口响应。"
+    else:
+        detail_suffix = f" · {_truncate_output(nodes_output)}"
+        suggestion = "检查集群节点可达性或确认 kubeconfig 权限。"
+    if nodes_ok:
+        return CHECK_STATUS_PASSED, f"{server_line}{detail_suffix}", ""
+    return CHECK_STATUS_WARNING, f"{server_line}{detail_suffix}", suggestion
+
 def check_nodes_status(context: CheckContext) -> Tuple[str, str, str]:
     ok, payload = _run_kubectl(["get", "nodes", "-o", "json"], context)
     if not ok:
@@ -725,6 +758,7 @@ def check_cluster_disk_io(context: CheckContext) -> Tuple[str, str, str]:
 
 HANDLERS: Dict[str, Callable[[CheckContext], Tuple[str, str, str]]] = {
     "cluster_version": check_cluster_version,
+    "connection_probe": check_connection_probe,
     "nodes_status": check_nodes_status,
     "pods_status": check_pods_status,
     # "events_recent": check_events_recent,
@@ -740,6 +774,11 @@ DEFAULT_CHECKS = [
         "name": "Cluster Version",
         "description": "Collects Kubernetes API server and kubectl client version.",
         "check_type": "cluster_version",
+    },
+    {
+        "name": "Connection Probe",
+        "description": "Validates kubeconfig connectivity and summarises node count.",
+        "check_type": "connection_probe",
     },
     {
         "name": "Node Health",

@@ -9,7 +9,7 @@ import base64
 import binascii
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Any, Generator
+from typing import Callable, Dict, List, Optional, Any, Generator, Iterable
 from uuid import uuid4
 import yaml
 from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, UploadFile, Query, Header
@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_INSPECTIONS_SENTINEL = Path("data/state/default_inspections_seeded.flag")
 AGENT_HEARTBEAT_TIMEOUT_MINUTES = 5
 AGENT_HEARTBEAT_TIMEOUT = timedelta(minutes=AGENT_HEARTBEAT_TIMEOUT_MINUTES)
+CONNECTION_TEST_OPERATOR = "__system_connection_test__"
 
 
 @dataclass
@@ -191,6 +192,65 @@ def _attach_run_report(db: Session, run: models.InspectionRun) -> models.Inspect
 
 def _generate_agent_token() -> str:
     return secrets.token_urlsafe(32)
+
+
+def _build_connection_test_plan(cluster: models.ClusterConfig) -> str:
+    plan = [
+        {
+            "id": f"conn-{cluster.id}",
+            "name": "连接连通性测试",
+            "check_type": "connection_probe",
+            "config": {},
+        }
+    ]
+    return json.dumps(plan, ensure_ascii=False)
+
+
+def _resolve_active_agent(db: Session, cluster: models.ClusterConfig) -> Optional[models.InspectionAgent]:
+    agent = cluster.default_agent
+    if agent and agent.is_enabled:
+        return agent
+    fallback = (
+        db.query(models.InspectionAgent)
+        .filter(
+            models.InspectionAgent.cluster_id == cluster.id,
+            models.InspectionAgent.is_enabled.is_(True),
+        )
+        .order_by(models.InspectionAgent.updated_at.desc())
+        .first()
+    )
+    return fallback
+
+
+def _has_pending_connection_test(db: Session, cluster: models.ClusterConfig) -> bool:
+    existing = (
+        db.query(models.InspectionRun)
+        .filter(
+            models.InspectionRun.cluster_id == cluster.id,
+            models.InspectionRun.operator == CONNECTION_TEST_OPERATOR,
+            models.InspectionRun.status.in_(("queued", "running")),
+        )
+        .first()
+    )
+    return existing is not None
+
+
+def _enqueue_connection_test_run(
+    db: Session, cluster: models.ClusterConfig, agent: models.InspectionAgent
+) -> models.InspectionRun:
+    plan_json = _build_connection_test_plan(cluster)
+    return crud.create_inspection_run(
+        db,
+        operator=CONNECTION_TEST_OPERATOR,
+        cluster=cluster,
+        status="queued",
+        total_items=1,
+        processed_items=0,
+        plan_json=plan_json,
+        executor="agent",
+        agent_status="queued",
+        agent_id=agent.id,
+    )
 
 
 def _parse_run_plan(run: models.InspectionRun) -> List[Dict[str, Any]]:
@@ -502,10 +562,33 @@ async def register_cluster(
     response_model=schemas.ClusterConfigOut,
 )
 def test_cluster_connection(cluster_id: int, db: Session = Depends(get_db)):
-    raise HTTPException(
-        status_code=410,
-        detail="连接测试请由 Agent 执行。",
+    cluster = crud.get_cluster(db, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="指定的集群不存在。")
+    if cluster.execution_mode != "agent":
+        raise HTTPException(
+            status_code=400,
+            detail="当前仅支持由 Agent 执行的集群发起连接测试。",
+        )
+    agent = _resolve_active_agent(db, cluster)
+    if not agent:
+        raise HTTPException(
+            status_code=409,
+            detail="未检测到可用 Agent，请先绑定或启用 Agent。",
+        )
+    if _has_pending_connection_test(db, cluster):
+        raise HTTPException(
+            status_code=409,
+            detail="已有连接测试任务执行中，请稍候再试。",
+        )
+    _enqueue_connection_test_run(db, cluster, agent)
+    cluster = crud.update_cluster(
+        db,
+        cluster,
+        connection_status="warning",
+        connection_message="已下发连接测试请求，等待 Agent 返回结果。",
     )
+    return _present_cluster(cluster)
 
 
 @app.put("/clusters/{cluster_id}", response_model=schemas.ClusterConfigOut)
@@ -801,6 +884,48 @@ def agent_claim_run(
     return _serialize_run(updated)
 
 
+
+
+def _apply_connection_test_result(
+    db: Session,
+    run: models.InspectionRun,
+    results: Iterable[Any],
+) -> None:
+    cluster = crud.get_cluster(db, run.cluster_id)
+    if not cluster:
+        return
+    result_payload: Optional[dict[str, Any]] = None
+    for entry in results:
+        if hasattr(entry, "model_dump"):
+            result_payload = entry.model_dump()
+        elif isinstance(entry, dict):
+            result_payload = dict(entry)
+        else:
+            continue
+        break
+    status_map = {"passed": "connected", "warning": "warning", "failed": "failed"}
+    connection_status = "failed"
+    message = ""
+    if result_payload:
+        normalized = str(result_payload.get("status") or "").strip().lower()
+        connection_status = status_map.get(normalized, "failed")
+        message = (result_payload.get("detail") or "").strip()
+    else:
+        normalized_run = (run.status or "").strip().lower()
+        if normalized_run == "finished":
+            connection_status = "connected"
+        elif normalized_run == "warning":
+            connection_status = "warning"
+        message = (run.summary or "").strip()
+    if not message:
+        message = "Agent 未返回详细信息。"
+    crud.update_cluster(
+        db,
+        cluster,
+        connection_status=connection_status,
+        connection_message=message[:500],
+        last_checked_at=datetime.utcnow(),
+    )
 @agent_router.post("/runs/{run_id}/results", response_model=schemas.InspectionRunOut)
 def agent_submit_results(
     run_id: int,
@@ -862,6 +987,8 @@ def agent_submit_results(
         agent_status=agent_state,
     )
     run = _attach_run_report(ctx.db, run)
+    if run.operator == CONNECTION_TEST_OPERATOR:
+        _apply_connection_test_result(ctx.db, run, payload.results)
     return _serialize_run(run)
 
 app.include_router(agent_router)

@@ -1147,35 +1147,6 @@ const OverviewView = ({
         )}
       </section>
 
-      <section className="card overview-footer">
-        <div className="overview-footer-header">
-          <div>
-            <h3>巡检建议</h3>
-            <p>保持 Agent 在线、定期触发巡检并及时下载报告，可以更快发现潜在风险。</p>
-          </div>
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => navigate("/history")}
-          >
-            查看历史巡检
-          </button>
-        </div>
-        <div className="overview-footer-grid">
-          <article className="overview-footer-item">
-            <h4>Agent 状态</h4>
-            <p>Agent 成功注册后会托管 kubeconfig，建议为关键集群保留至少 1 个可用 Agent。</p>
-          </article>
-          <article className="overview-footer-item">
-            <h4>巡检计划</h4>
-            <p>可在业务低峰时触发全量巡检，结合历史页面对比差异以便快速定位问题。</p>
-          </article>
-          <article className="overview-footer-item">
-            <h4>报告归档</h4>
-            <p>巡检完成后可导出报表，按集群建立归档能帮助审计与合规自查。</p>
-          </article>
-        </div>
-      </section>
     </>
   );
 };
