@@ -125,6 +125,22 @@ const BEIJING_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
   second: "2-digit",
 });
 
+const STATUS_CIRCLE_RADIUS = 18;
+const STATUS_CIRCLE_CIRCUMFERENCE = 2 * Math.PI * STATUS_CIRCLE_RADIUS;
+
+const clampProgress = (value?: number) => {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return 0;
+  }
+  if (value < 0) {
+    return 0;
+  }
+  if (value > 100) {
+    return 100;
+  }
+  return Math.round(value);
+};
+
 const statusClass = (status: InspectionRunStatus) => {
   switch (status) {
     case "queued":
