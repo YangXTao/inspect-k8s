@@ -672,6 +672,24 @@ def _normalize_prometheus_url(value: Optional[str]) -> Optional[str]:
     return trimmed.rstrip("/")
 
 
+def _sync_cluster_prometheus_to_agents(
+    db: Session, cluster: models.ClusterConfig
+) -> None:
+    """
+    将集群 Prometheus 地址同步到所有挂载该集群的 Agent。
+    以集群侧配置为最终值，Agent 上的 Prometheus 地址保持一致。
+    """
+    prom_url = cluster.prometheus_url
+    agents = (
+        db.query(models.InspectionAgent)
+        .filter(models.InspectionAgent.cluster_id == cluster.id)
+        .all()
+    )
+    for agent in agents:
+        if agent.prometheus_url != prom_url:
+            crud.update_inspection_agent(db, agent, prometheus_url=prom_url)
+
+
 def _store_kubeconfig(data: bytes, original_name: str | None = None) -> str:
     suffix = ".yaml"
     if original_name:
@@ -993,6 +1011,7 @@ async def register_cluster(
     )
 
     cluster = crud.get_cluster(db, cluster.id)
+    _sync_cluster_prometheus_to_agents(db, cluster)
     return _present_cluster(cluster)
 
 
@@ -1138,6 +1157,7 @@ async def update_cluster(
         _remove_file_safely(original_kubeconfig_path)
 
     cluster = crud.get_cluster(db, cluster.id)
+    _sync_cluster_prometheus_to_agents(db, cluster)
     return _present_cluster(cluster)
 
 
@@ -1201,6 +1221,7 @@ def agent_bootstrap(
             raise HTTPException(status_code=400, detail="集群名称不能为空。")
 
         cluster = agent.cluster or crud.get_cluster_by_name(db, cluster_name)
+        incoming_prom_url = _normalize_prometheus_url(payload.prometheus_url)
         kubeconfig_path: Optional[str] = None
         contexts_json: Optional[str] = None
         kubeconfig_bytes: Optional[bytes] = None
@@ -1229,7 +1250,7 @@ def agent_bootstrap(
                 name=cluster_name,
                 kubeconfig_path=kubeconfig_path,
                 contexts_json=contexts_json,
-                prometheus_url=None,
+                prometheus_url=incoming_prom_url,
                 connection_status="unknown",
                 execution_mode="agent",
                 default_agent_id=agent.id,
@@ -1245,13 +1266,23 @@ def agent_bootstrap(
                 update_kwargs["contexts_json"] = contexts_json
             cluster = crud.update_cluster(db, cluster, **update_kwargs)
 
+        cluster_prom_url = _normalize_prometheus_url(cluster.prometheus_url)
+        final_prom_url = cluster_prom_url or incoming_prom_url
+        if final_prom_url != cluster_prom_url:
+            cluster = crud.update_cluster(
+                db,
+                cluster,
+                prometheus_url=final_prom_url,
+            )
+
         agent = crud.update_inspection_agent(
             db,
             agent,
             cluster=cluster,
             is_enabled=True,
-            prometheus_url=_normalize_prometheus_url(payload.prometheus_url),
+            prometheus_url=final_prom_url,
         )
+        _sync_cluster_prometheus_to_agents(db, cluster)
         crud.record_agent_heartbeat(db, agent, seen_at=datetime.utcnow())
         refreshed = crud.get_inspection_agent(db, agent.id)
         if not refreshed:
