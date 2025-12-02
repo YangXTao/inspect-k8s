@@ -197,7 +197,7 @@ def _generate_agent_token() -> str:
 def _build_connection_test_plan(cluster: models.ClusterConfig) -> str:
     plan = [
         {
-            "id": f"conn-{cluster.id}",
+            "id": -int(cluster.id),
             "name": "连接连通性测试",
             "check_type": "connection_probe",
             "config": {},
