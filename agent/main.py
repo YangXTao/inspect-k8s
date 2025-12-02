@@ -16,7 +16,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 import requests
 import yaml
 
-# 确保可以引用后端共享的巡检引擎实现
+# 优先复用后端实现；若缺失则使用本地备份逻辑，确保独立部署时也能运行
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_PATH = REPO_ROOT / "backend"
 if str(REPO_ROOT) not in sys.path:
@@ -27,12 +27,16 @@ if BACKEND_PATH.exists() and str(BACKEND_PATH) not in sys.path:
 try:
     from app.inspections.engine import CheckContext, dispatch_checks
     from app.prometheus import PrometheusClient
-except ImportError as exc:  # pragma: no cover - 环境缺失时直接失败
-    raise RuntimeError(
-        "Agent 运行需要可用的 backend/app 模块，请确保以仓库根目录运行或安装后端依赖。"
-    ) from exc
+    _ENGINE_SOURCE = "backend"
+except ImportError:
+    from .runtime_engine import CheckContext, dispatch_checks, PrometheusClient
+    _ENGINE_SOURCE = "builtin"
 
 LOG = logging.getLogger("inspect-agent")
+if _ENGINE_SOURCE == "backend":
+    LOG.info("已加载 backend/app 中的巡检引擎。")
+else:
+    LOG.info("未检测到 backend/app，使用 Agent 内置巡检引擎。")
 
 DEFAULT_POLL_INTERVAL = 10
 DEFAULT_BATCH_SIZE = 1
