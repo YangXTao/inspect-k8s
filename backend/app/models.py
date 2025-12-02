@@ -24,7 +24,7 @@ class ClusterConfig(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
 
-    execution_mode = Column(String(20), nullable=False, default="server")
+    execution_mode = Column(String(20), nullable=False, default="agent")
     default_agent_id = Column(
         Integer,
         ForeignKey("inspection_agents.id", ondelete="SET NULL"),

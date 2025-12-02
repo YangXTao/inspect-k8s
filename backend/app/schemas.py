@@ -84,9 +84,6 @@ class ClusterUpdate(BaseModel):
     prometheus_url: Optional[str] = Field(
         None, max_length=255, description="Prometheus 根地址，形如 http(s)://host:port"
     )
-    execution_mode: Optional[str] = Field(
-        None, description="巡检执行模式：server 或 agent"
-    )
     default_agent_id: Optional[int] = Field(
         None, description="默认执行巡检的 Agent ID"
     )

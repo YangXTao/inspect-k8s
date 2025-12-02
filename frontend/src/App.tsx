@@ -734,6 +734,8 @@ const OverviewView = ({
   testingClusterIds,
   license,
 }: OverviewProps) => {
+  const enableServerClusterUpload = false;
+  const enableServerConnectionTest = false;
   const navigate = useNavigate();
   const enabledAgents = useMemo(
     () => agents.filter((agent) => agent.is_enabled),
@@ -908,39 +910,45 @@ const OverviewView = ({
           )}
           <div>
             <h1>Kubernetes 巡检中心</h1>
-            <p>上传 kubeconfig,配置 Prometheus,一键执行巡检并生成报告。</p>
+            <p>通过 Agent 托管集群连接，Server 统一管理巡检项和结果。</p>
           </div>
         </div>
         <div className="header-actions">
-          <div className="cluster-upload">
-            <label>添加集群</label>
-            {!license.loading && !license.valid && (
-              <div className="feedback error">
-                {license.reason ?? "当前 License 无效，无法添加集群。"}
-              </div>
-            )}
-            <input
-              type="text"
-              placeholder="自定义集群名称"
-              value={clusterNameInput}
-              disabled={!license.canManageClusters}
-              onChange={(event) => setClusterNameInput(event.target.value)}
-            />
-            <input
-              type="text"
-              placeholder="Prometheus 地址"
-              value={clusterPromInput}
-              disabled={!license.canManageClusters}
-              onChange={(event) => setClusterPromInput(event.target.value)}
-            />
-            <button
-              className="secondary"
-              onClick={() => void onUpload()}
-              disabled={clusterUploading || !license.canManageClusters}
-            >
-              {clusterUploading ? "上传中..." : "上传集群"}
-            </button>
-          </div>
+          {enableServerClusterUpload ? (
+            <div className="cluster-upload">
+              <label>添加集群</label>
+              {!license.loading && !license.valid && (
+                <div className="feedback error">
+                  {license.reason ?? "当前 License 无效，无法添加集群。"}
+                </div>
+              )}
+              <input
+                type="text"
+                placeholder="自定义集群名称"
+                value={clusterNameInput}
+                disabled={!license.canManageClusters}
+                onChange={(event) => setClusterNameInput(event.target.value)}
+              />
+              <input
+                type="text"
+                placeholder="Prometheus 地址"
+                value={clusterPromInput}
+                disabled={!license.canManageClusters}
+                onChange={(event) => setClusterPromInput(event.target.value)}
+              />
+              <button
+                className="secondary"
+                onClick={() => void onUpload()}
+                disabled={clusterUploading || !license.canManageClusters}
+              >
+                {clusterUploading ? "上传中..." : "上传集群"}
+              </button>
+            </div>
+          ) : (
+            <div className="cluster-upload-note warning">
+              集群接入需由 Agent 执行，Server 端仅负责查看巡检项与结果。
+            </div>
+          )}
         </div>
       </header>
 
@@ -980,7 +988,7 @@ const OverviewView = ({
           )}
         {clusters.length === 0 ? (
           <p className="placeholder">
-            还没有集群,请上传 kubeconfig 完成注册。
+            暂无集群，请在 Agent 端完成注册后刷新本页面。
           </p>
         ) : (
           <>
@@ -1060,16 +1068,18 @@ const OverviewView = ({
                       </div>
                     </div>
                     <div className="cluster-status-line">
-                      <button
-                        className="link-button small"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void onTestClusterConnection(cluster.id);
-                        }}
-                        disabled={isTesting}
-                      >
-                        {isTesting ? "测试中..." : "测试连接"}
-                      </button>
+                      {enableServerConnectionTest && (
+                        {enableServerConnectionTest && (
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => void onTestClusterConnection(cluster.id)}
+                            disabled={isTesting}
+                          >
+                            {isTesting ? "诊断中..." : "连接测试"}
+                          </button>
+                        )}
+                      )}
                       <span className={`status-chip ${statusMeta.className}`}>
                         {statusMeta.label}
                       </span>
@@ -1736,6 +1746,7 @@ const ClusterDetailView = ({
   testingClusterIds,
   license,
 }: ClusterDetailViewProps) => {
+  const enableServerConnectionTest = false;
   const { clusterKey } = useParams<{ clusterKey?: string }>();
   const navigate = useNavigate();
   const operatorInputId = useId();
@@ -1814,7 +1825,9 @@ const ClusterDetailView = ({
 
   const statusMeta = getClusterStatusMeta(cluster.connection_status);
   const clusterSlug = getClusterDisplayId(clusterDisplayIds, cluster.id, cluster);
-  const isTesting = Boolean(testingClusterIds[cluster.id]);
+  const isTesting = enableServerConnectionTest
+    ? Boolean(testingClusterIds[cluster.id])
+    : false;
   const contexts = cluster.contexts ?? [];
   const allItemsSelected =
     items.length > 0 && selectedIds.length === items.length;
@@ -1900,14 +1913,16 @@ const ClusterDetailView = ({
           ← 返回集群列表
         </button>
         <div className="detail-header-actions">
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => void onTestClusterConnection(cluster.id)}
-            disabled={isTesting}
-          >
-            {isTesting ? "校验中..." : "重新校验连接"}
-          </button>
+          {enableServerConnectionTest && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => void onTestClusterConnection(cluster.id)}
+              disabled={isTesting}
+            >
+              {isTesting ? "校验中..." : "重新校验连接"}
+            </button>
+          )}
           <button
             type="button"
             className="secondary"
@@ -3726,6 +3741,7 @@ const ClusterEditModal = ({
   );
   const [kubeconfigEdited, setKubeconfigEdited] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
+  const enableServerKubeconfigEdit = false;
 
   useEffect(() => {
     setName(cluster.name);
@@ -3844,7 +3860,9 @@ const ClusterEditModal = ({
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const fileForSubmit = resolveFileToUpload();
+    const fileForSubmit = enableServerKubeconfigEdit
+      ? resolveFileToUpload()
+      : null;
     await onSubmit({ name, prometheusUrl, file: fileForSubmit });
   };
 
@@ -3873,22 +3891,31 @@ const ClusterEditModal = ({
             disabled={submitting}
           />
         </div>
-        <div className="modal-field">
-          <span className="modal-field-label">重新上传 kubeconfig(可选)</span>
-          <button
-            type="button"
-            className={`cluster-upload-trigger${
-              kubeconfigReady ? " ready" : ""
-            }`}
-            onClick={handleOpenModal}
-            disabled={submitting}
-          >
-            {kubeconfigReady ? "查看 / 更新 kubeconfig" : "导入 kubeconfig"}
-          </button>
-          <div className="modal-kubeconfig-summary">
-            {kubeconfigSummary ?? "支持上传文件或粘贴 YAML 内容"}
+        {enableServerKubeconfigEdit ? (
+          <div className="modal-field">
+            <span className="modal-field-label">重新上传 kubeconfig(可选)</span>
+            <button
+              type="button"
+              className={`cluster-upload-trigger${
+                kubeconfigReady ? " ready" : ""
+              }`}
+              onClick={handleOpenModal}
+              disabled={submitting}
+            >
+              {kubeconfigReady ? "查看 / 更新 kubeconfig" : "导入 kubeconfig"}
+            </button>
+            <div className="modal-kubeconfig-summary">
+              {kubeconfigSummary ?? "支持上传文件或粘贴 YAML 内容"}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="modal-field">
+            <span className="modal-field-label">kubeconfig</span>
+            <div className="modal-kubeconfig-summary">
+              kubeconfig 由 Agent 托管，如需更新请在 Agent 端处理。
+            </div>
+          </div>
+        )}
         {fileError && <div className="feedback error">{fileError}</div>}
         {error && <div className="feedback error">{error}</div>}
         <div className="modal-actions">
@@ -3905,21 +3932,23 @@ const ClusterEditModal = ({
           </button>
         </div>
       </form>
-      <KubeconfigModal
-        open={kubeconfigModalOpen}
-        text={kubeconfigText}
-        fileName={kubeconfigFileName}
-        hasManualContent={hasManualKubeconfig}
-        title="更新 kubeconfig"
-        description="重新上传文件或粘贴最新的 kubeconfig 内容。"
-        confirmLabel="完成"
-        fileButtonLabel="选择文件"
-        fileInputId={modalFileInputId}
-        onClose={handleCloseModal}
-        onFileSelected={handleFileSelected}
-        onTextChange={handleTextChange}
-        onClear={handleClear}
-      />
+      {enableServerKubeconfigEdit && (
+        <KubeconfigModal
+          open={kubeconfigModalOpen}
+          text={kubeconfigText}
+          fileName={kubeconfigFileName}
+          hasManualContent={hasManualKubeconfig}
+          title="更新 kubeconfig"
+          description="重新上传文件或粘贴最新的 kubeconfig 内容。"
+          confirmLabel="确定"
+          fileButtonLabel="选择文件"
+          fileInputId={modalFileInputId}
+          onClose={handleCloseModal}
+          onFileSelected={handleFileSelected}
+          onTextChange={handleTextChange}
+          onClear={handleClear}
+        />
+      )}
     </div>
   );
 };
@@ -5716,13 +5745,6 @@ const hasManualKubeconfig = useMemo(
 };
 
 export default App;
-
-
-
-
-
-
-
 
 
 

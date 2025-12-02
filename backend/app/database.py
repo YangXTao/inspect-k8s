@@ -135,7 +135,7 @@ def _ensure_cluster_schema() -> None:
     if "execution_mode" not in existing_columns:
         column_type = "TEXT" if dialect == "sqlite" else "VARCHAR(20)"
         statements.append(
-            f"ALTER TABLE cluster_configs ADD COLUMN execution_mode {column_type} NOT NULL DEFAULT 'server'"
+            f"ALTER TABLE cluster_configs ADD COLUMN execution_mode {column_type} NOT NULL DEFAULT 'agent'"
         )
 
     if "default_agent_id" not in existing_columns:

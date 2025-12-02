@@ -4,35 +4,19 @@ import json
 import logging
 import re
 import secrets
-import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import base64
 import binascii
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Any, Generator
 from uuid import uuid4
-from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-
-import os
-import shutil
-import subprocess
 import yaml
 from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, UploadFile, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-import urllib3
 from pydantic import ValidationError
-
-try:
-    from kubernetes import client as k8s_client
-    from kubernetes import config as k8s_config
-    from kubernetes.client.rest import ApiException
-except Exception:  # pragma: no cover - optional dependency
-    k8s_client = None
-    k8s_config = None
-    ApiException = Exception
 
 from . import crud, models, schemas
 from .database import SessionLocal, ensure_runtime_directories, init_db
@@ -43,84 +27,15 @@ from .prometheus import PrometheusClient
 
 logger = logging.getLogger(__name__)
 
-_INSPECTION_EXECUTOR = ThreadPoolExecutor(max_workers=4)
-
 _DEFAULT_INSPECTIONS_SENTINEL = Path("data/state/default_inspections_seeded.flag")
 AGENT_HEARTBEAT_TIMEOUT_MINUTES = 5
 AGENT_HEARTBEAT_TIMEOUT = timedelta(minutes=AGENT_HEARTBEAT_TIMEOUT_MINUTES)
 
 
 @dataclass
-class RunExecutionControl:
-    pause_event: threading.Event = field(default_factory=threading.Event)
-    cancel_event: threading.Event = field(default_factory=threading.Event)
-
-    def __post_init__(self) -> None:
-        self.pause_event.set()
-
-
-@dataclass
 class AgentRequestContext:
     db: Session
     agent: models.InspectionAgent
-
-
-_RUN_EXECUTION_LOCK = threading.Lock()
-_ACTIVE_RUN_CONTROLS: Dict[int, RunExecutionControl] = {}
-_ACTIVE_RUN_FUTURES: Dict[int, Future] = {}
-_RUN_ITEM_CACHE: Dict[int, List[int]] = {}
-
-
-def _register_run_execution(
-    run_id: int,
-    item_ids: List[int],
-    control: RunExecutionControl,
-    future: Future,
-) -> None:
-    snapshot = list(item_ids)
-    with _RUN_EXECUTION_LOCK:
-        _RUN_ITEM_CACHE[run_id] = snapshot
-        _ACTIVE_RUN_CONTROLS[run_id] = control
-        _ACTIVE_RUN_FUTURES[run_id] = future
-
-    def _cleanup(fut: Future) -> None:
-        with _RUN_EXECUTION_LOCK:
-            stored = _ACTIVE_RUN_FUTURES.get(run_id)
-            if stored is not fut:
-                return
-            _ACTIVE_RUN_FUTURES.pop(run_id, None)
-            _ACTIVE_RUN_CONTROLS.pop(run_id, None)
-        logger.info("Inspection run %s worker completed.", run_id)
-        db = SessionLocal()
-        try:
-            run = crud.get_inspection_run(db, run_id)
-            if run and run.status not in {"running", "paused"}:
-                with _RUN_EXECUTION_LOCK:
-                    _RUN_ITEM_CACHE.pop(run_id, None)
-                    logger.debug(
-                        "Inspection run %s cache cleared after completion.",
-                        run_id,
-                    )
-        finally:
-            db.close()
-
-    future.add_done_callback(_cleanup)
-
-
-def _get_run_control(run_id: int) -> Optional[RunExecutionControl]:
-    with _RUN_EXECUTION_LOCK:
-        return _ACTIVE_RUN_CONTROLS.get(run_id)
-
-
-def _get_run_future(run_id: int) -> Optional[Future]:
-    with _RUN_EXECUTION_LOCK:
-        return _ACTIVE_RUN_FUTURES.get(run_id)
-
-
-def _get_run_item_ids(run_id: int) -> Optional[List[int]]:
-    with _RUN_EXECUTION_LOCK:
-        snapshot = _RUN_ITEM_CACHE.get(run_id)
-        return list(snapshot) if snapshot is not None else None
 
 
 def _requeue_stale_agent_runs(db: Session) -> int:
@@ -159,57 +74,6 @@ def _requeue_stale_agent_runs(db: Session) -> int:
         db.commit()
         logger.warning("已回滚 %s 个超时的 Agent 巡检任务。", recovered)
     return recovered
-
-
-def _submit_run_execution(run_id: int, item_ids: List[int]) -> None:
-    control = RunExecutionControl()
-    future = _INSPECTION_EXECUTOR.submit(
-        _execute_inspection_run_async,
-        run_id,
-        list(item_ids),
-        control,
-    )
-    logger.info(
-        "Inspection run %s scheduled with %d items.",
-        run_id,
-        len(item_ids),
-    )
-    _register_run_execution(run_id, list(item_ids), control, future)
-
-
-def _pause_run_execution(run_id: int) -> None:
-    control = _get_run_control(run_id)
-    if control:
-        control.pause_event.clear()
-        logger.info("Inspection run %s paused (worker waiting).", run_id)
-
-
-def _resume_run_execution(run_id: int) -> bool:
-    control = _get_run_control(run_id)
-    future = _get_run_future(run_id)
-    if not control or not future:
-        logger.warning(
-            "Inspection run %s resume requested without active worker.",
-            run_id,
-        )
-        return False
-    if future.done():
-        logger.info(
-            "Inspection run %s worker already finished before resume.",
-            run_id,
-        )
-        return False
-    control.pause_event.set()
-    logger.info("Inspection run %s resumed on existing worker.", run_id)
-    return True
-
-
-def _cancel_run_execution(run_id: int) -> None:
-    control = _get_run_control(run_id)
-    if control:
-        control.cancel_event.set()
-        control.pause_event.set()
-        logger.info("Inspection run %s received cancellation request.", run_id)
 
 
 def _normalise_cluster_name(name: str | None) -> str:
@@ -380,10 +244,6 @@ def _agent_request_dependency(
 app = FastAPI(title="K8s Inspection Service", version="0.3.0")
 agent_router = APIRouter(prefix="/agent", tags=["agent"])
 
-CONNECTION_TEST_TIMEOUT_SECONDS = 8.0
-CONNECTION_TEST_CONNECT_TIMEOUT = 3.0
-CONNECTION_TEST_READ_TIMEOUT = 5.0
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -397,197 +257,6 @@ def get_db() -> Session:
     db = SessionLocal()
     try:
         yield db
-    finally:
-        db.close()
-
-
-def _execute_inspection_run_async(
-    run_id: int,
-    item_ids: List[int],
-    control: RunExecutionControl,
-) -> None:
-    db = SessionLocal()
-    try:
-        run = crud.get_inspection_run(db, run_id)
-        if not run:
-            logger.error("Inspection run %s not found for async execution.", run_id)
-            return
-
-        if run.status not in {"queued", "running"}:
-            logger.warning(
-                "巡检任务 %s 当前状态为 %s，跳过执行。",
-                run_id,
-                run.status,
-            )
-            return
-        if run.status != "running":
-            run.status = "running"
-            db.add(run)
-            db.commit()
-            db.refresh(run)
-
-        cluster = crud.get_cluster(db, run.cluster_id)
-        if not cluster:
-            raise RuntimeError("指定的集群不存在。")
-
-        kubeconfig_path = Path(cluster.kubeconfig_path)
-        if not kubeconfig_path.exists():
-            raise RuntimeError("集群 kubeconfig 文件不存在。")
-
-        items = crud.get_items_by_ids(db, item_ids)
-        if len(items) != len(set(item_ids)):
-            raise RuntimeError("部分巡检项不存在或已删除。")
-
-        total_items = len(items)
-        if run.total_items != total_items:
-            run.total_items = total_items
-            db.add(run)
-            db.commit()
-            db.refresh(run)
-
-        processed_count = int(run.processed_items or 0)
-        if processed_count < 0:
-            processed_count = 0
-        if processed_count > total_items:
-            processed_count = total_items
-        remaining_items = items[processed_count:]
-        logger.info(
-            "Inspection run %s worker active: %d/%d items already processed.",
-            run_id,
-            processed_count,
-            total_items,
-        )
-
-        prom_client: Optional[PrometheusClient] = None
-        if cluster.prometheus_url:
-            prom_client = PrometheusClient(cluster.prometheus_url)
-
-        context = CheckContext(
-            kubeconfig_path=str(kubeconfig_path),
-            prom=prom_client,
-        )
-
-        status_counter = {"passed": 0, "warning": 0, "failed": 0}
-        for existing in run.results or []:
-            key = (existing.status or "passed").lower()
-            if key not in {"passed", "warning", "failed"}:
-                key = "warning"
-            status_counter[key] = status_counter.get(key, 0) + 1
-
-        for offset, item in enumerate(remaining_items, start=1):
-            target_index = processed_count + offset
-            while True:
-                if control.cancel_event.is_set():
-                    logger.info("Inspection run %s interrupted via cancel event.", run_id)
-                    return
-                control.pause_event.wait()
-                if control.cancel_event.is_set():
-                    logger.info("Inspection run %s interrupted via cancel event.", run_id)
-                    return
-                try:
-                    db.refresh(run)
-                except Exception:
-                    refreshed = crud.get_inspection_run(db, run_id)
-                    if not refreshed:
-                        logger.info("Inspection run %s no longer exists, aborting execution.", run_id)
-                        return
-                    run = refreshed
-                if run.status == "paused":
-                    control.pause_event.clear()
-                    continue
-                if run.status != "running":
-                    logger.info(
-                        "Inspection run %s interrupted with status %s.",
-                        run_id,
-                        run.status,
-                    )
-                    return
-                break
-            status, detail, suggestion = dispatch_checks(
-                item.check_type, context, item.config
-            )
-            sanitized_detail = _sanitize_optional_text(detail)
-            sanitized_suggestion = _sanitize_optional_text(suggestion)
-            crud.add_inspection_result(
-                db,
-                run=run,
-                item=item,
-                status=status,
-                detail=sanitized_detail,
-                suggestion=sanitized_suggestion,
-            )
-            run = crud.update_inspection_run_progress(
-                db, run=run, processed_items=target_index
-            )
-            normalized_status = (status or "warning").lower()
-            if normalized_status not in {"passed", "warning", "failed"}:
-                normalized_status = "warning"
-            status_counter[normalized_status] = status_counter.get(normalized_status, 0) + 1
-
-        if control.cancel_event.is_set():
-            logger.info(
-                "Inspection run %s cancellation detected before finalization.",
-                run_id,
-            )
-            return
-        try:
-            db.refresh(run)
-        except Exception:
-            refreshed = crud.get_inspection_run(db, run_id)
-            if not refreshed:
-                logger.info(
-                    "Inspection run %s missing during finalization, aborting.",
-                    run_id,
-                )
-                return
-            run = refreshed
-        if run.status == "cancelled":
-            logger.info("Inspection run %s has been cancelled before finalization.", run_id)
-            return
-
-        processed_total = (
-            status_counter.get("passed", 0)
-            + status_counter.get("warning", 0)
-            + status_counter.get("failed", 0)
-        )
-        total_items = len(items)
-        overall_status, summary, final_processed = _summarize_run_outcome(
-            total_items=total_items,
-            processed_total=processed_total,
-            status_counter=status_counter,
-            current_processed=run.processed_items or 0,
-        )
-
-        run = crud.finalize_inspection_run(
-            db,
-            run=run,
-            status=overall_status,
-            summary=summary,
-            report_path=None,
-            processed_items=final_processed,
-        )
-
-        run = crud.get_inspection_run(db, run.id)
-        if not run:
-            raise RuntimeError("无法加载巡检结果。")
-
-        run = _attach_run_report(db, run)
-        logger.info("Inspection run %s finalized with status %s.", run_id, overall_status)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.exception("Inspection run %s failed during execution.", run_id)
-        db.rollback()
-        run = crud.get_inspection_run(db, run_id)
-        if run:
-            message = _sanitize_optional_text(str(exc)) or "巡检执行过程中出现未知错误。"
-            summary = f"巡检执行失败：{message}"
-            crud.finalize_inspection_run(
-                db,
-                run=run,
-                status="failed",
-                summary=summary[:500],
-                report_path=None,
-                processed_items=run.processed_items or 0,
-            )
     finally:
         db.close()
 
@@ -658,9 +327,22 @@ def _extract_contexts(kubeconfig_text: str) -> List[str]:
     for entry in contexts:
         if isinstance(entry, dict):
             name = entry.get("name")
-            if name:
-                names.append(name)
+        if name:
+            names.append(name)
     return names
+
+
+AGENT_MANAGED_KUBECONFIG_PREFIX = "agent-managed://"
+
+
+def _build_agent_managed_kubeconfig_ref() -> str:
+    return f"{AGENT_MANAGED_KUBECONFIG_PREFIX}{uuid4().hex}"
+
+
+def _is_agent_managed_kubeconfig(path: str | None) -> bool:
+    if not path:
+        return False
+    return str(path).startswith(AGENT_MANAGED_KUBECONFIG_PREFIX)
 
 
 def _normalize_prometheus_url(value: Optional[str]) -> Optional[str]:
@@ -690,18 +372,10 @@ def _sync_cluster_prometheus_to_agents(
             crud.update_inspection_agent(db, agent, prometheus_url=prom_url)
 
 
-def _store_kubeconfig(data: bytes, original_name: str | None = None) -> str:
-    suffix = ".yaml"
-    if original_name:
-        suffix = Path(original_name).suffix or suffix
-    filename = f"cluster-{uuid4().hex}{suffix}"
-    path = Path("data/configs") / filename
-    path.write_bytes(data)
-    return str(path)
-
-
 def _remove_file_safely(path: str | Path | None) -> None:
     if not path:
+        return
+    if _is_agent_managed_kubeconfig(str(path)):
         return
     candidate = Path(path)
     try:
@@ -728,19 +402,6 @@ def _remove_file_safely(path: str | Path | None) -> None:
             continue
 
 
-def _sanitize_message(message: str | None) -> str | None:
-    if not message:
-        return "No additional details."
-    collapsed = re.sub(r"\s+", " ", message).strip()
-    try:
-        sanitized = collapsed.encode("ascii", errors="ignore").decode("ascii").strip()
-    except Exception:
-        sanitized = ""
-    if not sanitized:
-        return "No additional details."
-    return sanitized[:500]
-
-
 def _sanitize_optional_text(value: str | None) -> str | None:
     if value is None:
         return None
@@ -753,113 +414,6 @@ def _sanitize_optional_text(value: str | None) -> str | None:
     if len(normalized) > 2000:
         normalized = normalized[:2000]
     return normalized
-
-
-def _fetch_server_version_with_kubectl(kubeconfig_path: str) -> Optional[str]:
-    if shutil.which("kubectl") is None:
-        return None
-    env = os.environ.copy()
-    env["KUBECONFIG"] = kubeconfig_path
-    command = "kubectl version | grep Server | awk '{print $3}'"
-    try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=env,
-            text=True,
-            timeout=CONNECTION_TEST_READ_TIMEOUT,
-        )
-    except (subprocess.SubprocessError, OSError) as exc:
-        logger.warning("执行 kubectl version 命令失败: %s", exc)
-        return None
-    if result.returncode != 0:
-        logger.warning(
-            "kubectl version 命令返回非零退出码(%s): %s",
-            result.returncode,
-            result.stderr.strip(),
-        )
-        return None
-    output = result.stdout.strip()
-    return output or None
-
-
-def _test_cluster_connection(kubeconfig_path: str) -> tuple[str, str]:
-    if not k8s_config or not k8s_client:
-        return (
-            "warning",
-            "\u540e\u7aef\u672a\u5b89\u88c5 kubernetes Python \u5ba2\u6237\u7aef\uff0c\u8df3\u8f6c\u8fde\u901a\u6027\u6821\u9a8c\u3002",
-        )
-
-    def _perform_check() -> tuple[str, str]:
-        api_client = k8s_config.new_client_from_config(config_file=kubeconfig_path)
-        rest_client = getattr(api_client, "rest_client", None)
-        pool_manager = getattr(rest_client, "pool_manager", None)
-        if pool_manager and hasattr(pool_manager, "connection_pool_kw"):
-            pool_manager.connection_pool_kw["timeout"] = urllib3.Timeout(
-                connect=CONNECTION_TEST_CONNECT_TIMEOUT,
-                read=CONNECTION_TEST_READ_TIMEOUT,
-            )
-
-        git_version = _fetch_server_version_with_kubectl(kubeconfig_path) or ""
-        if not git_version:
-            version_api = k8s_client.VersionApi(api_client)
-            version_info = version_api.get_code(
-                _request_timeout=CONNECTION_TEST_READ_TIMEOUT
-            )
-            git_version = (version_info.git_version or "").strip()
-            if not git_version:
-                git_version = f"{version_info.major}.{version_info.minor}".strip()
-
-        core_api = k8s_client.CoreV1Api(api_client)
-        nodes = core_api.list_node(
-            _request_timeout=CONNECTION_TEST_READ_TIMEOUT,
-            _preload_content=True,
-        )
-        node_count = len(nodes.items)
-        if not git_version:
-            git_version = "unknown"
-        detail = f"Server version {git_version}; nodes {node_count}."
-        return "connected", detail
-
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(_perform_check)
-        try:
-            return future.result(timeout=CONNECTION_TEST_TIMEOUT_SECONDS)
-        except FuturesTimeoutError:
-            return (
-                "failed",
-                f"\u8fde\u63a5\u6821\u9a8c\u8d85\u65f6(>{CONNECTION_TEST_TIMEOUT_SECONDS}\u79d2)\uff0c\u8bf7\u68c0\u67e5\u7f51\u7edc\u8fde\u901a\u6027\u6216\u76ee\u6807\u5730\u5740\u3002",
-            )
-        except ApiException as exc:
-            reason = exc.reason or exc.body or str(exc)
-            return "failed", f"Kubernetes API error: {reason}"
-        except Exception as exc:  # pragma: no cover
-            return "failed", f"Cluster validation error: {exc}"
-
-    try:
-        return _perform_check()
-    except Exception as exc:  # pragma: no cover
-        return "failed", f"Cluster validation error: {exc}"
-
-
-def _log_connection_status(cluster_name: str, status: str, message: Optional[str]) -> None:
-    if status == "connected":
-        logger.info("Cluster %s connectivity check succeeded.", cluster_name)
-    elif status == "warning":
-        logger.warning(
-            "Cluster %s connectivity check warning: %s",
-            cluster_name,
-            message or "no details",
-        )
-    else:
-        logger.error(
-            "Cluster %s connectivity check failed: %s",
-            cluster_name,
-            message or "no details",
-        )
 
 
 @app.on_event("startup")
@@ -937,83 +491,10 @@ async def register_cluster(
     db: Session = Depends(get_db),
     _license_guard: None = Depends(require_license_dependency("clusters")),
 ):
-    data = await file.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="上传的 kubeconfig 文件为空。")
-    try:
-        text = data.decode()
-    except UnicodeDecodeError:
-        raise HTTPException(status_code=400, detail="无法解析 kubeconfig 文件内容。")
-
-    contexts = _extract_contexts(text)
-    default_name = (
-        contexts[0]
-        if contexts
-        else Path(file.filename or "kubeconfig").stem or f"cluster-{uuid4().hex[:6]}"
+    raise HTTPException(
+        status_code=410,
+        detail="Server 端已停用直接上传 kubeconfig，请通过 Agent 完成集群注册。",
     )
-    cluster_name = name.strip() if name else default_name
-
-    existing = crud.get_cluster_by_name(db, cluster_name)
-    if existing:
-        raise HTTPException(
-            status_code=400, detail=f"名称为 '{cluster_name}' 的集群已存在。"
-        )
-
-    normalized_prom_url = _normalize_prometheus_url(prometheus_url)
-    if normalized_prom_url and not normalized_prom_url.startswith(("http://", "https://")):
-        raise HTTPException(
-            status_code=400,
-            detail="Prometheus 地址需要以 http:// 或 https:// 开头。",
-        )
-
-    mode_value = (execution_mode or "server").strip().lower()
-    if mode_value not in {"server", "agent"}:
-        raise HTTPException(status_code=400, detail="执行模式仅支持 server 或 agent。")
-
-    default_agent = None
-    if default_agent_id:
-        try:
-            agent_id = int(default_agent_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="默认 Agent ID 无效。")
-        default_agent = crud.get_inspection_agent(db, agent_id)
-        if not default_agent:
-            raise HTTPException(status_code=404, detail="指定的 Agent 不存在。")
-        if not default_agent.is_enabled:
-            raise HTTPException(status_code=400, detail="指定的 Agent 已被禁用。")
-
-    if mode_value == "agent" and default_agent is None:
-        raise HTTPException(status_code=400, detail="请选择可用的 Agent 用于执行巡检。")
-
-    kubeconfig_path = _store_kubeconfig(data, file.filename)
-    cluster = crud.create_cluster(
-        db,
-        name=cluster_name,
-        kubeconfig_path=kubeconfig_path,
-        contexts_json=json.dumps(contexts, ensure_ascii=False),
-        prometheus_url=normalized_prom_url,
-        execution_mode=mode_value,
-        default_agent_id=default_agent.id if default_agent else None,
-    )
-    if default_agent and default_agent.cluster_id != cluster.id:
-        crud.update_inspection_agent(db, default_agent, cluster=cluster)
-
-    status, message = _test_cluster_connection(cluster.kubeconfig_path)
-    sanitized_message = _sanitize_message(message)
-    stored_message = sanitized_message or "No additional details."
-    _log_connection_status(cluster.name, status, message)
-    cluster = crud.update_cluster(
-        db,
-        cluster,
-        connection_status=status,
-        connection_message=stored_message,
-        last_checked_at=datetime.utcnow(),
-    )
-
-    cluster = crud.get_cluster(db, cluster.id)
-    _sync_cluster_prometheus_to_agents(db, cluster)
-    return _present_cluster(cluster)
-
 
 
 @app.post(
@@ -1021,26 +502,10 @@ async def register_cluster(
     response_model=schemas.ClusterConfigOut,
 )
 def test_cluster_connection(cluster_id: int, db: Session = Depends(get_db)):
-    cluster = crud.get_cluster(db, cluster_id)
-    if not cluster:
-        raise HTTPException(status_code=404, detail="指定的集群不存在。")
-
-    kubeconfig_path = Path(cluster.kubeconfig_path)
-    if not kubeconfig_path.exists():
-        raise HTTPException(status_code=500, detail="集群 kubeconfig 文件不存在。")
-
-    status, message = _test_cluster_connection(cluster.kubeconfig_path)
-    sanitized_message = _sanitize_message(message)
-    stored_message = sanitized_message or "No additional details."
-    _log_connection_status(cluster.name, status, message)
-    cluster = crud.update_cluster(
-        db,
-        cluster,
-        connection_status=status,
-        connection_message=stored_message,
-        last_checked_at=datetime.utcnow(),
+    raise HTTPException(
+        status_code=410,
+        detail="连接测试请由 Agent 执行。",
     )
-    return _present_cluster(cluster)
 
 
 @app.put("/clusters/{cluster_id}", response_model=schemas.ClusterConfigOut)
@@ -1049,19 +514,13 @@ async def update_cluster(
     db: Session = Depends(get_db),
     name: str | None = Form(None),
     prometheus_url: str | None = Form(None),
-    execution_mode: str | None = Form(None),
     default_agent_id: str | None = Form(None),
-    file: UploadFile | None = File(None),
 ):
     cluster = crud.get_cluster(db, cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="指定的集群不存在。")
 
     update_kwargs: dict[str, Any] = {}
-    connection_status: Optional[str] = None
-    connection_message: Optional[str] = None
-    connection_checked_at: Optional[datetime] = None
-    original_kubeconfig_path = cluster.kubeconfig_path
 
     if name is not None:
         new_name = name.strip()
@@ -1080,19 +539,11 @@ async def update_cluster(
         if normalized_prom_url and not normalized_prom_url.startswith(("http://", "https://")):
             raise HTTPException(
                 status_code=400,
-                detail="Prometheus 地址需要以 http:// 或 https:// 开头。",
+                detail="Prometheus 地址需以 http:// 或 https:// 开头。",
             )
         update_kwargs["prometheus_url"] = normalized_prom_url
 
-    mode_value: Optional[str] = None
-    if execution_mode is not None:
-        stripped_mode = execution_mode.strip().lower()
-        if stripped_mode and stripped_mode not in {"server", "agent"}:
-            raise HTTPException(status_code=400, detail="执行模式仅支持 server 或 agent。")
-        mode_value = stripped_mode or "server"
-        update_kwargs["execution_mode"] = mode_value
-
-    default_agent_obj: Optional[models.InspectionAgent] = None
+    default_agent_obj = None
     default_agent_specified = False
     if default_agent_id is not None:
         default_agent_specified = True
@@ -1111,50 +562,14 @@ async def update_cluster(
         else:
             update_kwargs["default_agent_id"] = None
 
-    new_kubeconfig_path: Optional[str] = None
-    if file is not None:
-        data = await file.read()
-        if not data:
-            raise HTTPException(status_code=400, detail="上传的 kubeconfig 文件为空。")
-        try:
-            text = data.decode()
-        except UnicodeDecodeError:
-            raise HTTPException(status_code=400, detail="无法解析 kubeconfig 文件内容。")
-        contexts = _extract_contexts(text)
-        new_kubeconfig_path = _store_kubeconfig(data, file.filename)
-        update_kwargs["kubeconfig_path"] = new_kubeconfig_path
-        update_kwargs["contexts_json"] = json.dumps(contexts, ensure_ascii=False)
-        status, message = _test_cluster_connection(new_kubeconfig_path)
-        connection_status = status
-        sanitized_message = _sanitize_message(message)
-        stored_message = sanitized_message or "No additional details."
-        connection_message = stored_message
-        connection_checked_at = datetime.utcnow()
-
     if update_kwargs:
         cluster = crud.update_cluster(db, cluster, **update_kwargs)
 
-    if mode_value == "agent" or (mode_value is None and cluster.execution_mode == "agent"):
-        effective_agent = default_agent_obj or cluster.default_agent
-        if effective_agent is None:
-            raise HTTPException(status_code=400, detail="巡检执行模式为 agent 时，需要绑定默认 Agent。")
-        if effective_agent.cluster_id != cluster.id:
-            crud.update_inspection_agent(db, effective_agent, cluster=cluster)
-    elif default_agent_specified and update_kwargs.get("default_agent_id") is None and cluster.default_agent is not None:
-        crud.update_inspection_agent(db, cluster.default_agent, cluster=None)
-
-    if connection_status is not None:
-        _log_connection_status(cluster.name, connection_status, message)
-        cluster = crud.update_cluster(
-            db,
-            cluster,
-            connection_status=connection_status,
-            connection_message=connection_message,
-            last_checked_at=connection_checked_at,
-        )
-
-    if new_kubeconfig_path:
-        _remove_file_safely(original_kubeconfig_path)
+    if default_agent_specified:
+        if update_kwargs.get("default_agent_id") is None and cluster.default_agent is not None:
+            crud.update_inspection_agent(db, cluster.default_agent, cluster=None)
+        elif default_agent_obj and default_agent_obj.cluster_id != cluster.id:
+            crud.update_inspection_agent(db, default_agent_obj, cluster=cluster)
 
     cluster = crud.get_cluster(db, cluster.id)
     _sync_cluster_prometheus_to_agents(db, cluster)
@@ -1207,31 +622,28 @@ def agent_bootstrap(
 ):
     token_value = (payload.registration_token or "").strip()
     if not token_value:
-        raise HTTPException(status_code=400, detail="Agent token 缺失。")
+        raise HTTPException(status_code=400, detail="Agent token ȱʧ��")
 
     db = SessionLocal()
     try:
         agent = crud.get_inspection_agent_by_token(db, token_value)
         if not agent:
-            raise HTTPException(status_code=401, detail="Agent token 无效。")
+            raise HTTPException(status_code=401, detail="Agent token ��Ч��")
 
         cluster_payload = payload.cluster
         cluster_name = (cluster_payload.name or "").strip()
         if not cluster_name:
-            raise HTTPException(status_code=400, detail="集群名称不能为空。")
+            raise HTTPException(status_code=400, detail="��Ⱥ���Ʋ���Ϊ�ա�")
 
         cluster = agent.cluster or crud.get_cluster_by_name(db, cluster_name)
         incoming_prom_url = _normalize_prometheus_url(payload.prometheus_url)
-        kubeconfig_path: Optional[str] = None
+
         contexts_json: Optional[str] = None
-        kubeconfig_bytes: Optional[bytes] = None
         if cluster_payload.kubeconfig_b64:
             try:
                 kubeconfig_bytes = base64.b64decode(cluster_payload.kubeconfig_b64)
             except (binascii.Error, ValueError):
-                raise HTTPException(status_code=400, detail="kubeconfig 编码无效。")
-            filename = cluster_payload.kubeconfig_name or f"{cluster_name}.yaml"
-            kubeconfig_path = _store_kubeconfig(kubeconfig_bytes, filename)
+                raise HTTPException(status_code=400, detail="kubeconfig ������Ч��")
             try:
                 kubeconfig_text = kubeconfig_bytes.decode("utf-8")
                 contexts = _extract_contexts(kubeconfig_text)
@@ -1240,18 +652,27 @@ def agent_bootstrap(
             if contexts:
                 contexts_json = json.dumps(contexts, ensure_ascii=False)
 
+        if cluster and _is_agent_managed_kubeconfig(cluster.kubeconfig_path):
+            kubeconfig_path = cluster.kubeconfig_path
+        else:
+            if cluster and cluster.kubeconfig_path:
+                _remove_file_safely(cluster.kubeconfig_path)
+            kubeconfig_path = _build_agent_managed_kubeconfig_ref()
+
+        now = datetime.utcnow()
+        connection_status = "connected"
+        connection_message = "Agent �Ѿ�ע�ᣬServer �������� kubeconfig��"
+
         if cluster is None:
-            if not kubeconfig_path:
-                raise HTTPException(
-                    status_code=400, detail="首次注册必须提供 kubeconfig。"
-                )
             cluster = crud.create_cluster(
                 db,
                 name=cluster_name,
                 kubeconfig_path=kubeconfig_path,
                 contexts_json=contexts_json,
                 prometheus_url=incoming_prom_url,
-                connection_status="unknown",
+                connection_status=connection_status,
+                connection_message=connection_message,
+                last_checked_at=now,
                 execution_mode="agent",
                 default_agent_id=agent.id,
             )
@@ -1259,10 +680,12 @@ def agent_bootstrap(
             update_kwargs: dict[str, Any] = {
                 "execution_mode": "agent",
                 "default_agent_id": agent.id,
+                "kubeconfig_path": kubeconfig_path,
+                "connection_status": connection_status,
+                "connection_message": connection_message,
+                "last_checked_at": now,
             }
-            if kubeconfig_path:
-                _remove_file_safely(cluster.kubeconfig_path)
-                update_kwargs["kubeconfig_path"] = kubeconfig_path
+            if contexts_json is not None:
                 update_kwargs["contexts_json"] = contexts_json
             cluster = crud.update_cluster(db, cluster, **update_kwargs)
 
@@ -1286,7 +709,7 @@ def agent_bootstrap(
         crud.record_agent_heartbeat(db, agent, seen_at=datetime.utcnow())
         refreshed = crud.get_inspection_agent(db, agent.id)
         if not refreshed:
-            raise HTTPException(status_code=500, detail="Agent 注册失败。")
+            raise HTTPException(status_code=500, detail="Agent ע��ʧ�ܡ�")
         return _serialize_agent(refreshed)
     finally:
         db.close()
@@ -1752,9 +1175,6 @@ def trigger_inspection(
     cluster = crud.get_cluster(db, run_in.cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="指定的集群不存在。")
-    kubeconfig_path = Path(cluster.kubeconfig_path)
-    if not kubeconfig_path.exists():
-        raise HTTPException(status_code=500, detail="集群 kubeconfig 文件不存在。")
 
     items = crud.get_items_by_ids(db, run_in.item_ids)
     if len(items) != len(set(run_in.item_ids)):
@@ -1775,15 +1195,12 @@ def trigger_inspection(
         )
     plan_json = json.dumps(plan_items, ensure_ascii=False)
 
-    executor = "agent" if cluster.execution_mode == "agent" else "server"
-    agent_id: Optional[int] = None
-    agent_status: Optional[str] = None
-    if executor == "agent":
-        agent = cluster.default_agent
-        if not agent or not agent.is_enabled:
-            raise HTTPException(status_code=400, detail="该集群未配置可用的 Agent。")
-        agent_id = agent.id
-        agent_status = "queued"
+    agent = cluster.default_agent
+    if not agent or not agent.is_enabled:
+        raise HTTPException(status_code=400, detail="该集群未配置可用的 Agent。")
+    executor = "agent"
+    agent_id = agent.id
+    agent_status: Optional[str] = "queued"
 
     run = crud.create_inspection_run(
         db,
@@ -1797,9 +1214,6 @@ def trigger_inspection(
         agent_status=agent_status,
         agent_id=agent_id,
     )
-
-    if executor == "server":
-        _submit_run_execution(run.id, list(run_in.item_ids))
 
     run = crud.get_inspection_run(db, run.id)
     if not run:
@@ -1850,7 +1264,6 @@ def cancel_inspection_run(run_id: int, db: Session = Depends(get_db)):
     if run.status not in {"queued", "running"}:
         raise HTTPException(status_code=400, detail="仅可取消排队或进行中的巡检。")
     crud.cancel_inspection_run(db, run)
-    _cancel_run_execution(run.id)
     refreshed = crud.get_inspection_run(db, run_id)
     if not refreshed:
         raise HTTPException(status_code=404, detail="Inspection run not found.")

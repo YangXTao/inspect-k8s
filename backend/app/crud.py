@@ -47,7 +47,7 @@ def create_cluster(
     connection_status: str = "unknown",
     connection_message: Optional[str] = None,
     last_checked_at: Optional[datetime] = None,
-    execution_mode: str = "server",
+    execution_mode: str = "agent",
     default_agent_id: Optional[int] = None,
 ) -> models.ClusterConfig:
     cluster = models.ClusterConfig(
