@@ -379,6 +379,11 @@ class InspectionItemsImportResult(BaseModel):
     total: int = Field(..., ge=0)
 
 
+class InspectionItemsExportOut(BaseModel):
+    exported_at: datetime
+    items: List[InspectionItemOut]
+
+
 class LicenseStatusOut(BaseModel):
     valid: bool
     reason: Optional[str] = None
