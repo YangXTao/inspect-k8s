@@ -1069,16 +1069,14 @@ const OverviewView = ({
                     </div>
                     <div className="cluster-status-line">
                       {enableServerConnectionTest && (
-                        {enableServerConnectionTest && (
-                          <button
-                            type="button"
-                            className="secondary"
-                            onClick={() => void onTestClusterConnection(cluster.id)}
-                            disabled={isTesting}
-                          >
-                            {isTesting ? "诊断中..." : "连接测试"}
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => void onTestClusterConnection(cluster.id)}
+                          disabled={isTesting}
+                        >
+                          {isTesting ? "诊断中..." : "连接测试"}
+                        </button>
                       )}
                       <span className={`status-chip ${statusMeta.className}`}>
                         {statusMeta.label}
