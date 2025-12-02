@@ -93,6 +93,31 @@ def _run_kubectl(args: Iterable[str], context: CheckContext) -> Tuple[bool, str]
     return True, completed.stdout.strip()
 
 
+def _run_kubectl_version_pipeline(context: CheckContext) -> Tuple[bool, str]:
+    if shutil.which("kubectl") is None:
+        return False, "kubectl command not found on agent."
+    cmd_parts = ["kubectl"]
+    if context.kubeconfig_path:
+        cmd_parts.extend(["--kubeconfig", context.kubeconfig_path])
+    cmd_parts.append("version")
+    pipeline = f"{shlex.join(cmd_parts)} | grep Server | awk '{{print $3}}'"
+    try:
+        completed = subprocess.run(
+            pipeline,
+            shell=True,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except Exception as exc:
+        return False, f"kubectl pipeline error: {exc}"
+    if completed.returncode != 0:
+        message = completed.stderr.strip() or completed.stdout.strip()
+        return False, message or "kubectl pipeline returned non-zero exit code."
+    return True, completed.stdout.strip()
+
+
 def _truncate(text: str, limit: int = 2000) -> str:
     text = text.strip()
     if len(text) <= limit:
