@@ -481,17 +481,14 @@ def check_cluster_version(context: CheckContext) -> Tuple[str, str, str]:
 
 
 def check_connection_probe(context: CheckContext) -> Tuple[str, str, str]:
-    ok, version_output = _run_kubectl(["version", "--short"], context)
+    ok, version_output = _run_kubectl_version_pipeline(context)
     if not ok:
         return (
             CHECK_STATUS_FAILED,
             _truncate_output(version_output),
-            "检查 kubeconfig、网络或 API Server 状态。",
+            "��� kubeconfig������� API Server ״̬��",
         )
-    server_line = next(
-        (line for line in version_output.splitlines() if line.lower().startswith("server version")),
-        version_output.splitlines()[0] if version_output else "",
-    ).strip()
+    server_line = version_output.strip() or "Server Version δ�л�ȡ"
     nodes_ok, nodes_output = _run_kubectl(["get", "nodes", "-o", "json"], context)
     detail_suffix = ""
     suggestion = ""

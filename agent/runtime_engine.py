@@ -400,21 +400,14 @@ def check_cluster_version(context: CheckContext):
 
 
 def check_connection_probe(context: CheckContext):
-    ok, version_output = _run_kubectl(["version", "--short"], context)
+    ok, version_output = _run_kubectl_version_pipeline(context)
     if not ok:
         return (
             CHECK_STATUS_FAILED,
             _truncate(version_output),
-            "检查 kubeconfig、网络或 API Server 状态。",
+            "检�?kubeconfig、网络或 API Server 状态�?",
         )
-    server_line = next(
-        (
-            line
-            for line in version_output.splitlines()
-            if line.lower().startswith("server version")
-        ),
-        version_output.splitlines()[0] if version_output else "",
-    ).strip()
+    server_line = version_output.strip() or "Server Version 未返回"
     nodes_ok, nodes_output = _run_kubectl(["get", "nodes", "-o", "json"], context)
     detail_suffix = ""
     suggestion = ""
