@@ -577,6 +577,7 @@ def check_cluster_disk_io(context: CheckContext):
 
 HANDLERS: Dict[str, Callable[[CheckContext], Tuple[str, str, str]]] = {
     "cluster_version": check_cluster_version,
+    "connection_probe": check_connection_probe,
     "nodes_status": check_nodes_status,
     "pods_status": check_pods_status,
     "cluster_cpu_usage": check_cluster_cpu_usage,
