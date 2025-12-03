@@ -674,22 +674,36 @@ def register_agent(
     db: Session = Depends(get_db),
     _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
-    cluster: Optional[models.ClusterConfig] = None
-    if payload.cluster_id is not None:
-        cluster = crud.get_cluster(db, payload.cluster_id)
-        if not cluster:
-            raise HTTPException(status_code=404, detail="指定的集群不存在。")
+    if payload.cluster_id is None:
+        raise HTTPException(status_code=400, detail="创建 Agent 需要先选择集群。")
+
+    cluster = crud.get_cluster(db, payload.cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="指定的集群不存在。")
+
+    target_name = (cluster.name or "").strip()
+    if not target_name:
+        raise HTTPException(status_code=400, detail="集群名称不能为空，无法创建 Agent。")
+
+    existing_agent = crud.get_inspection_agent_by_name(db, target_name)
+    if existing_agent:
+        raise HTTPException(status_code=400, detail="Agent 名称已存在，请选择其他集群。")
+
     token = _generate_agent_token()
     while crud.get_inspection_agent_by_token(db, token) is not None:
         token = _generate_agent_token()
+
+    normalized_description = (payload.description or "").strip() or None
+    normalized_prometheus_url = _normalize_prometheus_url(payload.prometheus_url)
+
     agent = crud.create_inspection_agent(
         db,
-        name=payload.name.strip(),
+        name=target_name,
         token=token,
         cluster=cluster,
-        description=payload.description,
+        description=normalized_description,
         is_enabled=True,
-        prometheus_url=payload.prometheus_url,
+        prometheus_url=normalized_prometheus_url,
     )
     return schemas.AgentRegisterOut(
         id=agent.id,

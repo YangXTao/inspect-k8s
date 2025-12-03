@@ -146,10 +146,11 @@ body {
 .app-shell {
   width: calc(100% - 20px);
   margin: 6px auto 1px;
-  padding: 0 0 32px;
+  padding: 0 0 clamp(24px, 5vh, 40px);
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-height: calc(100vh - 72px);
 }
 
 .app-header {
@@ -445,9 +446,9 @@ body {
 }
 
 .cluster-panel {
-  padding: 18px 24px 32px;
+  padding: 18px 24px clamp(18px, 4vh, 32px);
   gap: 14px;
-  min-height: max(360px, calc(100vh - 320px));
+  min-height: auto;
 }
 
 @media (max-width: 900px) {
@@ -466,11 +467,11 @@ body {
   gap: 14px;
   width: 100%;
   margin: 0;
-  padding: 6px 2px 32px;
+  padding: 6px 2px clamp(18px, 4vh, 32px);
   justify-content: flex-start;
   justify-items: stretch;
   align-items: stretch;
-  min-height: 320px;
+  min-height: 260px;
 }
 
 .pagination {
@@ -1426,7 +1427,8 @@ th {
   gap: 8px;
 }
 
-.agent-inline-form-body input {
+.agent-inline-form-body input,
+.agent-inline-form-body select {
   border-radius: 8px;
   border: none;
   padding: 7px 10px;

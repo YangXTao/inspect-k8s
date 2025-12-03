@@ -401,6 +401,19 @@ def get_inspection_agent_by_token(db: Session, token: str) -> Optional[models.In
     )
 
 
+def get_inspection_agent_by_name(
+    db: Session, name: str
+) -> Optional[models.InspectionAgent]:
+    trimmed = name.strip()
+    if not trimmed:
+        return None
+    return (
+        db.query(models.InspectionAgent)
+        .filter(models.InspectionAgent.name == trimmed)
+        .first()
+    )
+
+
 def create_inspection_agent(
     db: Session,
     *,
