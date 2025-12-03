@@ -720,7 +720,7 @@ def agent_bootstrap(
         cluster = agent.cluster or crud.get_cluster_by_name(db, cluster_name)
         agent_prom_url = _normalize_prometheus_url(agent.prometheus_url)
         incoming_prom_url = _normalize_prometheus_url(payload.prometheus_url)
-        effective_prom_url = incoming_prom_url or agent_prom_url
+        effective_prom_url = agent_prom_url or incoming_prom_url
 
         contexts_json: Optional[str] = None
         if cluster_payload.kubeconfig_b64:
