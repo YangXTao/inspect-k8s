@@ -936,16 +936,6 @@ const OverviewView = ({
     setCurrentPage(pageFromSearch);
   }, [pageFromSearch]);
 
-  useEffect(() => {
-    const maxPage = Math.max(
-      1,
-      Math.ceil(clusters.length / clusterPageSize) || 1
-    );
-    if (currentPage > maxPage) {
-      updatePage(maxPage, { replace: true });
-    }
-  }, [clusters.length, clusterPageSize, currentPage, updatePage]);
-
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(clusters.length / clusterPageSize)),
     [clusters.length, clusterPageSize]
@@ -968,6 +958,16 @@ const OverviewView = ({
     },
     [searchParams, setSearchParams]
   );
+
+  useEffect(() => {
+    const maxPage = Math.max(
+      1,
+      Math.ceil(clusters.length / clusterPageSize) || 1
+    );
+    if (currentPage > maxPage) {
+      updatePage(maxPage, { replace: true });
+    }
+  }, [clusters.length, clusterPageSize, currentPage, updatePage]);
 
   const effectivePage = useMemo(
     () => Math.min(Math.max(currentPage, 1), totalPages),
