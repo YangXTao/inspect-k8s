@@ -111,7 +111,7 @@ interface SettingsModalTab {
 }
 
 const CLUSTER_ID_STORAGE_KEY = "clusterDisplayIdMap.v1";
-const CLUSTER_PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
+const CLUSTER_PAGE_SIZE_OPTIONS = [10, 20, 50];
 const DEFAULT_CLUSTER_PAGE_SIZE = CLUSTER_PAGE_SIZE_OPTIONS[0];
 const RUN_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const SETTINGS_BASE_PATH = "/setting";
@@ -996,7 +996,7 @@ const OverviewView = ({
   const handlePageSizeChange = useCallback(
     (event: ChangeEvent<HTMLSelectElement>) => {
       const nextSize = Number(event.target.value);
-      if (!CLUSTER_PAGE_SIZE_OPTIONS.includes(nextSize as (typeof CLUSTER_PAGE_SIZE_OPTIONS)[number])) {
+      if (!CLUSTER_PAGE_SIZE_OPTIONS.includes(nextSize)) {
         return;
       }
       setClusterPageSize(nextSize);
