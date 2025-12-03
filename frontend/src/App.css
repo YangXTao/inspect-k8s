@@ -686,12 +686,25 @@ body {
 .cluster-agent-description {
   width: 100%;
   margin: 4px 0 6px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: #e0f2fe;
-  color: #0f172a;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #475569;
   font-size: 13px;
   line-height: 1.4;
+  display: flex;
+  gap: 6px;
+}
+
+.cluster-agent-description-label {
+  font-weight: 600;
+  color: #334155;
+  flex: 0 0 auto;
+}
+
+.cluster-agent-description-text {
+  flex: 1 1 auto;
+  word-break: break-word;
 }
 
 .cluster-name {

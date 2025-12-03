@@ -253,6 +253,23 @@ def _enqueue_connection_test_run(
     )
 
 
+def _trigger_auto_connection_test(
+    db: Session,
+    cluster: models.ClusterConfig,
+    agent: models.InspectionAgent,
+    message: str = "已自动触发连接测试，稍后更新结果。",
+) -> None:
+    if _has_pending_connection_test(db, cluster):
+        return
+    _enqueue_connection_test_run(db, cluster, agent)
+    crud.update_cluster(
+        db,
+        cluster,
+        connection_status="warning",
+        connection_message=message,
+    )
+
+
 def _parse_run_plan(run: models.InspectionRun) -> List[Dict[str, Any]]:
     if not run.plan_json:
         return []
@@ -797,6 +814,11 @@ def agent_bootstrap(
 
         cluster_name = agent_name
         cluster = agent.cluster or crud.get_cluster_by_name(db, cluster_name)
+        cluster_was_pending = False
+        if cluster is None:
+            cluster_was_pending = True
+        else:
+            cluster_was_pending = cluster.connection_status == "pending"
         if cluster and cluster.name != cluster_name:
             raise HTTPException(
                 status_code=400,
@@ -890,6 +912,16 @@ def agent_bootstrap(
             is_enabled=True,
             prometheus_url=final_prom_url or agent.prometheus_url,
         )
+        if cluster_was_pending and cluster is not None:
+            try:
+                _trigger_auto_connection_test(
+                    db,
+                    cluster,
+                    agent,
+                    message="已自动触发连接测试，等待结果更新。",
+                )
+            except Exception:
+                logger.warning("自动触发连接测试失败。", exc_info=True)
         _sync_cluster_prometheus_to_agents(db, cluster)
         crud.record_agent_heartbeat(db, agent, seen_at=datetime.utcnow())
         refreshed = crud.get_inspection_agent(db, agent.id)
@@ -1453,7 +1485,11 @@ def trigger_inspection(
 @app.get("/inspection-runs", response_model=List[schemas.InspectionRunListOut])
 def list_inspection_runs(db: Session = Depends(get_db)):
     _requeue_stale_agent_runs(db)
-    runs = crud.list_inspection_runs(db)
+    runs = [
+        run
+        for run in crud.list_inspection_runs(db)
+        if run.operator != CONNECTION_TEST_OPERATOR
+    ]
     return [_serialize_run_list(run) for run in runs]
 
 

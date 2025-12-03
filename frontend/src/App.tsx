@@ -115,6 +115,7 @@ const CLUSTER_PAGE_SIZE_OPTIONS = [10, 20, 50];
 const DEFAULT_CLUSTER_PAGE_SIZE = CLUSTER_PAGE_SIZE_OPTIONS[0];
 const RUN_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const SETTINGS_BASE_PATH = "/setting";
+const CONNECTION_TEST_OPERATOR = "__system_connection_test__";
 
 const BEIJING_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Shanghai",
@@ -1028,7 +1029,7 @@ const OverviewView = ({
   }, [pageJumpInput, totalPages, updatePage]);
 
   const handlePageJumpInputKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLInputElement>) => {
+    (event: KeyboardEvent) => {
       if (event.key === "Enter") {
         event.preventDefault();
         handlePageJump();
@@ -1036,6 +1037,37 @@ const OverviewView = ({
     },
     [handlePageJump]
   );
+
+  useEffect(() => {
+    const shouldRefresh = clusters.some((cluster) => {
+      if (cluster.connection_status === "pending") {
+        return true;
+      }
+      if (cluster.connection_status === "warning") {
+        const message = (cluster.connection_message || "").trim();
+        if (
+          !cluster.last_checked_at ||
+          message.includes("等待 Agent 注册") ||
+          message.includes("连接测试")
+        ) {
+          return true;
+        }
+      }
+      return false;
+    });
+    if (!shouldRefresh) {
+      return;
+    }
+    if (typeof window === "undefined") {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void refreshClusters();
+    }, 5000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [clusters, refreshClusters]);
 
   const columnsForPage = useMemo(() => {
     const count = pagedClusters.length;
@@ -4420,11 +4452,14 @@ const backgroundLocation =
     try {
       logWithTimestamp("info", "开始获取巡检历史");
       const data = await getInspectionRuns();
-      setRuns((previous) =>
-        areRunListsEqual(previous, data) ? previous ?? data : data
+      const filtered = data.filter(
+        (run) => run.operator !== CONNECTION_TEST_OPERATOR
       );
-      logWithTimestamp("info", "巡检历史获取成功,数量: %d", data.length);
-      return data;
+      setRuns((previous) =>
+        areRunListsEqual(previous, filtered) ? previous ?? filtered : filtered
+      );
+      logWithTimestamp("info", "巡检历史获取成功,数量: %d", filtered.length);
+      return filtered;
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "获取巡检历史失败";
