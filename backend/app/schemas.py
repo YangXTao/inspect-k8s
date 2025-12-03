@@ -78,6 +78,17 @@ class ClusterConfigOut(BaseModel):
             return agent.name
         return None
 
+    @computed_field(return_type=Optional[str])
+    @property
+    def default_agent_description(self) -> Optional[str]:
+        agent = getattr(self, "default_agent", None)
+        if not agent:
+            return None
+        description = getattr(agent, "description", None)
+        if description:
+            return description
+        return None
+
 
 class ClusterUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=150)

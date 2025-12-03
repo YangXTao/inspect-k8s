@@ -123,6 +123,17 @@ def update_cluster(
 def delete_cluster(db: Session, cluster: models.ClusterConfig) -> None:
     cluster_id = cluster.id
     cluster_name = cluster.name
+    related_agents = (
+        db.query(models.InspectionAgent)
+        .filter(
+            (models.InspectionAgent.cluster_id == cluster_id)
+            | (models.InspectionAgent.name == cluster_name)
+        )
+        .all()
+    )
+    removed_agent_ids = [agent.id for agent in related_agents]
+    for agent in related_agents:
+        db.delete(agent)
     db.delete(cluster)
     db.commit()
     log_action(
@@ -132,6 +143,16 @@ def delete_cluster(db: Session, cluster: models.ClusterConfig) -> None:
         entity_id=cluster_id,
         description=f"Deleted cluster '{cluster_name}'.",
     )
+    if removed_agent_ids:
+        log_action(
+            db,
+            action="delete",
+            entity_type="inspection_agent",
+            entity_id=None,
+            description=(
+                f"Removed {len(removed_agent_ids)} agent(s) bound to cluster '{cluster_name}'."
+            ),
+        )
 
 
 def log_action(

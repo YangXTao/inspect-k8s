@@ -767,7 +767,7 @@ const AgentQuickCreate = ({
         )}
       </div>
       <p className="agent-inline-copy">
-        Agent 名称建议与计划接入的集群名称保持一致，避免与现有集群冲突。
+        Agent 名称必须与计划接入的集群名称保持一致，注册后不可修改。
       </p>
       <form className="agent-inline-form-body" onSubmit={handleSubmit}>
         <input
@@ -1178,6 +1178,11 @@ const OverviewView = ({
                   versionLabel || nodeCountLabel
                     ? `版本 ${versionLabel ?? "未知"} · 节点数 ${nodeCountLabel ?? "未知"}`
                     : cluster.connection_message || "未校验";
+                const agentDescription =
+                  cluster.default_agent_description &&
+                  cluster.default_agent_description.trim().length > 0
+                    ? cluster.default_agent_description.trim()
+                    : null;
                 return (
                   <div
                     key={cluster.id}
@@ -1248,6 +1253,11 @@ const OverviewView = ({
                         {summaryText}
                       </span>
                     </div>
+                    {agentDescription && (
+                      <div className="cluster-agent-description">
+                        {agentDescription}
+                      </div>
+                    )}
                     {cluster.last_checked_at && (
                       <div className="cluster-status-time">
                         最近校验: {formatDate(cluster.last_checked_at)}
@@ -3823,10 +3833,13 @@ const ClusterEditModal = ({
             id={nameInputId}
             type="text"
             value={name}
-            onChange={(event) => setName(event.target.value)}
-            disabled={submitting}
+            readOnly
+            disabled
             required
           />
+          <div className="modal-hint">
+            名称来自 Agent 创建，若需调整请删除后重新注册 Agent。
+          </div>
         </div>
         <div className="modal-field">
           <label htmlFor={promInputId}>Prometheus 地址</label>

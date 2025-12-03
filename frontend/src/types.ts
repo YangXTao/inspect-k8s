@@ -25,6 +25,7 @@ export type ClusterConfig = {
   execution_mode: ExecutionMode;
   default_agent_id?: number | null;
   default_agent_name?: string | null;
+  default_agent_description?: string | null;
 };
 
 export type InspectionAgentStatus = "queued" | "running" | "finished" | "failed";

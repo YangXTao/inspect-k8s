@@ -610,12 +610,9 @@ async def update_cluster(
         if not new_name:
             raise HTTPException(status_code=400, detail="集群名称不能为空。")
         if new_name != cluster.name:
-            existing = crud.get_cluster_by_name(db, new_name)
-            if existing and existing.id != cluster.id:
-                raise HTTPException(
-                    status_code=400, detail=f"名称为 '{new_name}' 的集群已存在。"
-                )
-        update_kwargs["name"] = new_name
+            raise HTTPException(
+                status_code=400, detail="集群名称创建后不可修改，如需变更请重新注册。"
+            )
 
     if prometheus_url is not None:
         normalized_prom_url = _normalize_prometheus_url(prometheus_url)
@@ -727,10 +724,31 @@ def agent_bootstrap(
             raise HTTPException(status_code=401, detail="Agent Token 无效或已过期")
 
         cluster_payload = payload.cluster
-        cluster_name = (cluster_payload.name or "").strip()
-        if not cluster_name:
+        cluster_name_reported = (cluster_payload.name or "").strip()
+        agent_name = (agent.name or "").strip()
+        if not agent_name:
+            raise HTTPException(
+                status_code=400,
+                detail="Agent 名称缺失，无法匹配对应的集群。",
+            )
+        if not cluster_name_reported:
             raise HTTPException(status_code=400, detail="集群名称不能为空")
+        if cluster_name_reported and cluster_name_reported != agent_name:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Agent 名称“{agent_name}”与 Agent 端上报的集群名称"
+                    f"“{cluster_name_reported}”不一致，请保持两者一致后再注册。"
+                ),
+            )
+
+        cluster_name = agent_name
         cluster = agent.cluster or crud.get_cluster_by_name(db, cluster_name)
+        if cluster and cluster.name != cluster_name:
+            raise HTTPException(
+                status_code=400,
+                detail="集群名称已存在但与当前 Agent 不匹配，请重新注册。",
+            )
         agent_prom_url = _normalize_prometheus_url(agent.prometheus_url)
         incoming_prom_url = _normalize_prometheus_url(payload.prometheus_url)
         effective_prom_url = agent_prom_url or incoming_prom_url

@@ -146,11 +146,11 @@ body {
 .app-shell {
   width: calc(100% - 20px);
   margin: 6px auto 1px;
-  padding: 0 0 clamp(24px, 5vh, 40px);
+  padding: 0 0 16px;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  min-height: calc(100vh - 72px);
+  min-height: auto;
 }
 
 .app-header {
@@ -467,11 +467,11 @@ body {
   gap: 14px;
   width: 100%;
   margin: 0;
-  padding: 6px 2px clamp(18px, 4vh, 32px);
+  padding: 6px 2px 18px;
   justify-content: flex-start;
   justify-items: stretch;
   align-items: stretch;
-  min-height: 260px;
+  min-height: 190px;
 }
 
 .pagination {
@@ -663,6 +663,17 @@ body {
   margin-top: -6px;
   width: 100%;
   margin-bottom: 4px;
+}
+
+.cluster-agent-description {
+  width: 100%;
+  margin: 4px 0 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #e0f2fe;
+  color: #0f172a;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .cluster-name {
@@ -1212,6 +1223,12 @@ th {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.modal-hint {
+  font-size: 12px;
+  color: #475569;
+  line-height: 1.4;
 }
 
 .modal-field-label {
