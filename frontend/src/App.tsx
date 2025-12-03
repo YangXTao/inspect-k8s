@@ -854,6 +854,7 @@ interface OverviewProps {
     prometheus_url?: string | null;
   }) => Promise<void>;
   onClearAgentToken: () => void;
+  refreshClusters: () => Promise<void>;
 }
 
 const OverviewView = ({
@@ -888,6 +889,7 @@ const OverviewView = ({
   generatedAgentToken,
   onCreateAgent,
   onClearAgentToken,
+  refreshClusters,
 }: OverviewProps) => {
   const enableServerClusterUpload = false;
   const enableServerConnectionTest = true;
@@ -1055,12 +1057,10 @@ const OverviewView = ({
       }
       return false;
     });
-    if (!shouldRefresh) {
+    if (!shouldRefresh || typeof window === "undefined") {
       return;
     }
-    if (typeof window === "undefined") {
-      return;
-    }
+    void refreshClusters();
     const timer = window.setInterval(() => {
       void refreshClusters();
     }, 5000);
@@ -5635,6 +5635,7 @@ const hasManualKubeconfig = useMemo(
       generatedAgentToken={generatedAgentToken}
       onCreateAgent={handleCreateAgent}
       onClearAgentToken={handleClearAgentToken}
+      refreshClusters={refreshClusters}
     />
   );
 
