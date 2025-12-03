@@ -111,7 +111,8 @@ interface SettingsModalTab {
 }
 
 const CLUSTER_ID_STORAGE_KEY = "clusterDisplayIdMap.v1";
-const CLUSTER_PAGE_SIZE = 10;
+const CLUSTER_PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
+const DEFAULT_CLUSTER_PAGE_SIZE = CLUSTER_PAGE_SIZE_OPTIONS[0];
 const RUN_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const SETTINGS_BASE_PATH = "/setting";
 
@@ -890,6 +891,10 @@ const OverviewView = ({
   const enableServerClusterUpload = false;
   const enableServerConnectionTest = true;
   const navigate = useNavigate();
+  const [clusterPageSize, setClusterPageSize] = useState(
+    DEFAULT_CLUSTER_PAGE_SIZE
+  );
+  const [pageJumpInput, setPageJumpInput] = useState("");
   const enabledAgents = useMemo(
     () => agents.filter((agent) => agent.is_enabled),
     [agents]
@@ -931,9 +936,19 @@ const OverviewView = ({
     setCurrentPage(pageFromSearch);
   }, [pageFromSearch]);
 
+  useEffect(() => {
+    const maxPage = Math.max(
+      1,
+      Math.ceil(clusters.length / clusterPageSize) || 1
+    );
+    if (currentPage > maxPage) {
+      updatePage(maxPage, { replace: true });
+    }
+  }, [clusters.length, clusterPageSize, currentPage, updatePage]);
+
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(clusters.length / CLUSTER_PAGE_SIZE)),
-    [clusters.length]
+    () => Math.max(1, Math.ceil(clusters.length / clusterPageSize)),
+    [clusters.length, clusterPageSize]
   );
 
   const updatePage = useCallback(
@@ -966,9 +981,9 @@ const OverviewView = ({
   }, [currentPage, effectivePage, updatePage]);
 
   const pagedClusters = useMemo(() => {
-    const start = (effectivePage - 1) * CLUSTER_PAGE_SIZE;
-    return clusters.slice(start, start + CLUSTER_PAGE_SIZE);
-  }, [clusters, effectivePage]);
+    const start = (effectivePage - 1) * clusterPageSize;
+    return clusters.slice(start, start + clusterPageSize);
+  }, [clusters, effectivePage, clusterPageSize]);
 
   const handlePageChange = useCallback(
     (page: number) => {
@@ -976,6 +991,50 @@ const OverviewView = ({
       updatePage(target);
     },
     [totalPages, updatePage]
+  );
+
+  const handlePageSizeChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      const nextSize = Number(event.target.value);
+      if (!CLUSTER_PAGE_SIZE_OPTIONS.includes(nextSize as (typeof CLUSTER_PAGE_SIZE_OPTIONS)[number])) {
+        return;
+      }
+      setClusterPageSize(nextSize);
+      setPageJumpInput("");
+      updatePage(1);
+    },
+    [updatePage]
+  );
+
+  const handlePageJumpInputChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const digitsOnly = event.target.value.replace(/[^\d]/g, "");
+      setPageJumpInput(digitsOnly);
+    },
+    []
+  );
+
+  const handlePageJump = useCallback(() => {
+    if (!pageJumpInput) {
+      return;
+    }
+    const parsed = Number(pageJumpInput);
+    if (!Number.isInteger(parsed)) {
+      return;
+    }
+    const bounded = Math.min(Math.max(parsed, 1), totalPages);
+    updatePage(bounded);
+    setPageJumpInput("");
+  }, [pageJumpInput, totalPages, updatePage]);
+
+  const handlePageJumpInputKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        handlePageJump();
+      }
+    },
+    [handlePageJump]
   );
 
   const columnsForPage = useMemo(() => {
@@ -1256,7 +1315,12 @@ const OverviewView = ({
                     </div>
                     {descriptionText && (
                       <div className="cluster-agent-description">
-                        {descriptionText}
+                        <span className="cluster-agent-description-label">
+                          描述：
+                        </span>
+                        <span className="cluster-agent-description-text">
+                          {descriptionText}
+                        </span>
                       </div>
                     )}
                     {cluster.last_checked_at && (
@@ -1277,8 +1341,22 @@ const OverviewView = ({
                 );
               })}
             </div>
-            {clusters.length > CLUSTER_PAGE_SIZE && (
+            {clusters.length > 0 && (
               <div className="pagination">
+                <div className="pagination-size">
+                  <label htmlFor="cluster-page-size">每页</label>
+                  <select
+                    id="cluster-page-size"
+                    value={clusterPageSize}
+                    onChange={handlePageSizeChange}
+                  >
+                    {CLUSTER_PAGE_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <button
                   type="button"
                   className="pagination-nav"
@@ -1312,6 +1390,27 @@ const OverviewView = ({
                 >
                   下一页
                 </button>
+                <div className="page-jump">
+                  <span>跳转至</span>
+                  <input
+                    className="page-jump-input"
+                    value={pageJumpInput}
+                    onChange={handlePageJumpInputChange}
+                    onKeyDown={handlePageJumpInputKeyDown}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    aria-label="跳转页码"
+                  />
+                  <span> / {totalPages}</span>
+                  <button
+                    type="button"
+                    className="pagination-nav"
+                    onClick={handlePageJump}
+                    disabled={!pageJumpInput}
+                  >
+                    跳转
+                  </button>
+                </div>
               </div>
             )}
           </>
@@ -4368,7 +4467,7 @@ const backgroundLocation =
         setAgentNotice(
           `Agent ${response.name} 创建成功，请妥善保存 Token。`
         );
-        await refreshAgents();
+        await Promise.all([refreshAgents(), refreshClusters()]);
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "创建 Agent 失败";
@@ -4378,7 +4477,7 @@ const backgroundLocation =
         setAgentSubmitting(false);
       }
     },
-    [licenseCapabilities, agents, refreshAgents]
+    [licenseCapabilities, agents, refreshAgents, refreshClusters]
   );
 
   const handleClearAgentToken = useCallback(() => {

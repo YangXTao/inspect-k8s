@@ -483,6 +483,20 @@ body {
   flex-wrap: wrap;
 }
 
+.pagination-size {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pagination-size select {
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-family: inherit;
+  background: #fff;
+}
+
 .pagination-pages {
   display: inline-flex;
   gap: 8px;
