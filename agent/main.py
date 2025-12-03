@@ -414,12 +414,18 @@ class AgentClient:
             timeout=self.config.request_timeout,
         )
         resp.raise_for_status()
+        agent_data = resp.json()
+        if isinstance(agent_data, dict):
+            server_prom_url = (agent_data.get("prometheus_url") or "").strip()
+            if server_prom_url:
+                self.config.prometheus_url = server_prom_url
+                LOG.info("Server returned Prometheus URL: %s", server_prom_url)
         self.token = registration_token
         self.config.token = registration_token
         if self.config.token_file:
             self.config.save_token(self.token)
 
-    def send_heartbeat(self) -> None:
+    def send_heartbeat(self) -> Optional[Dict[str, Any]]:
         payload = {"reported_at": datetime.now(timezone.utc).isoformat()}
         resp = self.session.post(
             f"{self.config.server_base}/agent/heartbeat",
@@ -428,6 +434,10 @@ class AgentClient:
             timeout=self.config.request_timeout,
         )
         resp.raise_for_status()
+        try:
+            return resp.json()
+        except ValueError:
+            return None
 
     def fetch_tasks(self, limit: int) -> List[Dict[str, Any]]:
         resp = self.session.get(
@@ -472,12 +482,31 @@ class AgentRunner:
         self.config = config
         self.client = client
         self.prom_client: Optional[PrometheusClient] = None
-        if config.prometheus_url:
-            self.prom_client = PrometheusClient(
-                config.prometheus_url,
-                timeout=float(config.request_timeout),
-                verify_ssl=config.verify_ssl,
-            )
+        self._active_prom_url: Optional[str] = None
+        self._apply_prometheus_url(config.prometheus_url)
+
+    def _apply_prometheus_url(self, url: Optional[str]) -> None:
+        normalized = (url or "").strip()
+        if not normalized:
+            if self._active_prom_url:
+                LOG.info("Prometheus URL cleared,后续巡检将跳过需要 Prometheus 的检查。")
+            self._active_prom_url = None
+            self.prom_client = None
+            self.config.prometheus_url = None
+            return
+        if normalized == self._active_prom_url:
+            return
+        self._active_prom_url = normalized
+        self.config.prometheus_url = normalized
+        self.prom_client = PrometheusClient(
+            normalized,
+            timeout=float(self.config.request_timeout),
+            verify_ssl=self.config.verify_ssl,
+        )
+        LOG.info("Prometheus URL 已同步为 %s", normalized)
+
+    def sync_prometheus_from_config(self) -> None:
+        self._apply_prometheus_url(self.config.prometheus_url)
 
     def build_bootstrap_payload(self) -> Optional[Dict[str, Any]]:
         if self.config.cluster_name is None:
@@ -514,7 +543,11 @@ class AgentRunner:
 
     def run_once(self) -> bool:
         try:
-            self.client.send_heartbeat()
+            heartbeat_data = self.client.send_heartbeat()
+            if isinstance(heartbeat_data, dict):
+                server_prom = (heartbeat_data.get("prometheus_url") or "").strip()
+                if server_prom and server_prom != (self._active_prom_url or ""):
+                    self._apply_prometheus_url(server_prom)
         except Exception as exc:
             LOG.warning("心跳上报失败：%s", exc)
         try:

@@ -405,7 +405,7 @@ def check_connection_probe(context: CheckContext):
         return (
             CHECK_STATUS_FAILED,
             _truncate(version_output),
-            "检�?kubeconfig、网络或 API Server 状态�?",
+            "检查kubeconfig、网络或 API Server 状态",
         )
     server_line = version_output.strip() or "Server Version 未返回"
     nodes_ok, nodes_output = _run_kubectl(["get", "nodes", "-o", "json"], context)
