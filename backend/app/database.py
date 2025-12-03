@@ -450,11 +450,34 @@ def _ensure_inspection_agents_schema() -> None:
         return
 
     columns = {column["name"] for column in inspector.get_columns("inspection_agents")}
-    if "prometheus_url" in columns:
+    dialect = engine.dialect.name
+    statements: list[str] = []
+
+    if "prometheus_url" not in columns:
+        column_type = "TEXT" if dialect == "sqlite" else "VARCHAR(255)"
+        statements.append(
+            f"ALTER TABLE inspection_agents ADD COLUMN prometheus_url {column_type} NULL"
+        )
+
+    if dialect != "sqlite":
+        statements.extend(
+            [
+                "ALTER TABLE inspection_agents CONVERT TO CHARACTER SET utf8mb4 "
+                "COLLATE utf8mb4_unicode_ci",
+                "ALTER TABLE inspection_agents MODIFY name VARCHAR(100) "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+                "ALTER TABLE inspection_agents MODIFY token VARCHAR(64) "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+                "ALTER TABLE inspection_agents MODIFY description TEXT "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
+                "ALTER TABLE inspection_agents MODIFY prometheus_url VARCHAR(255) "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
+            ]
+        )
+
+    if not statements:
         return
 
-    dialect = engine.dialect.name
-    column_type = "TEXT" if dialect == "sqlite" else "VARCHAR(255)"
-    statement = f"ALTER TABLE inspection_agents ADD COLUMN prometheus_url {column_type} NULL"
     with engine.begin() as connection:
-        connection.execute(text(statement))
+        for statement in statements:
+            connection.execute(text(statement))
