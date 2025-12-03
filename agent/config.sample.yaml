@@ -3,12 +3,14 @@
   registration_token: "REPLACE_WITH_TOKEN"
   token_file: /app/state/agent.token
 agent:
+  name: demo-cluster
   poll_interval: 10
   batch_size: 1
   verify_ssl: false
   request_timeout: 15
 cluster:
-  name: demo-cluster
+  # 留空则默认与 agent.name 保持一致
+  name: ""
   kubeconfig_path: /app/config/kubeconfig.yaml
 prometheus:
   base_url: http://prometheus:9090

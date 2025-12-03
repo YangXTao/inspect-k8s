@@ -313,7 +313,7 @@ def load_config(config_path: Optional[str]) -> AgentConfig:
         except ValueError as exc:
             raise ValueError('cluster_id must be an integer') from exc
 
-    cluster_name = os.getenv(
+    raw_cluster_name = os.getenv(
         'INSPECT_AGENT_CLUSTER_NAME',
         cluster_cfg.get('name') or agent_cfg.get('cluster_name') or register_cfg.get('cluster_name'),
     )
@@ -332,17 +332,31 @@ def load_config(config_path: Optional[str]) -> AgentConfig:
         or register_cfg.get('token'),
     )
 
+    raw_agent_name = os.getenv(
+        'INSPECT_AGENT_NAME',
+        agent_cfg.get('name') or register_cfg.get('name'),
+    )
+    agent_name = raw_agent_name.strip() if raw_agent_name else None
+    cluster_name = raw_cluster_name.strip() if raw_cluster_name else None
+    if not cluster_name and agent_name:
+        cluster_name = agent_name
+        LOG.info(
+            "未显式配置 cluster.name，已自动使用 agent.name='%s' 作为集群名称。",
+            agent_name,
+        )
+    if not cluster_name:
+        raise ValueError(
+            "cluster.name 未配置，且无法从 agent.name 推导，请在配置或环境变量中指定。"
+        )
+
     config = AgentConfig(
         server_base=server_base.rstrip('/'),
         token=os.getenv('INSPECT_AGENT_TOKEN', server_cfg.get('token')),
         registration_token=registration_token,
         token_file=token_file,
-        agent_name=os.getenv(
-            'INSPECT_AGENT_NAME',
-            agent_cfg.get('name') or register_cfg.get('name'),
-        ),
+        agent_name=agent_name,
         cluster_id=cluster_id,
-        cluster_name=cluster_name.strip() if cluster_name else None,
+        cluster_name=cluster_name,
         kubeconfig_path=kubeconfig_path,
         prometheus_url=os.getenv(
             'INSPECT_AGENT_PROM_URL',
