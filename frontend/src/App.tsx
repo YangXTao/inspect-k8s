@@ -3216,8 +3216,6 @@ const LicenseSettingsPanel = ({
   );
 };
 
-};
-
 interface RunDetailViewProps {
   clusters: ClusterConfig[];
   items: InspectionItem[];
