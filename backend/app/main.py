@@ -718,7 +718,9 @@ def agent_bootstrap(
         if not cluster_name:
             raise HTTPException(status_code=400, detail="集群名称不能为空")
         cluster = agent.cluster or crud.get_cluster_by_name(db, cluster_name)
+        agent_prom_url = _normalize_prometheus_url(agent.prometheus_url)
         incoming_prom_url = _normalize_prometheus_url(payload.prometheus_url)
+        effective_prom_url = incoming_prom_url or agent_prom_url
 
         contexts_json: Optional[str] = None
         if cluster_payload.kubeconfig_b64:
@@ -763,7 +765,7 @@ def agent_bootstrap(
                 name=cluster_name,
                 kubeconfig_path=kubeconfig_path,
                 contexts_json=contexts_json,
-                prometheus_url=incoming_prom_url,
+                prometheus_url=effective_prom_url,
                 connection_status=connection_status,
                 connection_message=connection_message,
                 last_checked_at=now,
@@ -784,7 +786,7 @@ def agent_bootstrap(
             cluster = crud.update_cluster(db, cluster, **update_kwargs)
 
         cluster_prom_url = _normalize_prometheus_url(cluster.prometheus_url)
-        final_prom_url = cluster_prom_url or incoming_prom_url
+        final_prom_url = cluster_prom_url or effective_prom_url
         if final_prom_url != cluster_prom_url:
             cluster = crud.update_cluster(
                 db,
@@ -797,7 +799,7 @@ def agent_bootstrap(
             agent,
             cluster=cluster,
             is_enabled=True,
-            prometheus_url=final_prom_url,
+            prometheus_url=final_prom_url or agent.prometheus_url,
         )
         _sync_cluster_prometheus_to_agents(db, cluster)
         crud.record_agent_heartbeat(db, agent, seen_at=datetime.utcnow())
