@@ -681,6 +681,114 @@ const TopNavigation = ({ onOpenSettings }: { onOpenSettings: () => void }) => {
   );
 };
 
+interface AgentQuickCreateProps {
+  canManageAgents: boolean;
+  submitting: boolean;
+  notice: string | null;
+  error: string | null;
+  generatedToken: string | null;
+  onCreate: (payload: {
+    name: string;
+    description?: string;
+    prometheus_url?: string | null;
+  }) => Promise<void>;
+  onClearToken: () => void;
+}
+
+const AgentQuickCreate = ({
+  canManageAgents,
+  submitting,
+  notice,
+  error,
+  generatedToken,
+  onCreate,
+  onClearToken,
+}: AgentQuickCreateProps) => {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [prometheusUrl, setPrometheusUrl] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setFormError("Agent 名称不能为空");
+      return;
+    }
+    setFormError(null);
+    try {
+      await onCreate({
+        name: trimmedName,
+        description: description.trim() || undefined,
+        prometheus_url: prometheusUrl.trim() || undefined,
+      });
+      setName("");
+      setDescription("");
+      setPrometheusUrl("");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "创建 Agent 失败";
+      setFormError(message);
+    }
+  };
+
+  return (
+    <div className="agent-inline-form">
+      <div className="agent-inline-form-header">
+        <strong>快速创建 Agent</strong>
+        {!canManageAgents && (
+          <span className="agent-inline-hint">当前 License 不支持 Agent 管理</span>
+        )}
+      </div>
+      <p className="agent-inline-copy">
+        集群接入需由 Agent 执行，Server 端仅负责查看巡检项与结果。
+      </p>
+      <form className="agent-inline-form-body" onSubmit={handleSubmit}>
+        <input
+          type="text"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Agent 名称"
+          disabled={submitting || !canManageAgents}
+        />
+        <input
+          type="text"
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+          placeholder="描述（可选）"
+          disabled={submitting || !canManageAgents}
+        />
+        <input
+          type="text"
+          value={prometheusUrl}
+          onChange={(event) => setPrometheusUrl(event.target.value)}
+          placeholder="Prometheus 地址（可选）"
+          disabled={submitting || !canManageAgents}
+        />
+        <button
+          type="submit"
+          className="secondary"
+          disabled={submitting || !canManageAgents}
+        >
+          {submitting ? "创建中..." : "创建 Agent"}
+        </button>
+      </form>
+      {formError && <div className="feedback error">{formError}</div>}
+      {error && !formError && <div className="feedback error">{error}</div>}
+      {notice && <div className="feedback success">{notice}</div>}
+      {generatedToken && (
+        <div className="agent-token-box">
+          <p>创建成功，请妥善保存 Token，页面关闭后无法再次查看。</p>
+          <code>{generatedToken}</code>
+          <button type="button" className="secondary" onClick={onClearToken}>
+            我已保存 Token
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 interface OverviewProps {
   clusters: ClusterConfig[];
   clusterError: string | null;
@@ -706,6 +814,17 @@ interface OverviewProps {
   onTestClusterConnection: (clusterId: number) => Promise<void>;
   testingClusterIds: Record<number, boolean>;
   license: LicenseCapabilities;
+  canManageAgents: boolean;
+  agentSubmitting: boolean;
+  agentNotice: string | null;
+  agentError: string | null;
+  generatedAgentToken: string | null;
+  onCreateAgent: (payload: {
+    name: string;
+    description?: string;
+    prometheus_url?: string | null;
+  }) => Promise<void>;
+  onClearAgentToken: () => void;
 }
 
 const OverviewView = ({
@@ -733,6 +852,13 @@ const OverviewView = ({
   onTestClusterConnection,
   testingClusterIds,
   license,
+  canManageAgents,
+  agentSubmitting,
+  agentNotice,
+  agentError,
+  generatedAgentToken,
+  onCreateAgent,
+  onClearAgentToken,
 }: OverviewProps) => {
   const enableServerClusterUpload = false;
   const enableServerConnectionTest = true;
@@ -945,9 +1071,15 @@ const OverviewView = ({
               </button>
             </div>
           ) : (
-            <div className="cluster-upload-note warning">
-              集群接入需由 Agent 执行，Server 端仅负责查看巡检项与结果。
-            </div>
+            <AgentQuickCreate
+              canManageAgents={canManageAgents}
+              submitting={agentSubmitting}
+              notice={agentNotice}
+              error={agentError}
+              generatedToken={generatedAgentToken}
+              onCreate={onCreateAgent}
+              onClearToken={onClearAgentToken}
+            />
           )}
         </div>
       </header>
@@ -3084,216 +3216,6 @@ const LicenseSettingsPanel = ({
   );
 };
 
-interface AgentSettingsPanelProps {
-  agents: InspectionAgent[];
-  loading: boolean;
-  submitting: boolean;
-  notice: string | null;
-  error: string | null;
-  generatedToken: string | null;
-  onRefresh: () => Promise<void>;
-  onCreate: (payload: {
-    name: string;
-    description?: string;
-    prometheus_url?: string | null;
-  }) => Promise<void>;
-  onUpdate: (
-    agentId: number,
-    payload: {
-      name?: string;
-      description?: string;
-      is_enabled?: boolean;
-      prometheus_url?: string | null;
-    }
-  ) => Promise<InspectionAgent | null>;
-  onClearToken: () => void;
-  canManageAgents: boolean;
-}
-
-const AgentSettingsPanel = ({
-  agents,
-  loading,
-  submitting,
-  notice,
-  error,
-  generatedToken,
-  onRefresh,
-  onCreate,
-  onUpdate,
-  onClearToken,
-  canManageAgents,
-}: AgentSettingsPanelProps) => {
-  const [formName, setFormName] = useState("");
-  const [formDescription, setFormDescription] = useState("");
-  const [formPrometheusUrl, setFormPrometheusUrl] = useState("");
-  const [formError, setFormError] = useState<string | null>(null);
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const trimmedName = formName.trim();
-    if (!trimmedName) {
-      setFormError("Agent 名称不能为空");
-      return;
-    }
-    setFormError(null);
-    try {
-      await onCreate({
-        name: trimmedName,
-        description: formDescription.trim() || undefined,
-        prometheus_url: formPrometheusUrl.trim() || undefined,
-      });
-      setFormName("");
-      setFormDescription("");
-      setFormPrometheusUrl("");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "创建 Agent 失败";
-      setFormError(message);
-    }
-  };
-
-  const handleToggleAgent = async (agent: InspectionAgent) => {
-    try {
-      await onUpdate(agent.id, { is_enabled: !agent.is_enabled });
-    } catch {
-      /* ignore */
-    }
-  };
-
-  return (
-    <div className="agent-settings-panel">
-      <div className="agent-settings-header">
-        <h3>Agent 管理</h3>
-        <button
-          type="button"
-          className="secondary"
-          onClick={() => void onRefresh()}
-          disabled={loading || submitting}
-        >
-          {loading ? "刷新中..." : "刷新列表"}
-        </button>
-      </div>
-      {notice && <div className="feedback success">{notice}</div>}
-      {error && <div className="feedback error">{error}</div>}
-      {!canManageAgents && (
-        <div className="feedback warning">
-          当前 License 不支持 Agent 管理，相关操作已禁用。
-        </div>
-      )}
-      <section className="agent-create-section">
-        <h4>新增 Agent</h4>
-        <form className="agent-create-form" onSubmit={handleSubmit}>
-          <label>
-            Agent 名称
-            <input
-              type="text"
-              value={formName}
-              onChange={(event) => setFormName(event.target.value)}
-              disabled={submitting || !canManageAgents}
-              placeholder="例如：beijing-agent-01"
-            />
-          </label>
-          <label>
-            描述
-            <input
-              type="text"
-              value={formDescription}
-              onChange={(event) => setFormDescription(event.target.value)}
-              disabled={submitting || !canManageAgents}
-              placeholder="可选，说明用途或位置"
-            />
-          </label>
-          <label>
-            Agent Prometheus 地址
-            <input
-              type="text"
-              value={formPrometheusUrl}
-              onChange={(event) => setFormPrometheusUrl(event.target.value)}
-              disabled={submitting || !canManageAgents}
-              placeholder="可选，填写该 Agent 采集的 Prometheus 地址"
-            />
-          </label>
-          {formError && <div className="feedback error">{formError}</div>}
-          <div className="agent-create-actions">
-            <button
-              type="submit"
-              className="primary"
-              disabled={submitting || !canManageAgents}
-            >
-              {submitting ? "创建中..." : "创建 Agent"}
-            </button>
-          </div>
-        </form>
-        {generatedToken && (
-          <div className="agent-token-box">
-            <p>创建成功！请妥善保存 Token，页面关闭后将无法再次查看。</p>
-            <code>{generatedToken}</code>
-            <button
-              type="button"
-              className="secondary"
-              onClick={onClearToken}
-            >
-              我已保存 Token
-            </button>
-          </div>
-        )}
-      </section>
-      <section className="agent-list-section">
-        <h4>已注册 Agent</h4>
-        <div className="table-wrapper">
-          {agents.length === 0 ? (
-            <div className="placeholder">
-              {loading ? "Agent 列表加载中..." : "暂无 Agent，请先创建。"}
-            </div>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>名称</th>
-                  <th>状态</th>
-                  <th>最后上报</th>
-                  <th>Prometheus</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {agents.map((agent) => (
-                  <tr key={agent.id}>
-                    <td>
-                      <div className="agent-name">{agent.name}</div>
-                      {agent.description && (
-                        <div className="agent-desc">{agent.description}</div>
-                      )}
-                    </td>
-                    <td>
-                      <span
-                        className={`status-pill ${
-                          agent.is_enabled ? "success" : "cancelled"
-                        }`}
-                      >
-                        {agent.is_enabled ? "启用" : "已禁用"}
-                      </span>
-                    </td>
-                    <td>{formatDate(agent.last_seen_at)}</td>
-                    <td>{agent.prometheus_url || "-"}</td>
-                    <td className="actions">
-                      <button
-                        type="button"
-                        className="link-button"
-                        onClick={() => void handleToggleAgent(agent)}
-                        disabled={submitting || !canManageAgents}
-                      >
-                        {agent.is_enabled ? "禁用" : "启用"}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </section>
-    </div>
-  );
 };
 
 interface RunDetailViewProps {
@@ -4012,7 +3934,6 @@ const [clusterUploading, setClusterUploading] = useState(false);
     useState<ClusterConfig | null>(null);
   const [clusterEditSubmitting, setClusterEditSubmitting] = useState(false);
   const [clusterEditError, setClusterEditError] = useState<string | null>(null);
-  const [agentLoading, setAgentLoading] = useState(false);
   const [agentNotice, setAgentNotice] = useState<string | null>(null);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [agentSubmitting, setAgentSubmitting] = useState(false);
@@ -4102,7 +4023,6 @@ const [clusterUploading, setClusterUploading] = useState(false);
   }, [refreshLicenseStatus]);
 
   const refreshAgents = useCallback(async () => {
-    setAgentLoading(true);
     try {
       logWithTimestamp("info", "开始获取 Agent 列表");
       const data = await getAgents();
@@ -4115,8 +4035,6 @@ const [clusterUploading, setClusterUploading] = useState(false);
       logWithTimestamp("error", "获取 Agent 列表失败: %s", message);
       setAgentError(message);
       return null;
-    } finally {
-      setAgentLoading(false);
     }
   }, []);
 
@@ -4418,52 +4336,6 @@ const backgroundLocation =
       }
     },
     [licenseCapabilities, refreshAgents]
-  );
-
-  const handleUpdateAgent = useCallback(
-    async (
-      agentId: number,
-      payload: {
-        name?: string;
-        description?: string;
-        is_enabled?: boolean;
-        prometheus_url?: string | null;
-      }
-    ) => {
-      if (!licenseCapabilities.canManageAgents) {
-        setAgentError(
-          licenseCapabilities.reason ?? "当前 License 不支持 Agent 管理。"
-        );
-        return null;
-      }
-      setAgentSubmitting(true);
-      setAgentNotice(null);
-      setAgentError(null);
-      try {
-        const updated = await apiUpdateAgent(agentId, payload);
-        setAgents((prev) =>
-          prev.map((agent) => (agent.id === updated.id ? updated : agent))
-        );
-        if (payload.is_enabled !== undefined) {
-          setAgentNotice(
-            payload.is_enabled
-              ? `Agent ${updated.name} 已启用`
-              : `Agent ${updated.name} 已禁用`
-          );
-        } else {
-          setAgentNotice(`Agent ${updated.name} 信息已更新`);
-        }
-        return updated;
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "更新 Agent 失败";
-        setAgentError(message);
-        throw err instanceof Error ? err : new Error(message);
-      } finally {
-        setAgentSubmitting(false);
-      }
-    },
-    [licenseCapabilities]
   );
 
   const handleClearAgentToken = useCallback(() => {
@@ -5390,25 +5262,6 @@ const hasManualKubeconfig = useMemo(
         ),
       },
       {
-        id: "agents",
-        label: "Agent 管理",
-        render: () => (
-          <AgentSettingsPanel
-            agents={agents}
-            loading={agentLoading}
-            submitting={agentSubmitting}
-            notice={agentNotice}
-            error={agentError}
-            generatedToken={generatedAgentToken}
-            onRefresh={refreshAgents}
-            onCreate={handleCreateAgent}
-            onUpdate={handleUpdateAgent}
-            onClearToken={handleClearAgentToken}
-            canManageAgents={licenseCapabilities.canManageAgents}
-          />
-        ),
-      },
-      {
         id: "license",
         label: "License 管理",
         render: () => (
@@ -5433,17 +5286,6 @@ const hasManualKubeconfig = useMemo(
       handleDeleteInspectionItemsBulk,
       handleExportInspectionItems,
       handleImportInspectionItems,
-      agents,
-      clusters,
-      agentLoading,
-      agentSubmitting,
-      agentNotice,
-      agentError,
-      generatedAgentToken,
-      refreshAgents,
-      handleCreateAgent,
-      handleUpdateAgent,
-      handleClearAgentToken,
       licenseCapabilities,
       licenseUploading,
       licenseTextUploading,
@@ -5609,6 +5451,13 @@ const hasManualKubeconfig = useMemo(
       onTestClusterConnection={handleTestClusterConnection}
       testingClusterIds={testingClusterIds}
       license={licenseCapabilities}
+      canManageAgents={licenseCapabilities.canManageAgents}
+      agentSubmitting={agentSubmitting}
+      agentNotice={agentNotice}
+      agentError={agentError}
+      generatedAgentToken={generatedAgentToken}
+      onCreateAgent={handleCreateAgent}
+      onClearAgentToken={handleClearAgentToken}
     />
   );
 
