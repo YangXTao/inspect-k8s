@@ -1031,7 +1031,7 @@ const OverviewView = ({
   }, [pageJumpInput, totalPages, updatePage]);
 
   const handlePageJumpInputKeyDown = useCallback(
-    (event: KeyboardEvent) => {
+    (event: { key: string; preventDefault: () => void }) => {
       if (event.key === "Enter") {
         event.preventDefault();
         handlePageJump();
@@ -1040,8 +1040,8 @@ const OverviewView = ({
     [handlePageJump]
   );
 
-  useEffect(() => {
-    const shouldRefresh = clusters.some((cluster) => {
+  const needsAutoRefresh = useMemo(() => {
+    return clusters.some((cluster) => {
       if (cluster.connection_status === "pending") {
         return true;
       }
@@ -1057,7 +1057,10 @@ const OverviewView = ({
       }
       return false;
     });
-    if (!shouldRefresh || typeof window === "undefined") {
+  }, [clusters]);
+
+  useEffect(() => {
+    if (!needsAutoRefresh || typeof window === "undefined") {
       return;
     }
     void refreshClusters();
@@ -1067,7 +1070,7 @@ const OverviewView = ({
     return () => {
       window.clearInterval(timer);
     };
-  }, [clusters, refreshClusters]);
+  }, [needsAutoRefresh, refreshClusters]);
 
   const columnsForPage = useMemo(() => {
     const count = pagedClusters.length;
@@ -2672,7 +2675,7 @@ const SettingsModal = ({
     if (!open) {
       return;
     }
-    const handleKeyDown = (event: KeyboardEvent) => {
+    const handleKeyDown = (event: { key: string }) => {
       if (event.key === "Escape") {
         if (confirmState && onConfirmClose) {
           onConfirmClose();
