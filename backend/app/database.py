@@ -122,6 +122,12 @@ def _ensure_cluster_schema() -> None:
             f"ALTER TABLE cluster_configs ADD COLUMN connection_message {column_type} NULL"
         )
 
+    if "description" not in existing_columns:
+        column_type = "TEXT" if dialect == "sqlite" else "TEXT"
+        statements.append(
+            f"ALTER TABLE cluster_configs ADD COLUMN description {column_type} NULL"
+        )
+
     if "last_checked_at" not in existing_columns:
         if dialect == "sqlite":
             statements.append(

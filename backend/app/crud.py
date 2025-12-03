@@ -49,6 +49,7 @@ def create_cluster(
     last_checked_at: Optional[datetime] = None,
     execution_mode: str = "agent",
     default_agent_id: Optional[int] = None,
+    description: Optional[str] = None,
 ) -> models.ClusterConfig:
     cluster = models.ClusterConfig(
         name=name,
@@ -60,6 +61,7 @@ def create_cluster(
         last_checked_at=last_checked_at,
         execution_mode=execution_mode,
         default_agent_id=default_agent_id,
+        description=description,
     )
     db.add(cluster)
     db.commit()
@@ -87,6 +89,7 @@ def update_cluster(
     last_checked_at: Optional[datetime] = None,
     execution_mode: Optional[str] = None,
     default_agent_id: Any = UNSET,
+    description: Optional[str] = None,
 ) -> models.ClusterConfig:
     if name is not None:
         cluster.name = name
@@ -104,6 +107,8 @@ def update_cluster(
         cluster.last_checked_at = last_checked_at
     if execution_mode is not None:
         cluster.execution_mode = execution_mode
+    if description is not None:
+        cluster.description = description
     if default_agent_id is not UNSET:
         cluster.default_agent_id = default_agent_id
     cluster.updated_at = datetime.utcnow()

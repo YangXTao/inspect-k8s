@@ -679,18 +679,71 @@ def register_agent(
     if existing_agent:
         raise HTTPException(status_code=400, detail="Agent 名称已存在，请更换名称。")
 
+    normalized_description = (payload.description or "").strip() or None
+    normalized_prometheus_url = _normalize_prometheus_url(payload.prometheus_url)
+
     cluster: Optional[models.ClusterConfig] = None
     if payload.cluster_id is not None:
         cluster = crud.get_cluster(db, payload.cluster_id)
         if not cluster:
             raise HTTPException(status_code=404, detail="指定的集群不存在。")
+        if cluster.name != trimmed_name:
+            raise HTTPException(
+                status_code=400,
+                detail="Agent 名称必须与目标集群名称保持一致。",
+            )
+        if normalized_description:
+            cluster = crud.update_cluster(db, cluster, description=normalized_description)
+        if normalized_prometheus_url:
+            cluster = crud.update_cluster(
+                db,
+                cluster,
+                prometheus_url=normalized_prometheus_url,
+            )
+    else:
+        cluster = crud.get_cluster_by_name(db, trimmed_name)
+        if cluster:
+            if cluster.connection_status != "pending":
+                raise HTTPException(
+                    status_code=400,
+                    detail="同名集群已存在，请更换 Agent 名称或删除旧集群。",
+                )
+            linked_agents = (
+                db.query(models.InspectionAgent)
+                .filter(models.InspectionAgent.cluster_id == cluster.id)
+                .count()
+            )
+            if linked_agents > 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="该 Agent 名称已保留 Token，如需重新创建请先删除旧 Token。",
+                )
+            update_kwargs: dict[str, Any] = {}
+            if normalized_description is not None:
+                update_kwargs["description"] = normalized_description
+            if normalized_prometheus_url is not None:
+                update_kwargs["prometheus_url"] = normalized_prometheus_url
+            if update_kwargs:
+                cluster = crud.update_cluster(db, cluster, **update_kwargs)
+        else:
+            placeholder_path = _build_agent_managed_kubeconfig_ref()
+            cluster = crud.create_cluster(
+                db,
+                name=trimmed_name,
+                kubeconfig_path=placeholder_path,
+                contexts_json=None,
+                prometheus_url=normalized_prometheus_url,
+                connection_status="pending",
+                connection_message="等待 Agent 注册",
+                last_checked_at=None,
+                execution_mode="agent",
+                default_agent_id=None,
+                description=normalized_description,
+            )
 
     token = _generate_agent_token()
     while crud.get_inspection_agent_by_token(db, token) is not None:
         token = _generate_agent_token()
-
-    normalized_description = (payload.description or "").strip() or None
-    normalized_prometheus_url = _normalize_prometheus_url(payload.prometheus_url)
 
     agent = crud.create_inspection_agent(
         db,
@@ -790,6 +843,8 @@ def agent_bootstrap(
         connection_status = "connected"
         connection_message = "Agent 已完成注册，Server 端已托管 kubeconfig。"
 
+        agent_description = (agent.description or "").strip() or None
+
         if cluster is None:
             cluster = crud.create_cluster(
                 db,
@@ -802,6 +857,7 @@ def agent_bootstrap(
                 last_checked_at=now,
                 execution_mode="agent",
                 default_agent_id=agent.id,
+                description=agent_description,
             )
         else:
             update_kwargs: dict[str, Any] = {
@@ -814,6 +870,8 @@ def agent_bootstrap(
             }
             if contexts_json is not None:
                 update_kwargs["contexts_json"] = contexts_json
+            if agent_description is not None:
+                update_kwargs["description"] = agent_description
             cluster = crud.update_cluster(db, cluster, **update_kwargs)
 
         cluster_prom_url = _normalize_prometheus_url(cluster.prometheus_url)

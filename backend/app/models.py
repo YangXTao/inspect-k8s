@@ -16,6 +16,7 @@ class ClusterConfig(Base):
     kubeconfig_path = Column(String(255), nullable=False)
     prometheus_url = Column(String(255), nullable=True)
     contexts_json = Column(Text, nullable=True)
+    description = Column(Text, nullable=True)
     connection_status = Column(String(20), nullable=False, default="unknown")
     connection_message = Column(Text, nullable=True)
     last_checked_at = Column(DateTime, nullable=True)

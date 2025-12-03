@@ -270,6 +270,7 @@ const clusterStatusMeta = {
   failed: { label: "连接失败", className: "failed" },
   warning: { label: "待校验", className: "warning" },
   unknown: { label: "未校验", className: "unknown" },
+  pending: { label: "待注册", className: "pending" },
 } as const;
 
 const getClusterStatusMeta = (status: string) =>
@@ -1178,11 +1179,11 @@ const OverviewView = ({
                   versionLabel || nodeCountLabel
                     ? `版本 ${versionLabel ?? "未知"} · 节点数 ${nodeCountLabel ?? "未知"}`
                     : cluster.connection_message || "未校验";
-                const agentDescription =
-                  cluster.default_agent_description &&
-                  cluster.default_agent_description.trim().length > 0
-                    ? cluster.default_agent_description.trim()
-                    : null;
+                const descriptionText =
+                  (cluster.description && cluster.description.trim()) ||
+                  (cluster.default_agent_description &&
+                    cluster.default_agent_description.trim()) ||
+                  null;
                 return (
                   <div
                     key={cluster.id}
@@ -1253,9 +1254,9 @@ const OverviewView = ({
                         {summaryText}
                       </span>
                     </div>
-                    {agentDescription && (
+                    {descriptionText && (
                       <div className="cluster-agent-description">
-                        {agentDescription}
+                        {descriptionText}
                       </div>
                     )}
                     {cluster.last_checked_at && (
@@ -2089,7 +2090,7 @@ const ClusterDetailView = ({
               onClick={() => void onTestClusterConnection(cluster.id)}
               disabled={isTesting}
             >
-              {isTesting ? "校验中..." : "重新校验连接"}
+              {isTesting ? "测试中..." : "连接测试"}
             </button>
           )}
           <button
@@ -2131,10 +2132,12 @@ const ClusterDetailView = ({
                 {statusMeta.label}
               </span>
             </div>
-            <div>
-              <strong>连接说明：</strong>
-              {cluster.connection_message || "尚未校验连接"}
-            </div>
+            {cluster.description && cluster.description.trim().length > 0 && (
+              <div>
+                <strong>描述：</strong>
+                {cluster.description}
+              </div>
+            )}
             <div>
               <strong>最近校验：</strong>
               {cluster.last_checked_at
@@ -2144,17 +2147,6 @@ const ClusterDetailView = ({
             <div>
               <strong>Prometheus：</strong>
               {cluster.prometheus_url || "未配置"}
-            </div>
-            <div>
-              <strong>执行模式：</strong>
-              {cluster.execution_mode === "agent" ? "Agent 执行" : "服务器执行"}
-            </div>
-            <div>
-              <strong>默认 Agent：</strong>
-              {cluster.default_agent_name ||
-                (cluster.default_agent_id
-                  ? `Agent #${cluster.default_agent_id}`
-                  : "未设置")}
             </div>
             <div>
               <strong>Kubernetes 版本：</strong>

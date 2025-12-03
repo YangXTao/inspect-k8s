@@ -650,6 +650,10 @@ body {
   background: #e2e8f0;
   color: #475569;
 }
+.status-chip.pending {
+  background: #fde68a;
+  color: #92400e;
+}
 
 .cluster-status-message {
   font-size: 13px;

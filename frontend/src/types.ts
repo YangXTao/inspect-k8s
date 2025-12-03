@@ -15,6 +15,7 @@ export type ClusterConfig = {
   name: string;
   prometheus_url?: string | null;
   contexts: string[];
+  description?: string | null;
   connection_status: "connected" | "failed" | "warning" | "unknown";
   connection_message?: string | null;
   kubernetes_version?: string | null;

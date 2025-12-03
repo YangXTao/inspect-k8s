@@ -40,6 +40,23 @@ def _extract_connection_meta(
     nodes_match = re.search(r"nodes?\s+(\d+)", message, flags=re.IGNORECASE)
     version = version_match.group(1).strip() if version_match else None
     node_count = int(nodes_match.group(1)) if nodes_match else None
+
+    if version is None:
+        localized = re.search(
+            r"(?:版本|version)[:：]?\s*([vV]?\d+(?:\.\d+){1,2}(?:[^\s·]+)?)", message
+        )
+        if localized:
+            version = localized.group(1).strip()
+    if version is None:
+        leading_segment = message.strip().split("·", 1)[0].strip()
+        if leading_segment and any(ch.isdigit() for ch in leading_segment):
+            version = leading_segment
+
+    if node_count is None:
+        localized_nodes = re.search(r"(?:节点数|节点)[:：]?\s*(\d+)", message)
+        if localized_nodes:
+            node_count = int(localized_nodes.group(1))
+
     return version, node_count
 
 
@@ -50,6 +67,7 @@ class ClusterConfigOut(BaseModel):
     name: str
     prometheus_url: Optional[str]
     contexts: List[str]
+    description: Optional[str]
     connection_status: str
     connection_message: Optional[str]
     last_checked_at: Optional[datetime]
