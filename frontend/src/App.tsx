@@ -570,6 +570,36 @@ const isSameDisplayMap = (
   });
 };
 
+const areClusterListsEqual = (
+  prev: ClusterConfig[] | null | undefined,
+  next: ClusterConfig[]
+) => {
+  if (!prev || prev.length !== next.length) {
+    return false;
+  }
+  const prevMap = new Map(prev.map((cluster) => [cluster.id, cluster]));
+  for (const cluster of next) {
+    const previous = prevMap.get(cluster.id);
+    if (!previous) {
+      return false;
+    }
+    if (
+      previous.name !== cluster.name ||
+      previous.connection_status !== cluster.connection_status ||
+      (previous.connection_message || "") !==
+        (cluster.connection_message || "") ||
+      (previous.description || "") !== (cluster.description || "") ||
+      (previous.prometheus_url || "") !== (cluster.prometheus_url || "") ||
+      (previous.last_checked_at || "") !== (cluster.last_checked_at || "") ||
+      (previous.updated_at || "") !== (cluster.updated_at || "") ||
+      previous.default_agent_id !== cluster.default_agent_id
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
+
 const areRunListsEqual = (
   prev: InspectionRunListItem[] | null | undefined,
   next: InspectionRunListItem[]
@@ -854,7 +884,6 @@ interface OverviewProps {
     prometheus_url?: string | null;
   }) => Promise<void>;
   onClearAgentToken: () => void;
-  refreshClusters: () => Promise<void>;
 }
 
 const OverviewView = ({
@@ -889,7 +918,6 @@ const OverviewView = ({
   generatedAgentToken,
   onCreateAgent,
   onClearAgentToken,
-  refreshClusters,
 }: OverviewProps) => {
   const enableServerClusterUpload = false;
   const enableServerConnectionTest = true;
@@ -1039,38 +1067,6 @@ const OverviewView = ({
     },
     [handlePageJump]
   );
-
-  const needsAutoRefresh = useMemo(() => {
-    return clusters.some((cluster) => {
-      if (cluster.connection_status === "pending") {
-        return true;
-      }
-      if (cluster.connection_status === "warning") {
-        const message = (cluster.connection_message || "").trim();
-        if (
-          !cluster.last_checked_at ||
-          message.includes("等待 Agent 注册") ||
-          message.includes("连接测试")
-        ) {
-          return true;
-        }
-      }
-      return false;
-    });
-  }, [clusters]);
-
-  useEffect(() => {
-    if (!needsAutoRefresh || typeof window === "undefined") {
-      return;
-    }
-    void refreshClusters();
-    const timer = window.setInterval(() => {
-      void refreshClusters();
-    }, 5000);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [needsAutoRefresh, refreshClusters]);
 
   const columnsForPage = useMemo(() => {
     const count = pagedClusters.length;
@@ -4436,7 +4432,9 @@ const backgroundLocation =
     try {
       logWithTimestamp("info", "开始获取集群信息");
       const data = await getClusters();
-      setClusters(data);
+      setClusters((previous) =>
+        areClusterListsEqual(previous, data) ? previous ?? data : data
+      );
       setClusterDisplayIds((prev) => {
         const next = assignClusterDisplayIds(data, prev);
         return isSameDisplayMap(prev, next) ? prev : next;
@@ -4450,6 +4448,38 @@ const backgroundLocation =
       setClusterError(message);
     }
   }, []);
+
+  const needsClusterAutoRefresh = useMemo(() => {
+    return clusters.some((cluster) => {
+      if (cluster.connection_status === "pending") {
+        return true;
+      }
+      if (cluster.connection_status === "warning") {
+        const message = (cluster.connection_message || "").trim();
+        if (
+          !cluster.last_checked_at ||
+          message.includes("等待 Agent 注册") ||
+          message.includes("连接测试")
+        ) {
+          return true;
+        }
+      }
+      return false;
+    });
+  }, [clusters]);
+
+  useEffect(() => {
+    if (!needsClusterAutoRefresh || typeof window === "undefined") {
+      return;
+    }
+    void refreshClusters();
+    const timer = window.setInterval(() => {
+      void refreshClusters();
+    }, 5000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [needsClusterAutoRefresh, refreshClusters]);
 
   const refreshRuns = useCallback(async () => {
     try {
@@ -5638,7 +5668,6 @@ const hasManualKubeconfig = useMemo(
       generatedAgentToken={generatedAgentToken}
       onCreateAgent={handleCreateAgent}
       onClearAgentToken={handleClearAgentToken}
-      refreshClusters={refreshClusters}
     />
   );
 
