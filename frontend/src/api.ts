@@ -210,7 +210,7 @@ export function getAgents(): Promise<InspectionAgent[]> {
 
 export function createAgent(payload: {
   name: string;
-  cluster_id: number;
+  cluster_id?: number | null;
   description?: string;
   prometheus_url?: string | null;
 }): Promise<AgentRegisterResponse> {

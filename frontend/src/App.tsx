@@ -691,7 +691,6 @@ interface AgentQuickCreateProps {
   generatedToken: string | null;
   onCreate: (payload: {
     name: string;
-    cluster_id: number;
     description?: string;
     prometheus_url?: string | null;
   }) => Promise<void>;
@@ -709,57 +708,48 @@ const AgentQuickCreate = ({
   onCreate,
   onClearToken,
 }: AgentQuickCreateProps) => {
-  const [selectedClusterId, setSelectedClusterId] = useState<number | null>(null);
+  const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [prometheusUrl, setPrometheusUrl] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
-  const hasClusters = clusters.length > 0;
 
-  useEffect(() => {
-    if (!hasClusters) {
-      setSelectedClusterId(null);
-      return;
-    }
-    if (
-      selectedClusterId !== null &&
-      clusters.some((cluster) => cluster.id === selectedClusterId)
-    ) {
-      return;
-    }
-    setSelectedClusterId(clusters[0].id);
-  }, [clusters, hasClusters, selectedClusterId]);
-
-  const selectedCluster = useMemo(
-    () => clusters.find((cluster) => cluster.id === selectedClusterId) ?? null,
-    [clusters, selectedClusterId]
+  const trimmedName = name.trim();
+  const duplicateAgent = useMemo(
+    () =>
+      trimmedName.length > 0 &&
+      agents.some((agent) => agent.name.trim() === trimmedName),
+    [agents, trimmedName]
   );
-  const derivedName = selectedCluster?.name?.trim() ?? "";
-  const duplicateAgent =
-    derivedName.length > 0 &&
-    agents.some((agent) => agent.name.trim() === derivedName);
+  const duplicateCluster = useMemo(
+    () =>
+      trimmedName.length > 0 &&
+      clusters.some((cluster) => (cluster.name ?? "").trim() === trimmedName),
+    [clusters, trimmedName]
+  );
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selectedCluster) {
-      setFormError("请选择需要绑定的集群");
-      return;
-    }
-    if (!derivedName) {
+    const normalizedName = name.trim();
+    if (!normalizedName) {
       setFormError("Agent 名称不能为空");
       return;
     }
     if (duplicateAgent) {
-      setFormError("Agent 名称已存在，请选择其他集群");
+      setFormError("Agent 名称已存在，请更换其他名称");
+      return;
+    }
+    if (duplicateCluster) {
+      setFormError("集群列表中已存在同名项，请勿重复创建");
       return;
     }
     setFormError(null);
     try {
       await onCreate({
-        name: derivedName,
-        cluster_id: selectedCluster.id,
+        name: normalizedName,
         description: description.trim() || undefined,
         prometheus_url: prometheusUrl.trim() || undefined,
       });
+      setName("");
       setDescription("");
       setPrometheusUrl("");
     } catch (err) {
@@ -777,39 +767,15 @@ const AgentQuickCreate = ({
         )}
       </div>
       <p className="agent-inline-copy">
-        集群接入需由 Agent 执行，Server 端仅负责查看巡检项与结果。
+        Agent 名称建议与计划接入的集群名称保持一致，避免与现有集群冲突。
       </p>
-      {!hasClusters && (
-        <p className="agent-inline-hint">暂无可用集群，请先完成集群注册。</p>
-      )}
       <form className="agent-inline-form-body" onSubmit={handleSubmit}>
-        <select
-          value={selectedClusterId ?? ""}
-          onChange={(event) => {
-            const { value } = event.target;
-            if (value === "") {
-              setSelectedClusterId(null);
-              return;
-            }
-            const nextId = Number(value);
-            setSelectedClusterId(Number.isNaN(nextId) ? null : nextId);
-          }}
-          disabled={submitting || !canManageAgents || !hasClusters}
-        >
-          {!hasClusters && <option value="">暂无集群</option>}
-          {hasClusters && <option value="">请选择集群</option>}
-          {clusters.map((cluster) => (
-            <option key={cluster.id} value={cluster.id}>
-              {cluster.name}
-            </option>
-          ))}
-        </select>
         <input
           type="text"
-          value={derivedName}
-          readOnly
-          placeholder="Agent 名称自动同步集群"
-          disabled
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Agent / 集群名称"
+          disabled={submitting || !canManageAgents}
         />
         <input
           type="text"
@@ -881,7 +847,6 @@ interface OverviewProps {
   generatedAgentToken: string | null;
   onCreateAgent: (payload: {
     name: string;
-    cluster_id: number;
     description?: string;
     prometheus_url?: string | null;
   }) => Promise<void>;
@@ -4368,7 +4333,6 @@ const backgroundLocation =
   const handleCreateAgent = useCallback(
     async (payload: {
       name: string;
-      cluster_id: number;
       description?: string;
       prometheus_url?: string | null;
     }) => {
@@ -4378,15 +4342,23 @@ const backgroundLocation =
         );
         return;
       }
-      if (agents.some((agent) => agent.name.trim() === payload.name.trim())) {
-        setAgentError(`Agent 名称 ${payload.name} 已存在，请重新选择集群。`);
+      const normalizedName = payload.name.trim();
+      if (!normalizedName) {
+        setAgentError("Agent 名称不能为空。");
+        return;
+      }
+      if (agents.some((agent) => agent.name.trim() === normalizedName)) {
+        setAgentError(`Agent 名称 ${normalizedName} 已存在，请更换其他名称。`);
         return;
       }
       setAgentSubmitting(true);
       setAgentNotice(null);
       setAgentError(null);
       try {
-        const response = await apiCreateAgent(payload);
+        const response = await apiCreateAgent({
+          ...payload,
+          name: normalizedName,
+        });
         setGeneratedAgentToken(response.token);
         setAgentNotice(
           `Agent ${response.name} 创建成功，请妥善保存 Token。`

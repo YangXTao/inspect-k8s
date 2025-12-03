@@ -674,20 +674,19 @@ def register_agent(
     db: Session = Depends(get_db),
     _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
-    if payload.cluster_id is None:
-        raise HTTPException(status_code=400, detail="创建 Agent 需要先选择集群。")
+    trimmed_name = (payload.name or "").strip()
+    if not trimmed_name:
+        raise HTTPException(status_code=400, detail="Agent 名称不能为空。")
 
-    cluster = crud.get_cluster(db, payload.cluster_id)
-    if not cluster:
-        raise HTTPException(status_code=404, detail="指定的集群不存在。")
-
-    target_name = (cluster.name or "").strip()
-    if not target_name:
-        raise HTTPException(status_code=400, detail="集群名称不能为空，无法创建 Agent。")
-
-    existing_agent = crud.get_inspection_agent_by_name(db, target_name)
+    existing_agent = crud.get_inspection_agent_by_name(db, trimmed_name)
     if existing_agent:
-        raise HTTPException(status_code=400, detail="Agent 名称已存在，请选择其他集群。")
+        raise HTTPException(status_code=400, detail="Agent 名称已存在，请更换名称。")
+
+    cluster: Optional[models.ClusterConfig] = None
+    if payload.cluster_id is not None:
+        cluster = crud.get_cluster(db, payload.cluster_id)
+        if not cluster:
+            raise HTTPException(status_code=404, detail="指定的集群不存在。")
 
     token = _generate_agent_token()
     while crud.get_inspection_agent_by_token(db, token) is not None:
@@ -698,7 +697,7 @@ def register_agent(
 
     agent = crud.create_inspection_agent(
         db,
-        name=target_name,
+        name=trimmed_name,
         token=token,
         cluster=cluster,
         description=normalized_description,
