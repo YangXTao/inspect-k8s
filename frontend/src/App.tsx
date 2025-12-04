@@ -2093,42 +2093,21 @@ const ClusterDetailView = ({
     );
   }, [clusterRuns]);
 
-  if (!clusterKey || resolvedClusterId === null) {
-    return (
-      <div className="detail-empty">
-        <p>未找到对应的集群标识。</p>
-        <button
-          type="button"
-          className="secondary"
-          onClick={() => navigate("/")}
-        >
-          返回集群列表
-        </button>
-      </div>
-    );
-  }
-
-  if (!cluster) {
-    return (
-      <div className="detail-empty">
-        <p>该集群暂不可用或已被删除。</p>
-        <button
-          type="button"
-          className="secondary"
-          onClick={() => navigate("/")}
-        >
-          返回集群列表
-        </button>
-      </div>
-    );
-  }
-
-  const statusMeta = getClusterStatusMeta(cluster.connection_status);
-  const clusterSlug = getClusterDisplayId(clusterDisplayIds, cluster.id, cluster);
+  const statusMeta = useMemo(
+    () => (cluster ? getClusterStatusMeta(cluster.connection_status) : null),
+    [cluster]
+  );
+  const clusterSlug = useMemo(
+    () =>
+      cluster
+        ? getClusterDisplayId(clusterDisplayIds, cluster.id, cluster)
+        : null,
+    [cluster, clusterDisplayIds]
+  );
   const isTesting = enableServerConnectionTest
-    ? Boolean(testingClusterIds[cluster.id])
+    ? Boolean(cluster && testingClusterIds[cluster.id])
     : false;
-  const contexts = cluster.contexts ?? [];
+  const contexts = cluster?.contexts ?? [];
   const allItemsSelected =
     items.length > 0 && selectedIds.length === items.length;
   const shouldShowClusterNotice =
@@ -2199,18 +2178,50 @@ const ClusterDetailView = ({
   }, [clusterRuns, onDeleteRunsBulk, selectedRunIds]);
 
   const handleStart = useCallback(() => {
+    if (!cluster) {
+      return;
+    }
     void onStartInspection(cluster.id);
-  }, [cluster.id, onStartInspection]);
+  }, [cluster, onStartInspection]);
 
-  return (
-    <>
-      <div className="detail-header">
+  let detailContent: ReactNode;
+
+  if (!clusterKey || resolvedClusterId === null) {
+    detailContent = (
+      <div className="detail-empty">
+        <p>未找到对应的集群标识。</p>
         <button
           type="button"
-          className="link-button"
+          className="secondary"
           onClick={() => navigate("/")}
         >
-          ← 返回集群列表
+          返回集群列表
+        </button>
+      </div>
+    );
+  } else if (!cluster) {
+    detailContent = (
+      <div className="detail-empty">
+        <p>该集群暂不可用或已被删除。</p>
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => navigate("/")}
+        >
+          返回集群列表
+        </button>
+      </div>
+    );
+  } else {
+    detailContent = (
+      <>
+        <div className="detail-header">
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => navigate("/")}
+          >
+            ← 返回集群列表
         </button>
         <div className="detail-header-actions">
           {enableServerConnectionTest && (
@@ -2519,8 +2530,11 @@ const ClusterDetailView = ({
           )}
         </div>
       </section>
-    </>
-  );
+      </>
+    );
+  }
+
+  return detailContent;
 };
 
 interface ConfirmationModalProps {
@@ -4455,11 +4469,10 @@ const backgroundLocation =
         return true;
       }
       if (cluster.connection_status === "warning") {
-        const message = (cluster.connection_message || "").trim();
         if (
           !cluster.last_checked_at ||
-          message.includes("等待 Agent 注册") ||
-          message.includes("连接测试")
+          (cluster.connection_message || "").includes("等待 Agent 注册") ||
+          (cluster.connection_message || "").includes("连接测试")
         ) {
           return true;
         }
