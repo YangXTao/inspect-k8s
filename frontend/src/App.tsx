@@ -326,18 +326,9 @@ const hashString = (value: string) => {
   return Math.abs(hash).toString(36).toUpperCase();
 };
 
-const createDeterministicClusterSlug = (
-  cluster: ClusterConfig,
-  current?: string | null
-) => {
-  if (current && typeof current === "string") {
-    return current;
-  }
+const createDeterministicClusterSlug = (cluster: ClusterConfig) => {
   const idSegment = cluster.id.toString(36).toUpperCase();
-  const hashSegment = hashString(cluster.name || `cluster-${cluster.id}`)
-    .slice(-4)
-    .padStart(4, "0");
-  return `${CLUSTER_SLUG_PREFIX}${idSegment}-${hashSegment}`;
+  return `${CLUSTER_SLUG_PREFIX}${idSegment}`;
 };
 
 const decodeClusterKeyToId = (
@@ -526,30 +517,12 @@ const assignClusterDisplayIds = (
   clusters: ClusterConfig[],
   current: Record<number, string>
 ): Record<number, string> => {
-  const used = new Set<string>(Object.values(current));
-  const assigned: Record<number, string> = {};
+  const assigned: Record<number, string> = { ...current };
 
   clusters.forEach((cluster) => {
-    let displayId = createDeterministicClusterSlug(
-      cluster,
-      current[cluster.id]
-    );
-    if (used.has(displayId)) {
-      let counter = 1;
-      do {
-        const saltedName = `${cluster.name}-${counter}`;
-        displayId = createDeterministicClusterSlug(
-          {
-            ...cluster,
-            name: saltedName,
-          },
-          null
-        );
-        counter += 1;
-      } while (used.has(displayId));
+    if (!assigned[cluster.id]) {
+      assigned[cluster.id] = createDeterministicClusterSlug(cluster);
     }
-    assigned[cluster.id] = displayId;
-    used.add(displayId);
   });
 
   return assigned;
