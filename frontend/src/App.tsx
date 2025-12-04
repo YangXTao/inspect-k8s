@@ -3975,7 +3975,7 @@ const RunDetailView = ({
                       </td>
                       <td>
                         <div
-                          className={`result-text${
+                          className={`result-text detail-text${
                             detailText === "-" ? " empty" : ""
                           }`}
                         >
@@ -3984,7 +3984,7 @@ const RunDetailView = ({
                       </td>
                       <td>
                         <div
-                          className={`result-text${
+                          className={`result-text suggestion-text${
                             suggestionText === "-" ? " empty" : ""
                           }`}
                         >

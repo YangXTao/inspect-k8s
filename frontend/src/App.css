@@ -928,6 +928,15 @@ button:disabled {
   line-height: 1.6;
   color: #1f2937;
   white-space: pre-line;
+  word-break: normal;
+}
+
+.result-text.detail-text {
+  word-break: break-word;
+}
+
+.result-text.suggestion-text {
+  word-break: normal;
 }
 
 .result-text.empty {
