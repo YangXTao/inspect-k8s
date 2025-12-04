@@ -1304,7 +1304,12 @@ const OverviewView = ({
                         <button
                           type="button"
                           className="secondary"
-                          onClick={() => void onTestClusterConnection(cluster.id)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void onTestClusterConnection(cluster.id, {
+                              quiet: true,
+                            });
+                          }}
                           disabled={isTesting}
                         >
                           {isTesting ? "诊断中..." : "连接测试"}
@@ -4290,10 +4295,6 @@ const backgroundLocation =
 
   const setClusterTesting = useCallback((clusterId: number, value: boolean) => {
     setTestingClusterIds((prev) => {
-      const isActive = Boolean(prev[clusterId]);
-      if (isActive === value) {
-        return prev;
-      }
       const next = { ...prev };
       if (value) {
         next[clusterId] = true;
@@ -4389,32 +4390,46 @@ const backgroundLocation =
   }, []);
 
   const handleTestClusterConnection = useCallback(
-    async (clusterId: number, options?: { quiet?: boolean }) => {
-      if (!options?.quiet) {
+    async (
+      clusterId: number,
+      options?: { quiet?: boolean }
+    ) => {
+      const { quiet } = options ?? {};
+      if (!quiet) {
         clearClusterNotice();
         setClusterError(null);
       }
-      setClusterTesting(clusterId, true);
+      setClusterTesting((prev) => ({ ...prev, [clusterId]: true }));
       try {
         logWithTimestamp("info", "开始测试集群连接: %s", clusterId);
         await testClusterConnection(clusterId);
-        if (options?.quiet) {
-          return;
+        logWithTimestamp("info", "连接测试请求已下发: %s", clusterId);
+        setPendingRefreshTargets((prev) => ({
+          ...prev,
+          [clusterId]: Date.now(),
+        }));
+        if (!quiet) {
+          showClusterNotice(
+            currentNoticeScope,
+            "连接测试已下发，等待结果返回。",
+            "success"
+          );
         }
-        await refreshClusters();
-        logWithTimestamp("info", "集群连接测试已触发: %s", clusterId);
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "测试集群连接失败";
         logWithTimestamp("error", "测试集群连接失败: %s", message);
-        if (!options?.quiet) {
-          showClusterNotice(currentNoticeScope, message, "error");
-        }
+        showClusterNotice(currentNoticeScope, message, "error");
       } finally {
-        setClusterTesting(clusterId, false);
+        setClusterTesting((prev) => ({ ...prev, [clusterId]: false }));
       }
     },
-    [clearClusterNotice, currentNoticeScope, refreshClusters, setClusterTesting, showClusterNotice]
+    [
+      clearClusterNotice,
+      currentNoticeScope,
+      setClusterTesting,
+      showClusterNotice,
+    ]
   );
 
   const refreshRuns = useCallback(async () => {
