@@ -4463,37 +4463,6 @@ const backgroundLocation =
     }
   }, []);
 
-  const needsClusterAutoRefresh = useMemo(() => {
-    return clusters.some((cluster) => {
-      if (cluster.connection_status === "pending") {
-        return true;
-      }
-      if (cluster.connection_status === "warning") {
-        if (
-          !cluster.last_checked_at ||
-          (cluster.connection_message || "").includes("等待 Agent 注册") ||
-          (cluster.connection_message || "").includes("连接测试")
-        ) {
-          return true;
-        }
-      }
-      return false;
-    });
-  }, [clusters]);
-
-  useEffect(() => {
-    if (!needsClusterAutoRefresh || typeof window === "undefined") {
-      return;
-    }
-    void refreshClusters();
-    const timer = window.setInterval(() => {
-      void refreshClusters();
-    }, 5000);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [needsClusterAutoRefresh, refreshClusters]);
-
   const refreshRuns = useCallback(async () => {
     try {
       logWithTimestamp("info", "开始获取巡检历史");
