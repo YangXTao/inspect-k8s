@@ -116,8 +116,6 @@ const DEFAULT_CLUSTER_PAGE_SIZE = CLUSTER_PAGE_SIZE_OPTIONS[0];
 const RUN_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const CLUSTER_ITEM_PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
 const RESULT_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
-const CLUSTER_ITEM_PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
-const RESULT_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 
 const HISTORY_STATUS_OPTIONS: {
   value: InspectionRunStatus | "all";
@@ -2067,11 +2065,6 @@ const ClusterDetailView = ({
   const navigate = useNavigate();
   const operatorInputId = useId();
   const [selectedRunIds, setSelectedRunIds] = useState<number[]>([]);
-  const [itemPageSize, setItemPageSize] = useState<number>(
-    CLUSTER_ITEM_PAGE_SIZE_OPTIONS[0]
-  );
-  const [itemPage, setItemPage] = useState(1);
-  const [itemPageInput, setItemPageInput] = useState("");
   const [itemPageSize, setItemPageSize] = useState<number>(
     CLUSTER_ITEM_PAGE_SIZE_OPTIONS[0]
   );
