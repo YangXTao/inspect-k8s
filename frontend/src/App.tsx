@@ -3812,6 +3812,24 @@ const RunDetailView = ({
           ← 返回 {cluster ? `${cluster.name}` : "历史记录"}
         </button>
         <div className="detail-header-actions">
+          {reportUrl ? (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                if (license.canDownloadReports) {
+                  window.open(reportUrl, "_blank", "noreferrer");
+                }
+              }}
+              disabled={!license.canDownloadReports}
+            >
+              下载报告
+            </button>
+          ) : (
+            <button type="button" className="secondary" disabled>
+              无可下载报告
+            </button>
+          )}
           <button
             type="button"
             className="secondary"
@@ -3878,24 +3896,6 @@ const RunDetailView = ({
           {renderRunStatusBadge(statusValue, statusLabel, progressValue)}
           {summaryRun?.summary && (
             <p className="run-summary-text">{summaryRun.summary}</p>
-          )}
-        </div>
-        <div className="run-detail-actions">
-          {reportUrl && license.canDownloadReports ? (
-            <a
-              className="primary"
-              href={reportUrl}
-              target="_blank"
-              rel="noreferrer"
-            >
-              下载报告
-            </a>
-          ) : reportUrl ? (
-            <button type="button" className="secondary" disabled>
-              License 未授权下载报告
-            </button>
-          ) : (
-            <span className="muted">暂未生成报告</span>
           )}
         </div>
       </section>

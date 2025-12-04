@@ -924,10 +924,6 @@ button:disabled {
   white-space: nowrap;
 }
 
-.run-detail-actions {
-  display: none;
-}
-
 .result-text {
   line-height: 1.6;
   color: #1f2937;
