@@ -587,6 +587,11 @@ def test_cluster_connection(cluster_id: int, db: Session = Depends(get_db)):
             status_code=400,
             detail="当前仅支持由 Agent 执行的集群发起连接测试。",
         )
+    if cluster.connection_status == "pending":
+        raise HTTPException(
+            status_code=400,
+            detail="集群尚未完成注册，请先完成注册后再进行连接测试。",
+        )
     agent = _resolve_active_agent(db, cluster)
     if not agent:
         raise HTTPException(
