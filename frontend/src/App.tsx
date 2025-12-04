@@ -327,8 +327,9 @@ const hashString = (value: string) => {
 };
 
 const createDeterministicClusterSlug = (cluster: ClusterConfig) => {
-  const idSegment = cluster.id.toString(36).toUpperCase();
-  return `${CLUSTER_SLUG_PREFIX}${idSegment}`;
+  const hash = hashString(`${cluster.id}:${cluster.name || ""}`);
+  const randomSegment = hash.slice(-4).padStart(4, "0");
+  return `${CLUSTER_SLUG_PREFIX}${randomSegment}`;
 };
 
 const decodeClusterKeyToId = (
