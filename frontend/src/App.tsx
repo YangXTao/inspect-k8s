@@ -116,6 +116,8 @@ const DEFAULT_CLUSTER_PAGE_SIZE = CLUSTER_PAGE_SIZE_OPTIONS[0];
 const RUN_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const CLUSTER_ITEM_PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
 const RESULT_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
+const CLUSTER_ITEM_PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
+const RESULT_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 
 const HISTORY_STATUS_OPTIONS: {
   value: InspectionRunStatus | "all";
@@ -2070,6 +2072,11 @@ const ClusterDetailView = ({
   );
   const [itemPage, setItemPage] = useState(1);
   const [itemPageInput, setItemPageInput] = useState("");
+  const [itemPageSize, setItemPageSize] = useState<number>(
+    CLUSTER_ITEM_PAGE_SIZE_OPTIONS[0]
+  );
+  const [itemPage, setItemPage] = useState(1);
+  const [itemPageInput, setItemPageInput] = useState("");
 
   const resolvedClusterId = useMemo(
     () =>
@@ -2112,7 +2119,7 @@ const ClusterDetailView = ({
     );
   }, [clusterRuns]);
 
-  const totalItemPages = useMemo(
+  const totalInspectionPages = useMemo(
     () =>
       Math.max(
         1,
@@ -2127,8 +2134,8 @@ const ClusterDetailView = ({
   }, [itemPageSize, items.length]);
 
   useEffect(() => {
-    setItemPage((prev) => Math.min(Math.max(prev, 1), totalItemPages));
-  }, [totalItemPages]);
+    setItemPage((prev) => Math.min(Math.max(prev, 1), totalInspectionPages));
+  }, [totalInspectionPages]);
 
   const pagedInspectionItems = useMemo(() => {
     if (items.length === 0) {
@@ -2228,6 +2235,35 @@ const ClusterDetailView = ({
     }
     void onStartInspection(cluster.id);
   }, [cluster, onStartInspection]);
+
+  const handleInspectionPageChange = useCallback(
+    (offset: number) => {
+      setItemPage((prev) => {
+        const next = prev + offset;
+        if (next < 1) {
+          return 1;
+        }
+        if (next > totalInspectionPages) {
+          return totalInspectionPages;
+        }
+        return next;
+      });
+    },
+    [totalInspectionPages]
+  );
+
+  const handleInspectionPageJump = useCallback(() => {
+    const trimmed = itemPageInput.trim();
+    if (!trimmed) {
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isNaN(parsed) && Number.isInteger(parsed)) {
+      const target = Math.min(Math.max(parsed, 1), totalInspectionPages);
+      setItemPage(target);
+    }
+    setItemPageInput("");
+  }, [itemPageInput, totalInspectionPages]);
 
   const handleItemPageChange = useCallback(
     (offset: number) => {
