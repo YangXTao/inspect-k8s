@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import requests
+from requests import exceptions as req_exc
 import yaml
 
 # 优先复用后端实现；若缺失则使用本地备份逻辑，确保独立部署时也能运行
@@ -57,6 +58,30 @@ def _as_int(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _format_request_error(exc: Exception, base_url: str) -> str:
+    if isinstance(exc, req_exc.Timeout):
+        return (
+            f"访问 {base_url} 超时：{exc}。"
+            "请检查网络延迟或适当增大 request_timeout。"
+        )
+    if isinstance(exc, req_exc.ConnectionError):
+        return (
+            f"无法连接到 {base_url}：{exc}。"
+            "请确认 Agent 所在网络可访问该地址，必要时配置公网映射或 VPN。"
+        )
+    if isinstance(exc, req_exc.HTTPError):
+        status = exc.response.status_code if exc.response else "unknown"
+        body = ""
+        if exc.response is not None:
+            try:
+                body = (exc.response.text or "").strip()
+            except Exception:  # pragma: no cover - 防御
+                body = ""
+        snippet = f" 响应片段：{body[:200]}" if body else ""
+        return f"Server 返回 HTTP {status}{snippet}"
+    return str(exc)
 
 
 def _read_kubeconfig_bytes(path: Path, *, strict: bool) -> Optional[bytes]:
@@ -556,16 +581,31 @@ class AgentRunner:
             time.sleep(sleep_seconds)
 
     def run_once(self) -> bool:
+        heartbeat_blocked = False
         try:
             heartbeat_data = self.client.send_heartbeat()
             if isinstance(heartbeat_data, dict):
                 server_prom = (heartbeat_data.get("prometheus_url") or "").strip()
                 if server_prom and server_prom != (self._active_prom_url or ""):
                     self._apply_prometheus_url(server_prom)
+        except req_exc.RequestException as exc:
+            heartbeat_blocked = True
+            LOG.warning(
+                "心跳上报失败：%s",
+                _format_request_error(exc, self.config.server_base),
+            )
         except Exception as exc:
             LOG.warning("心跳上报失败：%s", exc)
+        if heartbeat_blocked:
+            return False
         try:
             tasks = self.client.fetch_tasks(limit=max(1, self.config.batch_size))
+        except req_exc.RequestException as exc:
+            LOG.error(
+                "拉取任务失败：%s",
+                _format_request_error(exc, self.config.server_base),
+            )
+            return False
         except Exception as exc:
             LOG.error("拉取任务失败：%s", exc)
             return False
