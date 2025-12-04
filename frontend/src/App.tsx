@@ -4085,9 +4085,9 @@ const [clusterUploading, setClusterUploading] = useState(false);
   const [agentNotice, setAgentNotice] = useState<string | null>(null);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [agentSubmitting, setAgentSubmitting] = useState(false);
-  const [generatedAgentToken, setGeneratedAgentToken] = useState<string | null>(
-    null
-  );
+const [generatedAgentToken, setGeneratedAgentToken] = useState<string | null>(
+  null
+);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSubmitting, setSettingsSubmitting] = useState(false);
@@ -4566,6 +4566,20 @@ const backgroundLocation =
     }
   }, []);
 
+  const pendingClusterIds = useMemo(
+    () =>
+      clusters
+        .filter(
+          (cluster) =>
+            cluster.connection_status === "pending" ||
+            (cluster.connection_status === "warning" &&
+              (!cluster.last_checked_at ||
+                (cluster.connection_message || "").includes("等待 Agent 注册")))
+        )
+        .map((cluster) => cluster.id),
+    [clusters]
+  );
+
   const handleOpenSettings = useCallback(() => {
     setSettingsError(null);
     setSettingsNotice(null);
@@ -4605,6 +4619,18 @@ const backgroundLocation =
     void refreshRuns();
     void refreshItems();
   }, [refreshClusters, refreshRuns, refreshItems]);
+
+  useEffect(() => {
+    if (pendingClusterIds.length === 0 || typeof window === "undefined") {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void refreshClusters();
+    }, 5000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [pendingClusterIds, refreshClusters]);
 
   const resetClusterUploadForm = () => {
     setClusterNameInput("");
