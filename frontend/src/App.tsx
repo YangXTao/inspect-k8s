@@ -114,6 +114,8 @@ const CLUSTER_ID_STORAGE_KEY = "clusterDisplayIdMap.v1";
 const CLUSTER_PAGE_SIZE_OPTIONS = [10, 20, 50];
 const DEFAULT_CLUSTER_PAGE_SIZE = CLUSTER_PAGE_SIZE_OPTIONS[0];
 const RUN_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
+const CLUSTER_ITEM_PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
+const RESULT_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 
 const HISTORY_STATUS_OPTIONS: {
   value: InspectionRunStatus | "all";
@@ -2063,6 +2065,11 @@ const ClusterDetailView = ({
   const navigate = useNavigate();
   const operatorInputId = useId();
   const [selectedRunIds, setSelectedRunIds] = useState<number[]>([]);
+  const [itemPageSize, setItemPageSize] = useState<number>(
+    CLUSTER_ITEM_PAGE_SIZE_OPTIONS[0]
+  );
+  const [itemPage, setItemPage] = useState(1);
+  const [itemPageInput, setItemPageInput] = useState("");
 
   const resolvedClusterId = useMemo(
     () =>
@@ -2104,6 +2111,32 @@ const ClusterDetailView = ({
       prev.filter((id) => clusterRuns.some((run) => run.id === id))
     );
   }, [clusterRuns]);
+
+  const totalItemPages = useMemo(
+    () =>
+      Math.max(
+        1,
+        Math.ceil(items.length / Math.max(itemPageSize, 1))
+      ),
+    [items.length, itemPageSize]
+  );
+
+  useEffect(() => {
+    setItemPage(1);
+    setItemPageInput("");
+  }, [itemPageSize, items.length]);
+
+  useEffect(() => {
+    setItemPage((prev) => Math.min(Math.max(prev, 1), totalItemPages));
+  }, [totalItemPages]);
+
+  const pagedInspectionItems = useMemo(() => {
+    if (items.length === 0) {
+      return [];
+    }
+    const start = (itemPage - 1) * itemPageSize;
+    return items.slice(start, start + itemPageSize);
+  }, [items, itemPage, itemPageSize]);
 
   const statusMeta = useMemo(
     () => (cluster ? getClusterStatusMeta(cluster.connection_status) : null),
@@ -2195,6 +2228,35 @@ const ClusterDetailView = ({
     }
     void onStartInspection(cluster.id);
   }, [cluster, onStartInspection]);
+
+  const handleItemPageChange = useCallback(
+    (offset: number) => {
+      setItemPage((prev) => {
+        const next = prev + offset;
+        if (next < 1) {
+          return 1;
+        }
+        if (next > totalItemPages) {
+          return totalItemPages;
+        }
+        return next;
+      });
+    },
+    [totalItemPages]
+  );
+
+  const handleItemPageJump = useCallback(() => {
+    const trimmed = itemPageInput.trim();
+    if (!trimmed) {
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isNaN(parsed) && Number.isInteger(parsed)) {
+      const target = Math.min(Math.max(parsed, 1), totalItemPages);
+      setItemPage(target);
+    }
+    setItemPageInput("");
+  }, [itemPageInput, totalItemPages]);
 
   let detailContent: ReactNode;
 
@@ -3434,6 +3496,11 @@ const RunDetailView = ({
   >("all");
   const [keyword, setKeyword] = useState("");
   const [refreshIndex, setRefreshIndex] = useState(0);
+  const [resultPageSize, setResultPageSize] = useState<number>(
+    RESULT_PAGE_SIZE_OPTIONS[0]
+  );
+  const [resultPage, setResultPage] = useState(1);
+  const [resultPageInput, setResultPageInput] = useState("");
 
   const resolvedClusterId = useMemo(
     () =>
@@ -3545,6 +3612,29 @@ const RunDetailView = ({
     });
   }, [keyword, run, statusFilter]);
 
+  const resultTotalPages = useMemo(
+    () =>
+      Math.max(
+        1,
+        Math.ceil(filteredResults.length / Math.max(resultPageSize, 1))
+      ),
+    [filteredResults.length, resultPageSize]
+  );
+
+  useEffect(() => {
+    setResultPage(1);
+    setResultPageInput("");
+  }, [resultPageSize, statusFilter, keyword, run]);
+
+  useEffect(() => {
+    setResultPage((prev) => Math.min(Math.max(prev, 1), resultTotalPages));
+  }, [resultTotalPages]);
+
+  const pagedResults = useMemo(() => {
+    const start = (resultPage - 1) * resultPageSize;
+    return filteredResults.slice(start, start + resultPageSize);
+  }, [filteredResults, resultPage, resultPageSize]);
+
   if (resolvedRunId === null) {
     return (
       <div className="detail-empty">
@@ -3593,6 +3683,49 @@ const RunDetailView = ({
       return;
     }
     void onCancelRun(resolvedRunId);
+  };
+
+  const handleResultPageChange = (offset: number) => {
+    setResultPage((prev) => {
+      const next = prev + offset;
+      if (next < 1) {
+        return 1;
+      }
+      if (next > resultTotalPages) {
+        return resultTotalPages;
+      }
+      return next;
+    });
+  };
+
+  const handleResultPageJump = () => {
+    const trimmed = resultPageInput.trim();
+    if (!trimmed) {
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isNaN(parsed) && Number.isInteger(parsed)) {
+      const target = Math.min(Math.max(parsed, 1), resultTotalPages);
+      setResultPage(target);
+    }
+    setResultPageInput("");
+  };
+
+  const compactResultText = (value?: string | null) =>
+    value?.replace(/\s*\n+\s*/g, " · ").replace(/\s{2,}/g, " ").trim();
+
+  const formatResultDetail = (result: InspectionResult) => {
+    if (result.status === "passed") {
+      return "-";
+    }
+    return compactResultText(result.detail) || "未提供详情";
+  };
+
+  const formatResultSuggestion = (result: InspectionResult) => {
+    if (result.status === "passed") {
+      return "-";
+    }
+    return compactResultText(result.suggestion) || "未提供建议";
   };
 
   return (
@@ -3775,8 +3908,10 @@ const RunDetailView = ({
                 </tr>
               </thead>
               <tbody>
-                {filteredResults.map((result) => {
+                {pagedResults.map((result) => {
                   const meta = getInspectionResultStatusMeta(result.status);
+                  const detailText = formatResultDetail(result);
+                  const suggestionText = formatResultSuggestion(result);
                   return (
                     <tr key={result.id}>
                       <td>{result.item_name}</td>
@@ -3786,13 +3921,21 @@ const RunDetailView = ({
                         </span>
                       </td>
                       <td>
-                        <div className="result-detail">
-                          {result.detail || "未提供详情"}
+                        <div
+                          className={`result-text${
+                            detailText === "-" ? " empty" : ""
+                          }`}
+                        >
+                          {detailText}
                         </div>
                       </td>
                       <td>
-                        <div className="result-actions">
-                          {result.suggestion || "未提供建议"}
+                        <div
+                          className={`result-text${
+                            suggestionText === "-" ? " empty" : ""
+                          }`}
+                        >
+                          {suggestionText}
                         </div>
                       </td>
                     </tr>
@@ -3802,6 +3945,68 @@ const RunDetailView = ({
             </table>
           )}
         </div>
+        {filteredResults.length > 0 && (
+          <div className="history-pagination-controls inspection-results-pagination">
+            <label className="page-size-control">
+              每页
+              <select
+                value={resultPageSize}
+                onChange={(event) =>
+                  setResultPageSize(Number(event.target.value))
+                }
+              >
+                {RESULT_PAGE_SIZE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="history-pagination-buttons">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => handleResultPageChange(-1)}
+                disabled={resultPage <= 1}
+              >
+                上一页
+              </button>
+              <span>
+                第 {resultPage} / {resultTotalPages} 页
+              </span>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => handleResultPageChange(1)}
+                disabled={resultPage >= resultTotalPages}
+              >
+                下一页
+              </button>
+            </div>
+            <label className="history-page-jump">
+              跳转
+              <input
+                type="number"
+                min={1}
+                value={resultPageInput}
+                onChange={(event) => setResultPageInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    handleResultPageJump();
+                  }
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              className="secondary"
+              onClick={handleResultPageJump}
+            >
+              确定
+            </button>
+          </div>
+        )}
       </section>
     </>
   );

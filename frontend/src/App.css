@@ -370,6 +370,22 @@ body {
   flex-wrap: wrap;
 }
 
+.inspection-items-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.inspection-items-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .card-actions-group {
   display: flex;
   align-items: center;
@@ -444,6 +460,20 @@ body {
 .history-search-clear:hover {
   background: #cbd5f5;
   color: #1e40af;
+}
+
+.inspection-items-pagination,
+.inspection-results-pagination {
+  margin-top: 12px;
+  gap: 12px;
+}
+
+.inspection-items-pagination {
+  justify-content: flex-end;
+}
+
+.inspection-results-pagination {
+  justify-content: flex-end;
 }
 
 .table-pagination {
@@ -888,6 +918,16 @@ button:disabled {
   border: 1px solid #dbe5ff;
   color: #2563eb;
   box-shadow: none;
+}
+
+.result-text {
+  line-height: 1.5;
+  color: #1f2937;
+  white-space: normal;
+}
+
+.result-text.empty {
+  color: #94a3b8;
 }
 
 .link-button {
