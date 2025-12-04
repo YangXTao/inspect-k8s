@@ -382,35 +382,29 @@ body {
   gap: 16px;
 }
 
-.history-header-controls {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-left: auto;
-}
-
 .history-filter-row {
   display: flex;
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+  margin-left: auto;
 }
 
 .history-chip {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
+  padding: 8px 14px;
   border-radius: 999px;
-  border: 1px solid #dbe5ff;
-  background: #f5f7ff;
+  border: 1px solid #d8e2fe;
+  background: #f7f9ff;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .history-chip-label {
   font-size: 13px;
-  color: #1f2933;
+  color: #1e293b;
+  font-weight: 600;
   white-space: nowrap;
 }
 
@@ -429,7 +423,7 @@ body {
 }
 
 .history-chip input {
-  min-width: 200px;
+  min-width: 220px;
 }
 
 .history-chip input::placeholder {
@@ -438,16 +432,18 @@ body {
 
 .history-search-clear {
   border: none;
-  background: transparent;
-  color: #94a3b8;
-  font-size: 18px;
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 14px;
   line-height: 1;
-  padding: 0 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
   cursor: pointer;
 }
 
 .history-search-clear:hover {
-  color: #ef4444;
+  background: #cbd5f5;
+  color: #1e40af;
 }
 
 .table-pagination {

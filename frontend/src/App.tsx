@@ -1779,48 +1779,39 @@ const HistoryView = ({
     <section className="card history history-page">
       <div className="card-header history-header">
         <h2>历史巡检</h2>
-        <div className="history-header-controls">
-          <div className="history-filter-row">
-            <div className="history-chip history-chip-select">
-              <span className="history-chip-label">状态筛选</span>
-              <select
-                value={historyStatusFilter}
-                onChange={handleHistoryStatusFilterChange}
-              >
-                {HISTORY_STATUS_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="history-chip history-chip-search">
-              <span className="history-chip-label">关键字</span>
-              <input
-                type="text"
-                value={historyKeyword}
-                onChange={handleKeywordFilterChange}
-                placeholder="按巡检编号 / 集群 / 巡检人搜索"
-              />
-              {historyKeyword && (
-                <button
-                  type="button"
-                  className="history-search-clear"
-                  onClick={handleKeywordFilterClear}
-                  aria-label="清空关键字"
-                >
-                  ×
-                </button>
-              )}
-            </div>
+        <div className="history-filter-row">
+          <div className="history-chip history-chip-select">
+            <span className="history-chip-label">状态筛选</span>
+            <select
+              value={historyStatusFilter}
+              onChange={handleHistoryStatusFilterChange}
+            >
+              {HISTORY_STATUS_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </div>
-          <button
-            type="button"
-            className="secondary ghost"
-            onClick={onRefreshRuns}
-          >
-            刷新
-          </button>
+          <div className="history-chip history-chip-search">
+            <span className="history-chip-label">关键字</span>
+            <input
+              type="text"
+              value={historyKeyword}
+              onChange={handleKeywordFilterChange}
+              placeholder="按巡检编号 / 集群 / 巡检人搜索"
+            />
+            {historyKeyword && (
+              <button
+                type="button"
+                className="history-search-clear"
+                onClick={handleKeywordFilterClear}
+                aria-label="清空关键字"
+              >
+                ×
+              </button>
+            )}
+          </div>
         </div>
       </div>
       {shouldShowNotice && noticeType && (
