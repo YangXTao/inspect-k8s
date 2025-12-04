@@ -2526,20 +2526,6 @@ const ClusterDetailView = ({
           {inspectionLoading && (
             <div className="feedback info">正在创建巡检任务...</div>
           )}
-          <div className="detail-actions">
-            <button
-              type="button"
-              className="primary"
-              onClick={handleStart}
-              disabled={
-                inspectionLoading ||
-                selectedIds.length === 0 ||
-                !license.canRunInspections
-              }
-            >
-              {inspectionLoading ? "巡检中..." : "开始巡检"}
-            </button>
-          </div>
         </div>
       </section>
 
@@ -3790,21 +3776,29 @@ const RunDetailView = ({
     setResultPageInput("");
   };
 
-  const compactResultText = (value?: string | null) =>
-    value?.replace(/\s*\n+\s*/g, " · ").replace(/\s{2,}/g, " ").trim();
+  const extractResultLines = (value?: string | null) =>
+    value
+      ?.split(/\r?\n+/)
+      .map((line) => line.replace(/\s+/g, " ").trim())
+      .filter(Boolean) ?? [];
 
   const formatResultDetail = (result: InspectionResult) => {
-    if (result.status === "passed") {
-      return "-";
+    const lines = extractResultLines(result.detail);
+    if (lines.length === 0) {
+      return "未提供详情";
     }
-    return compactResultText(result.detail) || "未提供详情";
+    if (result.status === "passed" && lines.length > 10) {
+      return lines.slice(0, 10).join(" · ");
+    }
+    return lines.join(" · ");
   };
 
   const formatResultSuggestion = (result: InspectionResult) => {
     if (result.status === "passed") {
       return "-";
     }
-    return compactResultText(result.suggestion) || "未提供建议";
+    const lines = extractResultLines(result.suggestion);
+    return lines.length > 0 ? lines.join(" · ") : "未提供建议";
   };
 
   return (
@@ -3818,6 +3812,18 @@ const RunDetailView = ({
           ← 返回 {cluster ? `${cluster.name}` : "历史记录"}
         </button>
         <div className="detail-header-actions">
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => {
+              if (reportUrl && license.canDownloadReports) {
+                window.open(reportUrl, "_blank", "noreferrer");
+              }
+            }}
+            disabled={!reportUrl || !license.canDownloadReports}
+          >
+            下载报告
+          </button>
           <button
             type="button"
             className="secondary"
@@ -3864,26 +3870,6 @@ const RunDetailView = ({
           <div>
             <strong>巡检人：</strong>
             {summaryRun?.operator || "-"}
-          </div>
-          <div>
-            <strong>执行方式：</strong>
-            {summaryRun
-              ? describeExecutor(
-                  summaryRun.executor,
-                  summaryRun.agent_name,
-                  summaryRun.agent_id
-                )
-              : "-"}
-          </div>
-          <div>
-            <strong>Agent 状态：</strong>
-            {summaryRun?.agent_status ? (
-              <span className={agentStatusClassName(summaryRun.agent_status)}>
-                {agentStatusLabel}
-              </span>
-            ) : (
-              "-"
-            )}
           </div>
           <div>
             <strong>开始时间：</strong>
