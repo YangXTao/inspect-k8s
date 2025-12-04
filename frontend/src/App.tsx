@@ -114,6 +114,18 @@ const CLUSTER_ID_STORAGE_KEY = "clusterDisplayIdMap.v1";
 const CLUSTER_PAGE_SIZE_OPTIONS = [10, 20, 50];
 const DEFAULT_CLUSTER_PAGE_SIZE = CLUSTER_PAGE_SIZE_OPTIONS[0];
 const RUN_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
+
+const HISTORY_STATUS_OPTIONS: {
+  value: InspectionRunStatus | "all";
+  label: string;
+}[] = [
+  { value: "all", label: "全部" },
+  { value: "queued", label: "排队中" },
+  { value: "running", label: "执行中" },
+  { value: "finished", label: "已完成" },
+  { value: "failed", label: "已失败" },
+  { value: "cancelled", label: "已取消" },
+];
 const SETTINGS_BASE_PATH = "/setting";
 const CONNECTION_TEST_OPERATOR = "__system_connection_test__";
 
@@ -1599,31 +1611,45 @@ const HistoryView = ({
   const shouldShowNotice =
     notice && noticeType && noticeScope === "history";
 
-  const [executorFilter, setExecutorFilter] = useState<ExecutionMode | "all">(
-    "all"
-  );
-  const [agentStatusFilter, setAgentStatusFilter] = useState<
-    InspectionAgentStatus | "all" | "none"
+  const [historyStatusFilter, setHistoryStatusFilter] = useState<
+    InspectionRunStatus | "all"
   >("all");
+  const [historyKeyword, setHistoryKeyword] = useState("");
 
   const [pageSize, setPageSize] = useState<number>(RUN_PAGE_SIZE_OPTIONS[0]);
   const [page, setPage] = useState(1);
   const [pageInput, setPageInput] = useState("");
 
   const filteredRuns = useMemo(() => {
+    const normalizedKeyword = historyKeyword.trim().toLowerCase();
     return runs.filter((run) => {
-      if (executorFilter !== "all" && run.executor !== executorFilter) {
+      if (historyStatusFilter !== "all" && run.status !== historyStatusFilter) {
         return false;
       }
-      if (agentStatusFilter === "none") {
-        return run.executor !== "agent" || !run.agent_status;
-      }
-      if (agentStatusFilter !== "all") {
-        return run.agent_status === agentStatusFilter;
+      if (normalizedKeyword) {
+        const keywordSource = [
+          runDisplayIds[run.id] ?? `#${run.id}`,
+          clusterDisplayIds[run.cluster_id] ?? `#${run.cluster_id}`,
+          run.cluster_name,
+          run.operator,
+          run.agent_name,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        if (!keywordSource.includes(normalizedKeyword)) {
+          return false;
+        }
       }
       return true;
     });
-  }, [runs, executorFilter, agentStatusFilter]);
+  }, [
+    runs,
+    historyStatusFilter,
+    historyKeyword,
+    clusterDisplayIds,
+    runDisplayIds,
+  ]);
 
   useEffect(() => {
     setPage(1);
@@ -1633,7 +1659,7 @@ const HistoryView = ({
   useEffect(() => {
     setPage(1);
     setPageInput("");
-  }, [executorFilter, agentStatusFilter]);
+  }, [historyStatusFilter, historyKeyword]);
 
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(filteredRuns.length / Math.max(pageSize, 1))),
@@ -1733,18 +1759,20 @@ const HistoryView = ({
     void onDeleteRunsBulk(selectedRunIds);
   }, [onDeleteRunsBulk, selectedRunIds]);
 
-  const handleExecutorFilterChange = (
+  const handleHistoryStatusFilterChange = (
     event: ChangeEvent<HTMLSelectElement>
   ) => {
-    setExecutorFilter(event.target.value as ExecutionMode | "all");
+    setHistoryStatusFilter(event.target.value as InspectionRunStatus | "all");
   };
 
-  const handleAgentStatusFilterChange = (
-    event: ChangeEvent<HTMLSelectElement>
+  const handleKeywordFilterChange = (
+    event: ChangeEvent<HTMLInputElement>
   ) => {
-    setAgentStatusFilter(
-      event.target.value as InspectionAgentStatus | "all" | "none"
-    );
+    setHistoryKeyword(event.target.value);
+  };
+
+  const handleKeywordFilterClear = () => {
+    setHistoryKeyword("");
   };
 
   return (
@@ -1754,24 +1782,36 @@ const HistoryView = ({
         <div className="card-actions">
           <div className="card-actions-group history-filter-group">
             <label>
-              执行方式
-              <select value={executorFilter} onChange={handleExecutorFilterChange}>
-                <option value="all">全部</option>
-                <option value="server">服务端</option>
-                <option value="agent">Agent</option>
+              状态
+              <select
+                value={historyStatusFilter}
+                onChange={handleHistoryStatusFilterChange}
+              >
+                {HISTORY_STATUS_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </label>
             <label>
-              Agent 状态
-              <select value={agentStatusFilter} onChange={handleAgentStatusFilterChange}>
-                <option value="all">全部</option>
-                <option value="none">非 Agent / 未上报</option>
-                <option value="queued">待执行</option>
-                <option value="running">执行中</option>
-                <option value="finished">已完成</option>
-                <option value="failed">执行失败</option>
-              </select>
+              关键字
+              <input
+                type="text"
+                value={historyKeyword}
+                onChange={handleKeywordFilterChange}
+                placeholder="巡检编号 / 集群 / 巡检人"
+              />
             </label>
+            {historyKeyword && (
+              <button
+                type="button"
+                className="secondary"
+                onClick={handleKeywordFilterClear}
+              >
+                清空
+              </button>
+            )}
           </div>
           <button type="button" className="secondary" onClick={onRefreshRuns}>
             刷新
@@ -1872,7 +1912,6 @@ const HistoryView = ({
                 <th>巡检编号</th>
                 <th>集群</th>
                 <th>巡检人</th>
-                <th>执行方式</th>
                 <th>状态</th>
                 <th>Agent 状态</th>
                 <th>开始时间</th>
@@ -1900,13 +1939,6 @@ const HistoryView = ({
                     </td>
                     <td>{clusterSlug}</td>
                     <td>{run.operator || "-"}</td>
-                    <td>
-                      {describeExecutor(
-                        run.executor,
-                        run.agent_name,
-                        run.agent_id
-                      )}
-                    </td>
                     <td>
                       <span className={statusClass(run.status)}>
                         {run.status_label ?? run.status}
@@ -2414,7 +2446,6 @@ const ClusterDetailView = ({
                 <tr>
                   <th>巡检编号</th>
                   <th>巡检人</th>
-                  <th>执行方式</th>
                   <th>状态</th>
                   <th>Agent 状态</th>
                   <th>开始时间</th>
@@ -2439,13 +2470,6 @@ const ClusterDetailView = ({
                         </label>
                       </td>
                       <td>{run.operator || "-"}</td>
-                      <td>
-                        {describeExecutor(
-                          run.executor,
-                          run.agent_name,
-                          run.agent_id
-                        )}
-                      </td>
                       <td>
                         {renderRunStatusBadge(
                           run.status,
