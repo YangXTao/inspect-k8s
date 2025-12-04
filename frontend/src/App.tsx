@@ -843,7 +843,10 @@ interface OverviewProps {
   onDeleteCluster: (cluster: ClusterConfig) => Promise<void>;
   onDeleteClustersBulk: (clusterIds: number[]) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
-  onTestClusterConnection: (clusterId: number) => Promise<void>;
+  onTestClusterConnection: (
+    clusterId: number,
+    options?: { quiet?: boolean }
+  ) => Promise<void>;
   testingClusterIds: Record<number, boolean>;
   license: LicenseCapabilities;
   canManageAgents: boolean;
@@ -1987,7 +1990,10 @@ interface ClusterDetailViewProps {
   onDeleteCluster: (cluster: ClusterConfig) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
-  onTestClusterConnection: (clusterId: number) => Promise<void>;
+  onTestClusterConnection: (
+    clusterId: number,
+    options?: { quiet?: boolean }
+  ) => Promise<void>;
   testingClusterIds: Record<number, boolean>;
   license: LicenseCapabilities;
 }
@@ -4361,6 +4367,27 @@ const backgroundLocation =
     };
   }, [agentNotice]);
 
+  const refreshClusters = useCallback(async () => {
+    try {
+      logWithTimestamp("info", "开始获取集群信息");
+      const data = await getClusters();
+      setClusters((previous) =>
+        areClusterListsEqual(previous, data) ? previous ?? data : data
+      );
+      setClusterDisplayIds((prev) => {
+        const next = assignClusterDisplayIds(data, prev);
+        return isSameDisplayMap(prev, next) ? prev : next;
+      });
+      setClusterError(null);
+      logWithTimestamp("info", "集群信息获取成功,数量: %d", data.length);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "获取集群信息失败";
+      logWithTimestamp("error", "获取集群信息失败: %s", message);
+      setClusterError(message);
+    }
+  }, []);
+
   const handleTestClusterConnection = useCallback(
     async (clusterId: number, options?: { quiet?: boolean }) => {
       if (!options?.quiet) {
@@ -4389,27 +4416,6 @@ const backgroundLocation =
     },
     [clearClusterNotice, currentNoticeScope, refreshClusters, setClusterTesting, showClusterNotice]
   );
-
-  const refreshClusters = useCallback(async () => {
-    try {
-      logWithTimestamp("info", "开始获取集群信息");
-      const data = await getClusters();
-      setClusters((previous) =>
-        areClusterListsEqual(previous, data) ? previous ?? data : data
-      );
-      setClusterDisplayIds((prev) => {
-        const next = assignClusterDisplayIds(data, prev);
-        return isSameDisplayMap(prev, next) ? prev : next;
-      });
-      setClusterError(null);
-      logWithTimestamp("info", "集群信息获取成功,数量: %d", data.length);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "获取集群信息失败";
-      logWithTimestamp("error", "获取集群信息失败: %s", message);
-      setClusterError(message);
-    }
-  }, []);
 
   const refreshRuns = useCallback(async () => {
     try {
