@@ -3815,18 +3815,6 @@ const RunDetailView = ({
           <button
             type="button"
             className="secondary"
-            onClick={() => {
-              if (reportUrl && license.canDownloadReports) {
-                window.open(reportUrl, "_blank", "noreferrer");
-              }
-            }}
-            disabled={!reportUrl || !license.canDownloadReports}
-          >
-            下载报告
-          </button>
-          <button
-            type="button"
-            className="secondary"
             onClick={handleRefresh}
             disabled={loading}
           >

@@ -920,10 +920,18 @@ button:disabled {
   box-shadow: none;
 }
 
+.inspection-results-card table td:first-child {
+  white-space: nowrap;
+}
+
+.run-detail-actions {
+  display: none;
+}
+
 .result-text {
-  line-height: 1.5;
+  line-height: 1.6;
   color: #1f2937;
-  white-space: normal;
+  white-space: pre-line;
 }
 
 .result-text.empty {
