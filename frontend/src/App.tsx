@@ -4099,6 +4099,9 @@ const [clusterUploading, setClusterUploading] = useState(false);
 const [generatedAgentToken, setGeneratedAgentToken] = useState<string | null>(
   null
 );
+const [pendingRefreshTargets, setPendingRefreshTargets] = useState<
+  Record<number, number>
+>({});
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSubmitting, setSettingsSubmitting] = useState(false);
@@ -4408,18 +4411,17 @@ const backgroundLocation =
           ...prev,
           [clusterId]: Date.now(),
         }));
-        if (!quiet) {
-          showClusterNotice(
-            currentNoticeScope,
-            "连接测试已下发，等待结果返回。",
-            "success"
-          );
-        }
+        const noticeScope = quiet ? "overview" : currentNoticeScope;
+        showClusterNotice(
+          noticeScope,
+          "连接测试已下发，等待结果返回。",
+          "success"
+        );
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "测试集群连接失败";
         logWithTimestamp("error", "测试集群连接失败: %s", message);
-        showClusterNotice(currentNoticeScope, message, "error");
+        showClusterNotice(quiet ? "overview" : currentNoticeScope, message, "error");
       } finally {
         setClusterTesting((prev) => ({ ...prev, [clusterId]: false }));
       }
@@ -4627,6 +4629,46 @@ const backgroundLocation =
       window.clearInterval(timer);
     };
   }, [pendingClusterIds, refreshClusters]);
+
+  useEffect(() => {
+    setPendingRefreshTargets((prev) => {
+      if (!Object.keys(prev).length) {
+        return prev;
+      }
+      const next: Record<number, number> = {};
+      clusters.forEach((cluster) => {
+        const shouldKeep =
+          prev[cluster.id] &&
+          (cluster.connection_status === "pending" ||
+            (cluster.connection_status === "warning" &&
+              (!cluster.last_checked_at ||
+                (cluster.connection_message || "").includes("等待 Agent 注册") ||
+                (cluster.connection_message || "").includes("连接测试"))));
+        if (shouldKeep) {
+          next[cluster.id] = prev[cluster.id];
+        }
+      });
+      if (Object.keys(next).length === Object.keys(prev).length) {
+        return prev;
+      }
+      return next;
+    });
+  }, [clusters]);
+
+  useEffect(() => {
+    if (
+      !Object.keys(pendingRefreshTargets).length ||
+      typeof window === "undefined"
+    ) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void refreshClusters();
+    }, 4000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [pendingRefreshTargets, refreshClusters]);
 
   const resetClusterUploadForm = () => {
     setClusterNameInput("");
