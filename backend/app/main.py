@@ -1066,9 +1066,7 @@ def agent_submit_results(
     if run.agent_id != ctx.agent.id:
         raise HTTPException(status_code=403, detail="巡检任务不属于当前 Agent。")
     crud.record_agent_heartbeat(ctx.db, ctx.agent)
-    crud.delete_run_results(ctx.db, run)
-    status_counter: dict[str, int] = {}
-    processed_total = 0
+    is_partial = bool(payload.partial)
     for result in payload.results:
         normalized_status = (result.status or "").strip().lower()
         if normalized_status not in {"passed", "warning", "failed"}:
@@ -1082,19 +1080,36 @@ def agent_submit_results(
             normalized_status,
             detail,
             suggestion,
+            replace_existing=True,
         )
-        status_counter[normalized_status] = status_counter.get(normalized_status, 0) + 1
-        processed_total += 1
+    run = crud.get_inspection_run(ctx.db, run.id) or run
+    processed_total = crud.count_run_results(ctx.db, run)
 
-    run = crud.get_inspection_run(ctx.db, run.id)
-    total_items = run.total_items or processed_total
+    def _clamp_processed(value: int, total: int) -> int:
+        if total > 0:
+            return min(value, total)
+        return value
+
+    if is_partial:
+        display_total = run.total_items or processed_total
+        run = crud.update_inspection_run_agent_state(
+            ctx.db,
+            run,
+            status="running",
+            processed_items=_clamp_processed(processed_total, display_total),
+        )
+        refreshed = crud.get_inspection_run(ctx.db, run.id) or run
+        return _serialize_run(refreshed)
+
     if run.total_items == 0 and processed_total > 0:
         run.total_items = processed_total
         ctx.db.add(run)
         ctx.db.commit()
         ctx.db.refresh(run)
+
+    status_counter = crud.get_run_result_status_counts(ctx.db, run)
     overall_status, summary, final_processed = _summarize_run_outcome(
-        total_items=run.total_items or 0,
+        total_items=run.total_items or processed_total,
         processed_total=processed_total,
         status_counter=status_counter,
         current_processed=run.processed_items or 0,

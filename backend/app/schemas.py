@@ -365,6 +365,10 @@ class AgentRunResultItemIn(BaseModel):
 
 class AgentRunResultIn(BaseModel):
     results: List[AgentRunResultItemIn] = Field(..., min_length=1)
+    partial: bool = Field(
+        False,
+        description="是否为增量上报；True 表示仅追加/更新已有结果，不会结束巡检",
+    )
 
 
 class AgentBootstrapCluster(BaseModel):

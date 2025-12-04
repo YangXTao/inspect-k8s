@@ -3,6 +3,7 @@
 from datetime import datetime
 from typing import Iterable, List, Optional, Any
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from . import models, schemas
@@ -578,6 +579,8 @@ def add_run_result_by_item_id(
     status: str,
     detail: Optional[str],
     suggestion: Optional[str],
+    *,
+    replace_existing: bool = False,
 ) -> models.InspectionResult:
     item = None
     if item_id is not None:
@@ -586,6 +589,28 @@ def add_run_result_by_item_id(
             .filter(models.InspectionItem.id == item_id)
             .first()
         )
+
+    existing: Optional[models.InspectionResult] = None
+    if replace_existing:
+        query = db.query(models.InspectionResult).filter(
+            models.InspectionResult.run_id == run.id,
+        )
+        if item_id is not None:
+            query = query.filter(models.InspectionResult.item_id == item_id)
+        else:
+            query = query.filter(models.InspectionResult.item_id.is_(None))
+        existing = query.order_by(models.InspectionResult.id.desc()).first()
+        if existing:
+            existing.status = status
+            existing.detail = detail
+            existing.suggestion = suggestion
+            if item and item.name:
+                existing.item_name_cached = item.name
+            db.add(existing)
+            db.commit()
+            db.refresh(existing)
+            return existing
+
     return add_inspection_result(
         db,
         run=run,
@@ -594,6 +619,27 @@ def add_run_result_by_item_id(
         detail=detail,
         suggestion=suggestion,
     )
+
+
+def count_run_results(db: Session, run: models.InspectionRun) -> int:
+    return (
+        db.query(func.count(models.InspectionResult.id))
+        .filter(models.InspectionResult.run_id == run.id)
+        .scalar()
+        or 0
+    )
+
+
+def get_run_result_status_counts(
+    db: Session, run: models.InspectionRun
+) -> dict[str, int]:
+    rows = (
+        db.query(models.InspectionResult.status, func.count(models.InspectionResult.id))
+        .filter(models.InspectionResult.run_id == run.id)
+        .group_by(models.InspectionResult.status)
+        .all()
+    )
+    return {str(status): int(count) for status, count in rows}
 
 
 def pause_inspection_run(

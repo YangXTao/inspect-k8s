@@ -504,8 +504,10 @@ class AgentClient:
         self,
         run_id: int,
         results: Iterable[Dict[str, Any]],
+        *,
+        partial: bool = False,
     ) -> Dict[str, Any]:
-        payload = {"results": list(results)}
+        payload = {"results": list(results), "partial": partial}
         resp = self.session.post(
             f"{self.config.server_base}/agent/runs/{run_id}/results",
             json=payload,
@@ -625,7 +627,7 @@ class AgentRunner:
             except Exception as exc:
                 LOG.warning("领取巡检 %s 失败：%s", run_id, exc)
                 continue
-            results = self._execute_items(task)
+            results = self._execute_items(run_id, task)
             try:
                 self.client.submit_results(run_id, results)
                 LOG.info("巡检 %s 已回传结果。", run_id)
@@ -633,7 +635,7 @@ class AgentRunner:
                 LOG.error("上报巡检 %s 结果失败：%s", run_id, exc)
         return True
 
-    def _execute_items(self, task: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _execute_items(self, run_id: int, task: Dict[str, Any]) -> List[Dict[str, Any]]:
         items = task.get("items") or []
         results: List[Dict[str, Any]] = []
         cluster_id = task.get("cluster_id")
@@ -677,7 +679,18 @@ class AgentRunner:
                     "suggestion": suggestion,
                 }
             )
+            self._upload_partial_result(run_id, results[-1])
         return results
+
+    def _upload_partial_result(self, run_id: int, result: Dict[str, Any]) -> None:
+        try:
+            self.client.submit_results(run_id, [result], partial=True)
+        except Exception as exc:
+            LOG.warning(
+                "巡检 %s 局部结果上报失败，将在最终汇总时重试：%s",
+                run_id,
+                exc,
+            )
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
