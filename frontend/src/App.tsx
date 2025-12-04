@@ -521,9 +521,8 @@ const assignClusterDisplayIds = (
   const assigned: Record<number, string> = { ...current };
 
   clusters.forEach((cluster) => {
-    if (!assigned[cluster.id]) {
-      assigned[cluster.id] = createDeterministicClusterSlug(cluster);
-    }
+    assigned[cluster.id] =
+      current[cluster.id] ?? createDeterministicClusterSlug(cluster);
   });
 
   return assigned;
@@ -4363,57 +4362,32 @@ const backgroundLocation =
   }, [agentNotice]);
 
   const handleTestClusterConnection = useCallback(
-    async (clusterId: number) => {
-      clearClusterNotice();
-      setClusterError(null);
+    async (clusterId: number, options?: { quiet?: boolean }) => {
+      if (!options?.quiet) {
+        clearClusterNotice();
+        setClusterError(null);
+      }
       setClusterTesting(clusterId, true);
       try {
         logWithTimestamp("info", "开始测试集群连接: %s", clusterId);
-        const updated = await testClusterConnection(clusterId);
-        setClusters((prev) =>
-          prev.map((item) => (item.id === updated.id ? updated : item))
-        );
-        const statusMeta = getClusterStatusMeta(updated.connection_status);
-        const versionLabel =
-          updated.kubernetes_version && updated.kubernetes_version.trim().length > 0
-            ? updated.kubernetes_version.trim()
-            : "未知";
-        const nodeCountLabel =
-          typeof updated.node_count === "number"
-            ? String(updated.node_count)
-            : "未知";
-        let noticeType: NoticeType = "success";
-        let noticeMessage: string;
-        if (updated.connection_status === "connected") {
-          noticeMessage = `集群(${updated.name}) 连接成功，版本：${versionLabel}，节点数：${nodeCountLabel}`;
-        } else {
-          if (updated.connection_status === "warning") {
-            noticeType = "warning";
-          } else if (updated.connection_status === "failed") {
-            noticeType = "error";
-          }
-          const detailMessage = updated.connection_message
-            ? `，详情：${updated.connection_message}`
-            : "";
-          noticeMessage = `集群(${updated.name}) ${statusMeta.label}${detailMessage}`;
+        await testClusterConnection(clusterId);
+        if (options?.quiet) {
+          return;
         }
-        showClusterNotice(currentNoticeScope, noticeMessage, noticeType);
-        logWithTimestamp(
-          "info",
-          "集群连接测试完成: %s -> %s",
-          clusterId,
-          updated.connection_status
-        );
+        await refreshClusters();
+        logWithTimestamp("info", "集群连接测试已触发: %s", clusterId);
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "测试集群连接失败";
         logWithTimestamp("error", "测试集群连接失败: %s", message);
-        showClusterNotice(currentNoticeScope, message, "error");
+        if (!options?.quiet) {
+          showClusterNotice(currentNoticeScope, message, "error");
+        }
       } finally {
         setClusterTesting(clusterId, false);
       }
     },
-    [clearClusterNotice, currentNoticeScope, setClusterTesting, showClusterNotice]
+    [clearClusterNotice, currentNoticeScope, refreshClusters, setClusterTesting, showClusterNotice]
   );
 
   const refreshClusters = useCallback(async () => {
