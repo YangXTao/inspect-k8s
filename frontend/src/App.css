@@ -377,28 +377,77 @@ body {
   flex-wrap: wrap;
 }
 
-.history-filter-group {
+.history-header {
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.history-header-controls {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 12px;
+  flex-wrap: wrap;
+  margin-left: auto;
 }
 
-.history-filter-group label {
+.history-filter-row {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
-  color: #475569;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
-.history-filter-group select {
-  padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid #cbd5f5;
-  background: #fff;
+.history-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid #dbe5ff;
+  background: #f5f7ff;
+}
+
+.history-chip-label {
   font-size: 13px;
-  min-width: 130px;
+  color: #1f2933;
+  white-space: nowrap;
+}
+
+.history-chip select,
+.history-chip input {
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  color: #0f172a;
+  outline: none;
+}
+
+.history-chip select {
+  min-width: 110px;
+  font-weight: 600;
+}
+
+.history-chip input {
+  min-width: 200px;
+}
+
+.history-chip input::placeholder {
+  color: #94a3b8;
+}
+
+.history-search-clear {
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.history-search-clear:hover {
+  color: #ef4444;
 }
 
 .table-pagination {
@@ -836,6 +885,13 @@ button:disabled {
 .secondary {
   background: #e2e8f0;
   color: #1e293b;
+}
+
+.secondary.ghost {
+  background: transparent;
+  border: 1px solid #dbe5ff;
+  color: #2563eb;
+  box-shadow: none;
 }
 
 .link-button {

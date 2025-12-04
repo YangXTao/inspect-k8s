@@ -1777,12 +1777,12 @@ const HistoryView = ({
 
   return (
     <section className="card history history-page">
-      <div className="card-header">
+      <div className="card-header history-header">
         <h2>历史巡检</h2>
-        <div className="card-actions">
-          <div className="card-actions-group history-filter-group">
-            <label>
-              状态
+        <div className="history-header-controls">
+          <div className="history-filter-row">
+            <div className="history-chip history-chip-select">
+              <span className="history-chip-label">状态筛选</span>
               <select
                 value={historyStatusFilter}
                 onChange={handleHistoryStatusFilterChange}
@@ -1793,27 +1793,32 @@ const HistoryView = ({
                   </option>
                 ))}
               </select>
-            </label>
-            <label>
-              关键字
+            </div>
+            <div className="history-chip history-chip-search">
+              <span className="history-chip-label">关键字</span>
               <input
                 type="text"
                 value={historyKeyword}
                 onChange={handleKeywordFilterChange}
-                placeholder="巡检编号 / 集群 / 巡检人"
+                placeholder="按巡检编号 / 集群 / 巡检人搜索"
               />
-            </label>
-            {historyKeyword && (
-              <button
-                type="button"
-                className="secondary"
-                onClick={handleKeywordFilterClear}
-              >
-                清空
-              </button>
-            )}
+              {historyKeyword && (
+                <button
+                  type="button"
+                  className="history-search-clear"
+                  onClick={handleKeywordFilterClear}
+                  aria-label="清空关键字"
+                >
+                  ×
+                </button>
+              )}
+            </div>
           </div>
-          <button type="button" className="secondary" onClick={onRefreshRuns}>
+          <button
+            type="button"
+            className="secondary ghost"
+            onClick={onRefreshRuns}
+          >
             刷新
           </button>
         </div>
