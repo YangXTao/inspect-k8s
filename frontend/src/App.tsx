@@ -2405,39 +2405,119 @@ const ClusterDetailView = ({
               onChange={(event) => setOperator(event.target.value)}
             />
           </label>
-          <div className="selection-hint">
-            已选择 {selectedIds.length} / {items.length} 个巡检项
+          <div className="inspection-items-toolbar">
+            <span className="selection-hint">
+              已选择 {selectedIds.length} / {items.length} 个巡检项
+            </span>
+            <div className="inspection-items-toolbar-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={handleToggleAllItems}
+              >
+                {allItemsSelected ? "清除选择" : "全选"}
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={handleStart}
+                disabled={
+                  inspectionLoading ||
+                  selectedIds.length === 0 ||
+                  !license.canRunInspections
+                }
+              >
+                {inspectionLoading ? "巡检中..." : "开始巡检"}
+              </button>
+            </div>
           </div>
-          <button
-            type="button"
-            className="secondary"
-            onClick={handleToggleAllItems}
-          >
-            {allItemsSelected ? "清除选择" : "全选"}
-          </button>
-          <ul className="item-list">
-            {items.length === 0 ? (
+          {items.length === 0 ? (
+            <ul className="item-list">
               <li className="placeholder">暂无巡检项，请在设置中添加。</li>
-            ) : (
-              items.map((item) => (
-                <li key={item.id}>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.includes(item.id)}
-                      onChange={() => handleToggleItem(item.id)}
-                    />
-                    <div>
-                      <div className="item-name">{item.name}</div>
-                      <div className="item-desc">
-                        {item.description || "未提供描述"}
+            </ul>
+          ) : (
+            <>
+              <ul className="item-list">
+                {pagedInspectionItems.map((item) => (
+                  <li key={item.id}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(item.id)}
+                        onChange={() => handleToggleItem(item.id)}
+                      />
+                      <div>
+                        <div className="item-name">{item.name}</div>
+                        <div className="item-desc">
+                          {item.description || "未提供描述"}
+                        </div>
                       </div>
-                    </div>
-                  </label>
-                </li>
-              ))
-            )}
-          </ul>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              <div className="history-pagination-controls inspection-items-pagination">
+                <label className="page-size-control">
+                  每页
+                  <select
+                    value={itemPageSize}
+                    onChange={(event) =>
+                      setItemPageSize(Number(event.target.value))
+                    }
+                  >
+                    {CLUSTER_ITEM_PAGE_SIZE_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="history-pagination-buttons">
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => handleInspectionPageChange(-1)}
+                    disabled={itemPage <= 1}
+                  >
+                    上一页
+                  </button>
+                  <span>
+                    第 {itemPage} / {totalInspectionPages} 页
+                  </span>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => handleInspectionPageChange(1)}
+                    disabled={itemPage >= totalInspectionPages}
+                  >
+                    下一页
+                  </button>
+                </div>
+                <label className="history-page-jump">
+                  跳转
+                  <input
+                    type="number"
+                    min={1}
+                    value={itemPageInput}
+                    onChange={(event) => setItemPageInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        handleInspectionPageJump();
+                      }
+                    }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={handleInspectionPageJump}
+                >
+                  确定
+                </button>
+              </div>
+            </>
+          )}
           {!license.canRunInspections && (
             <div className="feedback warning">
               {license.reason ?? "当前 License 不支持发起巡检。"}
