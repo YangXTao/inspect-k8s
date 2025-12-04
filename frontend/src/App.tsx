@@ -2257,36 +2257,6 @@ const ClusterDetailView = ({
     }
     setItemPageInput("");
   }, [itemPageInput, totalInspectionPages]);
-
-  const handleItemPageChange = useCallback(
-    (offset: number) => {
-      setItemPage((prev) => {
-        const next = prev + offset;
-        if (next < 1) {
-          return 1;
-        }
-        if (next > totalItemPages) {
-          return totalItemPages;
-        }
-        return next;
-      });
-    },
-    [totalItemPages]
-  );
-
-  const handleItemPageJump = useCallback(() => {
-    const trimmed = itemPageInput.trim();
-    if (!trimmed) {
-      return;
-    }
-    const parsed = Number(trimmed);
-    if (!Number.isNaN(parsed) && Number.isInteger(parsed)) {
-      const target = Math.min(Math.max(parsed, 1), totalItemPages);
-      setItemPage(target);
-    }
-    setItemPageInput("");
-  }, [itemPageInput, totalItemPages]);
-
   let detailContent: ReactNode;
 
   if (!clusterKey || resolvedClusterId === null) {
