@@ -957,6 +957,32 @@ button:disabled {
   font-size: 12px;
 }
 
+.back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: none;
+  background: #eef2ff;
+  color: #1d4ed8;
+  font-weight: 600;
+  font-size: 14px;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+  cursor: pointer;
+  transition: transform 0.1s ease, box-shadow 0.2s ease;
+}
+
+.back-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.28);
+}
+
+.back-button:active {
+  transform: translateY(0);
+  box-shadow: 0 3px 10px rgba(37, 99, 235, 0.18);
+}
+
 .link-button.danger,
 .link-button.small.danger {
   color: #b91c1c;
@@ -1263,6 +1289,11 @@ th {
   gap: 10px;
   font-size: 13px;
   color: #475569;
+}
+
+.cluster-runs-pagination {
+  margin-top: 16px;
+  justify-content: flex-end;
 }
 
 .history-pagination-controls select,

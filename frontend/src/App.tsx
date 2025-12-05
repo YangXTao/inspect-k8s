@@ -2065,6 +2065,11 @@ const ClusterDetailView = ({
   const navigate = useNavigate();
   const operatorInputId = useId();
   const [selectedRunIds, setSelectedRunIds] = useState<number[]>([]);
+  const [clusterRunPageSize, setClusterRunPageSize] = useState<number>(
+    RUN_PAGE_SIZE_OPTIONS[0]
+  );
+  const [clusterRunPage, setClusterRunPage] = useState(1);
+  const [clusterRunPageInput, setClusterRunPageInput] = useState("");
   const [itemPageSize, setItemPageSize] = useState<number>(
     CLUSTER_ITEM_PAGE_SIZE_OPTIONS[0]
   );
@@ -2083,6 +2088,14 @@ const ClusterDetailView = ({
     }
     return clusters.find((item) => item.id === resolvedClusterId) ?? null;
   }, [clusters, resolvedClusterId]);
+
+  const handleBackToPreviousPage = useCallback(() => {
+    if (window.history.length > 1) {
+      navigate(-1);
+    } else {
+      navigate("/");
+    }
+  }, [navigate]);
 
   const clusterRuns = useMemo(() => {
     if (!cluster) {
@@ -2111,6 +2124,31 @@ const ClusterDetailView = ({
       prev.filter((id) => clusterRuns.some((run) => run.id === id))
     );
   }, [clusterRuns]);
+
+  const totalClusterRunPages = useMemo(
+    () =>
+      Math.max(
+        1,
+        Math.ceil(clusterRuns.length / Math.max(clusterRunPageSize, 1))
+      ),
+    [clusterRuns.length, clusterRunPageSize]
+  );
+
+  useEffect(() => {
+    setClusterRunPage(1);
+    setClusterRunPageInput("");
+  }, [clusterRunPageSize, resolvedClusterId]);
+
+  useEffect(() => {
+    setClusterRunPage((prev) =>
+      Math.min(Math.max(prev, 1), totalClusterRunPages)
+    );
+  }, [totalClusterRunPages]);
+
+  const pagedClusterRuns = useMemo(() => {
+    const start = (clusterRunPage - 1) * clusterRunPageSize;
+    return clusterRuns.slice(start, start + clusterRunPageSize);
+  }, [clusterRuns, clusterRunPage, clusterRunPageSize]);
 
   const totalInspectionPages = useMemo(
     () =>
@@ -2193,10 +2231,10 @@ const ClusterDetailView = ({
 
   const handleToggleAllRuns = useCallback(() => {
     setSelectedRunIds((prev) => {
-      if (clusterRuns.length === 0) {
+      if (pagedClusterRuns.length === 0) {
         return prev;
       }
-      const visibleIds = clusterRuns.map((run) => run.id);
+      const visibleIds = pagedClusterRuns.map((run) => run.id);
       const allVisibleSelected = visibleIds.every((id) =>
         prev.includes(id)
       );
@@ -2207,7 +2245,7 @@ const ClusterDetailView = ({
       visibleIds.forEach((id) => merged.add(id));
       return Array.from(merged);
     });
-  }, [clusterRuns]);
+  }, [pagedClusterRuns]);
 
   const handleDeleteSelectedRuns = useCallback(() => {
     if (selectedRunIds.length === 0) {
@@ -2228,6 +2266,35 @@ const ClusterDetailView = ({
     }
     void onStartInspection(cluster.id);
   }, [cluster, onStartInspection]);
+
+  const handleClusterRunPageChange = useCallback(
+    (offset: number) => {
+      setClusterRunPage((prev) => {
+        const next = prev + offset;
+        if (next < 1) {
+          return 1;
+        }
+        if (next > totalClusterRunPages) {
+          return totalClusterRunPages;
+        }
+        return next;
+      });
+    },
+    [totalClusterRunPages]
+  );
+
+  const handleClusterRunPageJump = useCallback(() => {
+    const trimmed = clusterRunPageInput.trim();
+    if (!trimmed) {
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isNaN(parsed) && Number.isInteger(parsed)) {
+      const target = Math.min(Math.max(parsed, 1), totalClusterRunPages);
+      setClusterRunPage(target);
+    }
+    setClusterRunPageInput("");
+  }, [clusterRunPageInput, totalClusterRunPages]);
 
   const handleInspectionPageChange = useCallback(
     (offset: number) => {
@@ -2266,9 +2333,9 @@ const ClusterDetailView = ({
         <button
           type="button"
           className="secondary"
-          onClick={() => navigate("/")}
+          onClick={handleBackToPreviousPage}
         >
-          返回集群列表
+          返回上一页
         </button>
       </div>
     );
@@ -2279,9 +2346,9 @@ const ClusterDetailView = ({
         <button
           type="button"
           className="secondary"
-          onClick={() => navigate("/")}
+          onClick={handleBackToPreviousPage}
         >
-          返回集群列表
+          返回上一页
         </button>
       </div>
     );
@@ -2291,10 +2358,10 @@ const ClusterDetailView = ({
         <div className="detail-header">
           <button
             type="button"
-            className="link-button"
-            onClick={() => navigate("/")}
+            className="back-button"
+            onClick={handleBackToPreviousPage}
           >
-            ← 返回集群列表
+            ← 返回上一页
         </button>
         <div className="detail-header-actions">
           {enableServerConnectionTest && (
@@ -2527,6 +2594,68 @@ const ClusterDetailView = ({
             <div className="feedback info">正在创建巡检任务...</div>
           )}
         </div>
+        {clusterRuns.length > 0 && (
+          <div className="history-pagination-controls cluster-runs-pagination">
+            <label className="page-size-control">
+              ÿҳ
+              <select
+                value={clusterRunPageSize}
+                onChange={(event) =>
+                  setClusterRunPageSize(Number(event.target.value))
+                }
+              >
+                {RUN_PAGE_SIZE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="history-pagination-buttons">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => handleClusterRunPageChange(-1)}
+                disabled={clusterRunPage <= 1}
+              >
+                ��һҳ
+              </button>
+              <span>
+                �� {clusterRunPage} / {totalClusterRunPages} ҳ
+              </span>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => handleClusterRunPageChange(1)}
+                disabled={clusterRunPage >= totalClusterRunPages}
+              >
+                ��һҳ
+              </button>
+            </div>
+            <label className="history-page-jump">
+              ��ת
+              <input
+                type="number"
+                min={1}
+                value={clusterRunPageInput}
+                onChange={(event) => setClusterRunPageInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    handleClusterRunPageJump();
+                  }
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              className="secondary"
+              onClick={handleClusterRunPageJump}
+            >
+              ȷ��
+            </button>
+          </div>
+        )}
       </section>
 
       <section className="card history">
@@ -2537,8 +2666,10 @@ const ClusterDetailView = ({
               <input
                 type="checkbox"
                 checked={
-                  clusterRuns.length > 0 &&
-                  clusterRuns.every((run) => selectedRunIds.includes(run.id))
+                  pagedClusterRuns.length > 0 &&
+                  pagedClusterRuns.every((run) =>
+                    selectedRunIds.includes(run.id)
+                  )
                 }
                 onChange={handleToggleAllRuns}
               />
@@ -2577,7 +2708,7 @@ const ClusterDetailView = ({
                 </tr>
               </thead>
               <tbody>
-                {clusterRuns.map((run) => {
+                {pagedClusterRuns.map((run) => {
                   const isSelected = selectedRunIds.includes(run.id);
                   const runSlug = runDisplayIds[run.id] ?? `#${run.id}`;
                   return (
@@ -3634,6 +3765,13 @@ const RunDetailView = ({
       : runKey ?? "-";
   const backTarget = cluster ? `/clusters/${clusterSlug}` : "/history";
   const summaryRun = run ?? fallbackRun;
+  const handleBackNavigation = useCallback(() => {
+    if (window.history.length > 1) {
+      navigate(-1);
+    } else {
+      navigate(backTarget);
+    }
+  }, [backTarget, navigate]);
 
   const shouldShowNotice =
     notice && noticeType && noticeScope === "runDetail";
@@ -3806,10 +3944,10 @@ const RunDetailView = ({
       <div className="detail-header">
         <button
           type="button"
-          className="link-button"
-          onClick={() => navigate(backTarget)}
+          className="back-button"
+          onClick={handleBackNavigation}
         >
-          ← 返回 {cluster ? `${cluster.name}` : "历史记录"}
+          ← 返回上一页
         </button>
         <div className="detail-header-actions">
           {reportUrl ? (
@@ -6100,6 +6238,7 @@ const hasManualKubeconfig = useMemo(
 };
 
 export default App;
+
 
 
 
