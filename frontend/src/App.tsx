@@ -2361,8 +2361,8 @@ const ClusterDetailView = ({
             className="back-button"
             onClick={handleBackToPreviousPage}
           >
-            ← 返回上一页
-        </button>
+            返回上一页
+          </button>
         <div className="detail-header-actions">
           {enableServerConnectionTest && (
             <button
@@ -2594,68 +2594,6 @@ const ClusterDetailView = ({
             <div className="feedback info">正在创建巡检任务...</div>
           )}
         </div>
-        {clusterRuns.length > 0 && (
-          <div className="history-pagination-controls cluster-runs-pagination">
-            <label className="page-size-control">
-              ÿҳ
-              <select
-                value={clusterRunPageSize}
-                onChange={(event) =>
-                  setClusterRunPageSize(Number(event.target.value))
-                }
-              >
-                {RUN_PAGE_SIZE_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="history-pagination-buttons">
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => handleClusterRunPageChange(-1)}
-                disabled={clusterRunPage <= 1}
-              >
-                ��һҳ
-              </button>
-              <span>
-                �� {clusterRunPage} / {totalClusterRunPages} ҳ
-              </span>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => handleClusterRunPageChange(1)}
-                disabled={clusterRunPage >= totalClusterRunPages}
-              >
-                ��һҳ
-              </button>
-            </div>
-            <label className="history-page-jump">
-              ��ת
-              <input
-                type="number"
-                min={1}
-                value={clusterRunPageInput}
-                onChange={(event) => setClusterRunPageInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    handleClusterRunPageJump();
-                  }
-                }}
-              />
-            </label>
-            <button
-              type="button"
-              className="secondary"
-              onClick={handleClusterRunPageJump}
-            >
-              ȷ��
-            </button>
-          </div>
-        )}
       </section>
 
       <section className="card history">
@@ -2791,6 +2729,68 @@ const ClusterDetailView = ({
             </table>
           )}
         </div>
+        {clusterRuns.length > 0 && (
+          <div className="history-pagination-controls cluster-runs-pagination">
+            <label className="page-size-control">
+              每页
+              <select
+                value={clusterRunPageSize}
+                onChange={(event) =>
+                  setClusterRunPageSize(Number(event.target.value))
+                }
+              >
+                {RUN_PAGE_SIZE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="history-pagination-buttons">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => handleClusterRunPageChange(-1)}
+                disabled={clusterRunPage <= 1}
+              >
+                上一页
+              </button>
+              <span>
+                第 {clusterRunPage} / {totalClusterRunPages} 页
+              </span>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => handleClusterRunPageChange(1)}
+                disabled={clusterRunPage >= totalClusterRunPages}
+              >
+                下一页
+              </button>
+            </div>
+            <label className="history-page-jump">
+              跳转
+              <input
+                type="number"
+                min={1}
+                value={clusterRunPageInput}
+                onChange={(event) => setClusterRunPageInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    handleClusterRunPageJump();
+                  }
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              className="secondary"
+              onClick={handleClusterRunPageJump}
+            >
+              确定
+            </button>
+          </div>
+        )}
       </section>
       </>
     );
@@ -3947,7 +3947,7 @@ const RunDetailView = ({
           className="back-button"
           onClick={handleBackNavigation}
         >
-          ← 返回上一页
+          返回上一页
         </button>
         <div className="detail-header-actions">
           {reportUrl ? (
