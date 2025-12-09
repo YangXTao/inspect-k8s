@@ -12,6 +12,7 @@
   useState,
 } from "react";
 import {
+  Link,
   Navigate,
   NavLink,
   Route,
@@ -636,14 +637,25 @@ const logWithTimestamp = (
 };
 
 const TopNavigation = ({ onOpenSettings }: { onOpenSettings: () => void }) => {
-  const navigate = useNavigate();
+  const handleSettingsClick = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey ||
+      event.button !== 0
+    ) {
+      return;
+    }
+    event.preventDefault();
+    onOpenSettings();
+  };
 
   return (
     <header className="top-navigation">
-      <button
-        type="button"
+      <Link
+        to="/"
         className="top-navigation-brand"
-        onClick={() => navigate("/")}
         aria-label="返回首页"
       >
         <span className="top-navigation-home-icon" aria-hidden="true">
@@ -655,7 +667,7 @@ const TopNavigation = ({ onOpenSettings }: { onOpenSettings: () => void }) => {
           </svg>
         </span>
         <span className="top-navigation-title">Kubernetes 巡检中心</span>
-      </button>
+      </Link>
       <nav className="top-navigation-links">
         <NavLink
           to="/history"
@@ -679,10 +691,10 @@ const TopNavigation = ({ onOpenSettings }: { onOpenSettings: () => void }) => {
             <span>历史巡检</span>
           </span>
         </NavLink>
-        <button
-          type="button"
+        <Link
+          to={SETTINGS_BASE_PATH}
           className="top-navigation-link"
-          onClick={onOpenSettings}
+          onClick={handleSettingsClick}
         >
           <span className="top-navigation-link-inner">
             <span className="top-navigation-link-icon" aria-hidden="true">
@@ -695,7 +707,7 @@ const TopNavigation = ({ onOpenSettings }: { onOpenSettings: () => void }) => {
             </span>
             <span>设置</span>
           </span>
-        </button>
+        </Link>
       </nav>
     </header>
   );
@@ -1245,7 +1257,7 @@ const OverviewView = ({
                 );
                 const isTesting = Boolean(testingClusterIds[cluster.id]);
                 const isSelected = selectedClusterIds.includes(cluster.id);
-                const handleNavigate = () => navigate(`/clusters/${displayId}`);
+                const detailPath = `/clusters/${displayId}`;
                 const versionLabel =
                   cluster.kubernetes_version &&
                   cluster.kubernetes_version.trim().length > 0
@@ -1268,16 +1280,13 @@ const OverviewView = ({
                   <div
                     key={cluster.id}
                     className={`cluster-card${isSelected ? " selected" : ""}`}
-                    role="button"
-                    tabIndex={0}
-                    onClick={handleNavigate}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        handleNavigate();
-                      }
-                    }}
                   >
+                    <Link
+                      to={detailPath}
+                      className="cluster-card-overlay"
+                      aria-label={`查看集群 ${cluster.name}`}
+                    />
+                    <div className="cluster-card-content">
                     <div className="cluster-card-top">
                       <div className="cluster-name-row">
                         <input
@@ -1362,6 +1371,7 @@ const OverviewView = ({
                     <div className="cluster-meta">
                       <span>创建时间: {formatDate(cluster.created_at)}</span>
                       <span>更新时间: {formatDate(cluster.updated_at)}</span>
+                    </div>
                     </div>
                   </div>
                 );
@@ -2330,39 +2340,39 @@ const ClusterDetailView = ({
     detailContent = (
       <div className="detail-empty">
         <p>未找到对应的集群标识。</p>
-        <button
-          type="button"
-          className="secondary"
-          onClick={handleBackToPreviousPage}
+        <Link
+          to="/"
+          className="back-button"
+          onClick={handleBackLinkClick}
         >
           返回上一页
-        </button>
+        </Link>
       </div>
     );
   } else if (!cluster) {
     detailContent = (
       <div className="detail-empty">
         <p>该集群暂不可用或已被删除。</p>
-        <button
-          type="button"
-          className="secondary"
-          onClick={handleBackToPreviousPage}
+        <Link
+          to="/"
+          className="back-button"
+          onClick={handleBackLinkClick}
         >
           返回上一页
-        </button>
+        </Link>
       </div>
     );
   } else {
     detailContent = (
       <>
         <div className="detail-header">
-          <button
-            type="button"
+          <Link
+            to="/"
             className="back-button"
-            onClick={handleBackToPreviousPage}
+            onClick={handleBackLinkClick}
           >
             返回上一页
-          </button>
+          </Link>
         <div className="detail-header-actions">
           {enableServerConnectionTest && (
             <button
@@ -3942,13 +3952,13 @@ const RunDetailView = ({
   return (
     <>
       <div className="detail-header">
-        <button
-          type="button"
+        <Link
+          to={backTarget}
           className="back-button"
           onClick={handleBackNavigation}
         >
           返回上一页
-        </button>
+        </Link>
         <div className="detail-header-actions">
           {reportUrl ? (
             <button
@@ -6238,13 +6248,3 @@ const hasManualKubeconfig = useMemo(
 };
 
 export default App;
-
-
-
-
-
-
-
-
-
-
