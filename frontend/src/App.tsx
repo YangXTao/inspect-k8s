@@ -290,6 +290,8 @@ const clusterStatusMeta = {
   pending: { label: "待注册", className: "pending" },
 } as const;
 
+type ClusterConnectionStatus = "connected" | "failed" | "warning" | "unknown" | "pending";
+
 const getClusterStatusMeta = (status: string) =>
   clusterStatusMeta[status as keyof typeof clusterStatusMeta] ||
   clusterStatusMeta.unknown;
@@ -409,7 +411,7 @@ const persistClusterDisplayIds = (map: Record<number, string>) => {
   try {
     window.localStorage.setItem(
       CLUSTER_ID_STORAGE_KEY,
-      JSON.stringify(map, null, 0)
+      JSON.stringify(map)
     );
   } catch {
     // ignore storage failure
@@ -637,7 +639,7 @@ const logWithTimestamp = (
 };
 
 const TopNavigation = ({ onOpenSettings }: { onOpenSettings: () => void }) => {
-  const handleSettingsClick = (event: MouseEvent<HTMLAnchorElement>) => {
+  const handleSettingsClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
     if (
       event.metaKey ||
       event.ctrlKey ||
@@ -1338,9 +1340,9 @@ const OverviewView = ({
                           {isTesting ? "诊断中..." : "连接测试"}
                         </button>
                       )}
-                      <span className={`status-chip ${statusMeta.className}`}>
-                        {statusMeta.label}
-                      </span>
+              <span className={`status-chip ${statusMeta?.className}`}>
+                {statusMeta?.label}
+              </span>
                       <span
                         className="cluster-status-message"
                         title={summaryText}
@@ -1977,7 +1979,7 @@ const HistoryView = ({
                       {run.report_path && (
                         <a
                           className="link-button"
-                          href={run.report_path}
+                          href={getReportDownloadUrl(run.id)}
                           target="_blank"
                           rel="noreferrer"
                         >
@@ -2186,10 +2188,12 @@ const ClusterDetailView = ({
     return items.slice(start, start + itemPageSize);
   }, [items, itemPage, itemPageSize]);
 
-  const statusMeta = useMemo(
-    () => (cluster ? getClusterStatusMeta(cluster.connection_status) : null),
-    [cluster]
-  );
+  const statusMeta = useMemo(() => {
+    if (!cluster) {
+      return clusterStatusMeta.unknown;
+    }
+    return getClusterStatusMeta(cluster.connection_status);
+  }, [cluster]);
   const clusterSlug = useMemo(
     () =>
       cluster
@@ -2343,7 +2347,7 @@ const ClusterDetailView = ({
         <Link
           to="/"
           className="back-button"
-          onClick={handleBackLinkClick}
+          onClick={handleBackToPreviousPage}
         >
           返回上一页
         </Link>
@@ -2356,7 +2360,7 @@ const ClusterDetailView = ({
         <Link
           to="/"
           className="back-button"
-          onClick={handleBackLinkClick}
+          onClick={handleBackToPreviousPage}
         >
           返回上一页
         </Link>
@@ -2708,7 +2712,7 @@ const ClusterDetailView = ({
                         {run.report_path && (
                           <a
                             className="link-button"
-                            href={run.report_path}
+                            href={getReportDownloadUrl(run.id)}
                             target="_blank"
                             rel="noreferrer"
                           >
@@ -3626,13 +3630,13 @@ const LicenseSettingsPanel = ({
       </section>
       <section className="settings-form">
         <h4>License 详情</h4>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".lic,.txt,.json"
-          onChange={handleFileChange}
-          disabled={uploading}
-        />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".lic,.txt,.json"
+            onChange={handleFileChange}
+            disabled={uploading}
+          />
         <p className="settings-overview-hint">
           支持 .lic / .txt / .json 文件，上传后立即生效。
         </p>
@@ -3878,7 +3882,11 @@ const RunDetailView = ({
     (summaryRun?.agent_status
       ? describeAgentStatus(summaryRun.agent_status)
       : null);
-  const reportUrl = run?.report_path ?? summaryRun?.report_path ?? null;
+  const reportUrl = run?.report_path
+    ? getReportDownloadUrl(run.id)
+    : summaryRun?.report_path
+      ? getReportDownloadUrl(summaryRun.id)
+      : null;
 
   const handleRefresh = () => {
     setRefreshIndex((prev) => prev + 1);
@@ -4860,7 +4868,7 @@ const backgroundLocation =
     ]
   );
 
-  const refreshRuns = useCallback(async () => {
+  const refreshRuns = useCallback(async (): Promise<InspectionRunListItem[] | null> => {
     try {
       logWithTimestamp("info", "开始获取巡检历史");
       const data = await getInspectionRuns();
@@ -5063,10 +5071,11 @@ const backgroundLocation =
       }
       const next: Record<number, number> = {};
       clusters.forEach((cluster) => {
+        const status = cluster.connection_status as string;
         const shouldKeep =
           prev[cluster.id] &&
-          (cluster.connection_status === "pending" ||
-            (cluster.connection_status === "warning" &&
+          (status === "pending" ||
+            (status === "warning" &&
               (!cluster.last_checked_at ||
                 (cluster.connection_message || "").includes("等待 Agent 注册") ||
                 (cluster.connection_message || "").includes("连接测试"))));
@@ -5341,6 +5350,23 @@ const hasManualKubeconfig = useMemo(
       setSelectedItemIdsState((prev) => updater(prev));
     },
     []
+  );
+
+  const handleBackLinkClick = useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>) => {
+      if (
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey ||
+        event.button !== 0
+      ) {
+        return;
+      }
+      event.preventDefault();
+      navigate(-1);
+    },
+    [navigate]
   );
 
   const handleStartInspection = useCallback(
