@@ -712,6 +712,8 @@ def pause_inspection_run(
     run: models.InspectionRun,
 ) -> models.InspectionRun:
     run.status = "paused"
+    if run.executor == "agent":
+        run.agent_status = "paused"
     db.add(run)
     db.commit()
     db.refresh(run)
@@ -730,6 +732,8 @@ def resume_inspection_run(
     run: models.InspectionRun,
 ) -> models.InspectionRun:
     run.status = "running"
+    if run.executor == "agent":
+        run.agent_status = "running"
     run.completed_at = None
     db.add(run)
     db.commit()
@@ -750,6 +754,7 @@ def cancel_inspection_run(
     reason: Optional[str] = None,
 ) -> models.InspectionRun:
     run.status = "cancelled"
+    run.report_path = None
     if run.executor == "agent":
         run.agent_status = "failed"
     run.completed_at = datetime.utcnow()

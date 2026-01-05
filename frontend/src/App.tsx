@@ -41,7 +41,9 @@ import {
   getLicenseStatus,
   getReportDownloadUrl,
   importInspectionItems,
+  pauseInspectionRun,
   registerCluster,
+  resumeInspectionRun,
   testClusterConnection,
   updateAgent as apiUpdateAgent,
   updateCluster,
@@ -125,6 +127,7 @@ const HISTORY_STATUS_OPTIONS: {
   { value: "all", label: "全部" },
   { value: "queued", label: "排队中" },
   { value: "running", label: "执行中" },
+  { value: "paused", label: "暂停中" },
   { value: "finished", label: "已完成" },
   { value: "failed", label: "已失败" },
   { value: "cancelled", label: "已取消" },
@@ -164,6 +167,8 @@ const statusClass = (status: InspectionRunStatus) => {
       return "status-pill queued";
     case "running":
       return "status-pill running";
+    case "paused":
+      return "status-pill paused";
     case "finished":
       return "status-pill success";
     case "failed":
@@ -180,10 +185,14 @@ const renderRunStatusBadge = (
   statusLabel: string,
   progress?: number
 ) => {
-  if (status === "running") {
+  if (status === "running" || status === "paused") {
     const clamped = clampProgress(progress);
+    const progressClassName =
+      status === "paused"
+        ? "status-progress status-progress-circle paused"
+        : "status-progress status-progress-circle";
     return (
-      <div className="status-progress status-progress-circle">
+      <div className={progressClassName}>
         <div className="status-circle">
           <svg viewBox="0 0 40 40">
             <circle className="status-circle-bg" cx="20" cy="20" r={STATUS_CIRCLE_RADIUS} />
@@ -258,6 +267,8 @@ const describeAgentStatus = (
       return "待执行";
     case "running":
       return "执行中";
+    case "paused":
+      return "暂停中";
     case "finished":
       return "已完成";
     case "failed":
@@ -273,6 +284,8 @@ const agentStatusClassName = (status?: InspectionAgentStatus | null) => {
       return "status-pill warning";
     case "running":
       return "status-pill running";
+    case "paused":
+      return "status-pill paused";
     case "finished":
       return "status-pill success";
     case "failed":
@@ -2043,6 +2056,8 @@ interface ClusterDetailViewProps {
   onDeleteRun: (run: InspectionRunListItem) => Promise<void>;
   onDeleteRunsBulk: (runIds: number[]) => Promise<void>;
   onCancelRun: (run: InspectionRunListItem) => Promise<void>;
+  onPauseRun: (run: InspectionRunListItem) => Promise<void>;
+  onResumeRun: (run: InspectionRunListItem) => Promise<void>;
   onEditCluster: (cluster: ClusterConfig) => void;
   onDeleteCluster: (cluster: ClusterConfig) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
@@ -2074,6 +2089,8 @@ const ClusterDetailView = ({
   onDeleteRun,
   onDeleteRunsBulk,
   onCancelRun,
+  onPauseRun,
+  onResumeRun,
   onEditCluster,
   onDeleteCluster,
   clusterDisplayIds,
@@ -2728,6 +2745,25 @@ const ClusterDetailView = ({
                           </>
                         )}
                         {run.status === "running" && (
+                          <button
+                            type="button"
+                            className="link-button"
+                            onClick={() => void onPauseRun(run)}
+                          >
+                            暂停
+                          </button>
+                        )}
+                        {run.status === "paused" && (
+                          <button
+                            type="button"
+                            className="link-button"
+                            onClick={() => void onResumeRun(run)}
+                          >
+                            继续
+                          </button>
+                        )}
+                        {(run.status === "running" ||
+                          run.status === "paused") && (
                           <button
                             type="button"
                             className="link-button"
@@ -3680,6 +3716,8 @@ interface RunDetailViewProps {
   runs: InspectionRunListItem[];
   onDeleteRun: (runId: number, redirectPath?: string) => Promise<void>;
   onCancelRun: (runId: number, redirectPath?: string) => Promise<void>;
+  onPauseRun: (runId: number) => Promise<void>;
+  onResumeRun: (runId: number) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
   notice?: string | null;
@@ -3694,6 +3732,8 @@ const RunDetailView = ({
   runs,
   onDeleteRun,
   onCancelRun,
+  onPauseRun,
+  onResumeRun,
   clusterDisplayIds,
   runDisplayIds,
   notice,
@@ -3980,6 +4020,24 @@ const RunDetailView = ({
     void onCancelRun(resolvedRunId);
   };
 
+  const handlePause = () => {
+    if (resolvedRunId === null) {
+      return;
+    }
+    void onPauseRun(resolvedRunId).then(() => {
+      setRefreshIndex((prev) => prev + 1);
+    });
+  };
+
+  const handleResume = () => {
+    if (resolvedRunId === null) {
+      return;
+    }
+    void onResumeRun(resolvedRunId).then(() => {
+      setRefreshIndex((prev) => prev + 1);
+    });
+  };
+
   const handleResultPageChange = (offset: number) => {
     setResultPage((prev) => {
       const next = prev + offset;
@@ -4083,6 +4141,25 @@ const RunDetailView = ({
             {loading ? "刷新中..." : "刷新"}
           </button>
           {summaryRun?.status === "running" && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={handlePause}
+            >
+              暂停
+            </button>
+          )}
+          {summaryRun?.status === "paused" && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={handleResume}
+            >
+              继续
+            </button>
+          )}
+          {(summaryRun?.status === "running" ||
+            summaryRun?.status === "paused") && (
             <button
               type="button"
               className="secondary"
@@ -5811,6 +5888,42 @@ const hasManualKubeconfig = useMemo(
     [runDisplayIds, refreshRuns, refreshClusters, currentNoticeScope, showClusterNotice]
   );
 
+  const handlePauseRun = useCallback(
+    async (run: InspectionRunListItem): Promise<void> => {
+      try {
+        logWithTimestamp("info", "暂停巡检记录: %s", run.id);
+        await pauseInspectionRun(run.id);
+        await refreshRuns();
+        await refreshClusters();
+        showClusterNotice(currentNoticeScope, "巡检已暂停", "warning");
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "暂停巡检失败";
+        logWithTimestamp("error", "暂停巡检失败: %s", message);
+        showClusterNotice(currentNoticeScope, message, "error");
+      }
+    },
+    [refreshRuns, refreshClusters, currentNoticeScope, showClusterNotice]
+  );
+
+  const handleResumeRun = useCallback(
+    async (run: InspectionRunListItem): Promise<void> => {
+      try {
+        logWithTimestamp("info", "继续巡检记录: %s", run.id);
+        await resumeInspectionRun(run.id);
+        await refreshRuns();
+        await refreshClusters();
+        showClusterNotice(currentNoticeScope, "巡检已继续", "success");
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "继续巡检失败";
+        logWithTimestamp("error", "继续巡检失败: %s", message);
+        showClusterNotice(currentNoticeScope, message, "error");
+      }
+    },
+    [refreshRuns, refreshClusters, currentNoticeScope, showClusterNotice]
+  );
+
   const handleCancelRunById = useCallback(
     (runId: number, redirectPath?: string): Promise<void> => {
       const displayId = runDisplayIds[runId] ?? String(runId);
@@ -5851,6 +5964,42 @@ const hasManualKubeconfig = useMemo(
       currentNoticeScope,
       showClusterNotice,
     ]
+  );
+
+  const handlePauseRunById = useCallback(
+    async (runId: number): Promise<void> => {
+      try {
+        logWithTimestamp("info", "暂停巡检记录: %s", runId);
+        await pauseInspectionRun(runId);
+        await refreshRuns();
+        await refreshClusters();
+        showClusterNotice(currentNoticeScope, "巡检已暂停", "warning");
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "暂停巡检失败";
+        logWithTimestamp("error", "暂停巡检失败: %s", message);
+        showClusterNotice(currentNoticeScope, message, "error");
+      }
+    },
+    [refreshRuns, refreshClusters, currentNoticeScope, showClusterNotice]
+  );
+
+  const handleResumeRunById = useCallback(
+    async (runId: number): Promise<void> => {
+      try {
+        logWithTimestamp("info", "继续巡检记录: %s", runId);
+        await resumeInspectionRun(runId);
+        await refreshRuns();
+        await refreshClusters();
+        showClusterNotice(currentNoticeScope, "巡检已继续", "success");
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "继续巡检失败";
+        logWithTimestamp("error", "继续巡检失败: %s", message);
+        showClusterNotice(currentNoticeScope, message, "error");
+      }
+    },
+    [refreshRuns, refreshClusters, currentNoticeScope, showClusterNotice]
   );
 
   const handleEditCluster = useCallback((cluster: ClusterConfig) => {
@@ -6350,6 +6499,8 @@ const hasManualKubeconfig = useMemo(
                   handleDeleteRunsBulk(ids, "clusterDetail")
                 }
                 onCancelRun={handleCancelRun}
+                onPauseRun={handlePauseRun}
+                onResumeRun={handleResumeRun}
                 onEditCluster={handleEditCluster}
                 onDeleteCluster={handleDeleteCluster}
                 clusterDisplayIds={clusterDisplayIds}
@@ -6369,6 +6520,8 @@ const hasManualKubeconfig = useMemo(
                   runs={runs}
                   onDeleteRun={handleDeleteRunById}
                 onCancelRun={handleCancelRunById}
+                onPauseRun={handlePauseRunById}
+                onResumeRun={handleResumeRunById}
                 clusterDisplayIds={clusterDisplayIds}
                 runDisplayIds={runDisplayIds}
                 notice={clusterNotice}

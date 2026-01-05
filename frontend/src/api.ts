@@ -257,6 +257,18 @@ export function cancelInspectionRun(runId: number): Promise<InspectionRun> {
   });
 }
 
+export function pauseInspectionRun(runId: number): Promise<InspectionRun> {
+  return request<InspectionRun>(`/inspection-runs/${runId}/pause`, {
+    method: "POST",
+  });
+}
+
+export function resumeInspectionRun(runId: number): Promise<InspectionRun> {
+  return request<InspectionRun>(`/inspection-runs/${runId}/resume`, {
+    method: "POST",
+  });
+}
+
 export function getLicenseStatus(): Promise<LicenseStatus> {
   return request<LicenseStatus>("/license/status");
 }
