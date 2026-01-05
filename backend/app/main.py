@@ -94,6 +94,12 @@ def _build_run_display_id(db: Session, run: models.InspectionRun) -> str:
         .order_by(models.InspectionRun.created_at.asc(), models.InspectionRun.id.asc())
         .all()
     )
+    if (run.operator or "") != CONNECTION_TEST_OPERATOR:
+        runs = [
+            candidate
+            for candidate in runs
+            if (candidate.operator or "") != CONNECTION_TEST_OPERATOR
+        ]
     for index, candidate in enumerate(runs, start=1):
         if candidate.id == run.id:
             return f"{slug}-{index:02d}"

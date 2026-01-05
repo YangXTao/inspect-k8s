@@ -36,7 +36,16 @@ MARKDOWN_REPORTS_DIR = REPORTS_ROOT / "md"
 def _prepare_output_path(default_dir: Path, filename: str, output_path: Optional[Path | str] = None) -> Path:
     if output_path is None:
         default_dir.mkdir(parents=True, exist_ok=True)
-        return default_dir / filename
+        candidate = default_dir / filename
+        if not candidate.exists():
+            return candidate
+        stem = candidate.stem
+        suffix = candidate.suffix
+        for index in range(1, 1000):
+            unique_path = candidate.with_name(f"{stem}-{index}{suffix}")
+            if not unique_path.exists():
+                return unique_path
+        return candidate
     path = Path(output_path)
     if not path.is_absolute():
         path = Path.cwd() / path
