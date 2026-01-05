@@ -70,6 +70,13 @@ def _get_report_dir_for_run(run: InspectionRun, base_dir: Path) -> Path:
     return base_dir / _build_cluster_slug(cluster_id, cluster_name)
 
 
+def get_cluster_report_dirs(
+    cluster_id: Optional[int], cluster_name: Optional[str]
+) -> tuple[Path, Path]:
+    slug = _build_cluster_slug(cluster_id, cluster_name)
+    return (PDF_REPORTS_DIR / slug, MARKDOWN_REPORTS_DIR / slug)
+
+
 def _prepare_output_path(default_dir: Path, filename: str, output_path: Optional[Path | str] = None) -> Path:
     if output_path is None:
         default_dir.mkdir(parents=True, exist_ok=True)

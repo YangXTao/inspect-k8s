@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import secrets
+import shutil
 from dataclasses import dataclass
 import base64
 import binascii
@@ -22,7 +23,7 @@ from . import crud, models, schemas
 from .database import SessionLocal, ensure_runtime_directories, init_db
 from .inspections import CheckContext, DEFAULT_CHECKS, dispatch_checks
 from .license import LicenseError, license_manager
-from .pdf import generate_markdown_report, generate_pdf_report
+from .pdf import generate_markdown_report, generate_pdf_report, get_cluster_report_dirs
 from .prometheus import PrometheusClient
 
 logger = logging.getLogger(__name__)
@@ -228,17 +229,20 @@ def _resolve_active_agent(db: Session, cluster: models.ClusterConfig) -> Optiona
     return fallback
 
 
-def _has_pending_connection_test(db: Session, cluster: models.ClusterConfig) -> bool:
-    existing = (
+def _has_pending_connection_test(
+    db: Session, cluster: models.ClusterConfig, agent_id: Optional[int] = None
+) -> bool:
+    query = (
         db.query(models.InspectionRun)
         .filter(
             models.InspectionRun.cluster_id == cluster.id,
             models.InspectionRun.operator == CONNECTION_TEST_OPERATOR,
             models.InspectionRun.status.in_(("queued", "running")),
         )
-        .first()
     )
-    return existing is not None
+    if agent_id is not None:
+        query = query.filter(models.InspectionRun.agent_id == agent_id)
+    return query.first() is not None
 
 
 def _enqueue_connection_test_run(
@@ -265,7 +269,7 @@ def _trigger_auto_connection_test(
     agent: models.InspectionAgent,
     message: str = "已自动触发连接测试，稍后更新结果。",
 ) -> None:
-    if _has_pending_connection_test(db, cluster):
+    if _has_pending_connection_test(db, cluster, agent.id):
         return
     _enqueue_connection_test_run(db, cluster, agent)
     crud.update_cluster(
@@ -485,6 +489,14 @@ def _remove_file_safely(path: str | Path | None) -> None:
             continue
 
 
+def _remove_report_dir_safely(path: Path) -> None:
+    try:
+        if path.exists() and path.is_dir():
+            shutil.rmtree(path)
+    except Exception:
+        pass
+
+
 def _sanitize_optional_text(value: str | None) -> str | None:
     if value is None:
         return None
@@ -604,7 +616,7 @@ def test_cluster_connection(cluster_id: int, db: Session = Depends(get_db)):
             status_code=409,
             detail="未检测到可用 Agent，请先绑定或启用 Agent。",
         )
-    if _has_pending_connection_test(db, cluster):
+    if _has_pending_connection_test(db, cluster, agent.id):
         raise HTTPException(
             status_code=409,
             detail="已有连接测试任务执行中，请稍候再试。",
@@ -1202,6 +1214,9 @@ def delete_cluster(
     if delete_files:
         for report_path in report_paths:
             _remove_file_safely(report_path)
+        pdf_dir, md_dir = get_cluster_report_dirs(cluster.id, cluster.name)
+        _remove_report_dir_safely(pdf_dir)
+        _remove_report_dir_safely(md_dir)
 
     return {}
 
