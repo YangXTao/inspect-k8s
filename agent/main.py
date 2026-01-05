@@ -281,6 +281,20 @@ class AgentConfig:
     verify_ssl: bool = True
     request_timeout: int = DEFAULT_TIMEOUT
 
+    def load_token(self) -> Optional[str]:
+        if self.token:
+            return self.token
+        if self.token_file and self.token_file.exists():
+            return self.token_file.read_text(encoding='utf-8').strip() or None
+        return None
+
+    def save_token(self, token: str) -> None:
+        if not self.token_file:
+            return
+        self.token_file.parent.mkdir(parents=True, exist_ok=True)
+        self.token_file.write_text(token, encoding='utf-8')
+        LOG.info("Agent Token saved to %s", self.token_file)
+
 
 def _ensure_incluster_kubeconfig_file(config: AgentConfig) -> None:
     if config.kubeconfig_path and config.kubeconfig_path.exists():
@@ -310,20 +324,6 @@ def _ensure_incluster_kubeconfig_file(config: AgentConfig) -> None:
         return
     config.kubeconfig_path = kubeconfig_path
     LOG.info("已生成 ServiceAccount kubeconfig: %s", kubeconfig_path)
-
-    def load_token(self) -> Optional[str]:
-        if self.token:
-            return self.token
-        if self.token_file and self.token_file.exists():
-            return self.token_file.read_text(encoding="utf-8").strip() or None
-        return None
-
-    def save_token(self, token: str) -> None:
-        if not self.token_file:
-            return
-        self.token_file.parent.mkdir(parents=True, exist_ok=True)
-        self.token_file.write_text(token, encoding="utf-8")
-        LOG.info("已将 Agent Token 写入 %s", self.token_file)
 
 
 def _load_yaml_config(path: Optional[str]) -> Dict[str, Any]:
