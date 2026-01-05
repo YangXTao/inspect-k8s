@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>README.md</title>
+    <meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+    
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+html,footer,header{
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Custom MD PDF CSS
+ */
+html,footer,header{
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+
+ }
+body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+<link rel="stylesheet" href="file:///r%3A/2.Travail/1.Enseignement/Cours/_1.Outils/2.Developpement/1.SCSS/main.css" type="text/css"><link rel="stylesheet" href="file:///d%3A/rdaros/Cours/_1.Outils/2.Developpement/1.SCSS/main.css" type="text/css">
+</head>
+
+<body>
+    <h1 id="%E5%B7%A1%E6%A3%80-agent-%E5%8E%9F%E5%9E%8B%E4%BD%BF%E7%94%A8%E8%AF%B4%E6%98%8E">巡检 Agent 原型使用说明</h1>
+<p>本目录提供一个基于 Python 的最小可运行 Agent，能够完成以下能力：</p>
+<ul>
+<li>向 Server 注册并获取 Token（可选）；</li>
+<li>定时上报心跳、拉取待执行巡检任务；</li>
+<li>执行巡检项中的 PromQL 查询；</li>
+<li>回传巡检结果，具备幂等处理。</li>
+</ul>
+<h2 id="%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B">快速开始</h2>
+<ol>
+<li>
+<p><strong>安装依赖</strong></p>
+<pre class="hljs"><code><div><span class="hljs-built_in">cd</span> agent
+python -m venv .venv
+<span class="hljs-built_in">source</span> .venv/bin/activate  <span class="hljs-comment"># Windows: .venv\Scripts\activate</span>
+pip install -r requirements.txt
+</div></code></pre>
+</li>
+<li>
+<p><strong>准备配置</strong></p>
+<p>复制 <code>config.sample.yaml</code> 并填入实际的 Server 与 Prometheus 地址：</p>
+<pre class="hljs"><code><div>cp config.sample.yaml config.yaml
+</div></code></pre>
+</li>
+<li>
+<p><strong>启动 Agent</strong></p>
+<pre class="hljs"><code><div>python -m agent -c config.yaml
+</div></code></pre>
+<p>如需仅执行一次巡检并退出，可追加 <code>--once</code>。</p>
+</li>
+</ol>
+<h2 id="%E9%85%8D%E7%BD%AE%E8%AF%B4%E6%98%8E">配置说明</h2>
+<p><code>config.yaml</code> 主要包含三个部分：</p>
+<pre class="hljs"><code><div><span class="hljs-attr">server:</span>
+  <span class="hljs-attr">base_url:</span> <span class="hljs-string">http://backend:8000</span>     <span class="hljs-comment"># Server API 地址</span>
+  <span class="hljs-attr">registration_token:</span> <span class="hljs-string">REPLACE_WITH_TOKEN</span>  <span class="hljs-comment"># Server 端生成的 Agent Token</span>
+  <span class="hljs-attr">token_file:</span> <span class="hljs-string">./state/agent.token</span>   <span class="hljs-comment"># Token 缓存路径，可选</span>
+<span class="hljs-attr">agent:</span>
+  <span class="hljs-attr">poll_interval:</span> <span class="hljs-number">10</span>                 <span class="hljs-comment"># 无任务时的轮询间隔</span>
+  <span class="hljs-attr">batch_size:</span> <span class="hljs-number">1</span>                     <span class="hljs-comment"># 每次拉取的任务数</span>
+  <span class="hljs-attr">verify_ssl:</span> <span class="hljs-literal">true</span>                  <span class="hljs-comment"># 是否校验 Server 证书</span>
+  <span class="hljs-attr">request_timeout:</span> <span class="hljs-number">15</span>               <span class="hljs-comment"># HTTP 请求超时</span>
+<span class="hljs-attr">cluster:</span>
+  <span class="hljs-attr">name:</span> <span class="hljs-string">demo-cluster</span>               <span class="hljs-comment"># Agent 所覆盖的集群名称</span>
+<span class="hljs-attr">prometheus:</span>
+  <span class="hljs-attr">base_url:</span> <span class="hljs-string">http://prometheus:9090</span>  <span class="hljs-comment"># Prometheus 查询入口（可选）</span>
+</div></code></pre>
+<ul>
+<li>在 Server 端生成注册 Token 后，将其填入 <code>server.registration_token</code>，或通过环境变量 <code>INSPECT_AGENT_REGISTRATION_TOKEN</code> 提供。</li>
+<li><code>token_file</code> 会缓存服务器分配的 Token，Agent 重启时会优先从文件加载。</li>
+<li>在集群内运行时，Agent 会自动使用 ServiceAccount 生成 kubeconfig，并写入 <code>/var/lib/inspect-agent/incluster.kubeconfig</code>。</li>
+<li>支持以下环境变量覆盖配置：
+<ul>
+<li><code>INSPECT_AGENT_SERVER</code>、<code>INSPECT_AGENT_TOKEN</code>、<code>INSPECT_AGENT_TOKEN_FILE</code></li>
+<li><code>INSPECT_AGENT_REGISTRATION_TOKEN</code></li>
+<li><code>INSPECT_AGENT_CLUSTER_NAME</code>、<code>INSPECT_AGENT_KUBECONFIG</code></li>
+<li><code>INSPECT_AGENT_PROM_URL</code></li>
+<li><code>INSPECT_AGENT_POLL_INTERVAL</code>、<code>INSPECT_AGENT_BATCH_SIZE</code></li>
+<li><code>INSPECT_AGENT_INSECURE</code>（为 <code>true</code> 时跳过 SSL 校验）</li>
+</ul>
+</li>
+</ul>
+<h2 id="%E5%AE%B9%E5%99%A8%E9%95%9C%E5%83%8F">容器镜像</h2>
+<p>已提供 <code>Dockerfile</code>，可直接构建：</p>
+<pre class="hljs"><code><div>docker build -t inspect-agent:dev agent
+</div></code></pre>
+<p>使用示例（通过环境变量提供配置）：</p>
+<pre class="hljs"><code><div>docker run --rm \
+  -e INSPECT_AGENT_SERVER=http://backend:8000 \
+  -e INSPECT_AGENT_PROM_URL=http://prometheus:9090 \
+  -e INSPECT_AGENT_TOKEN=&lt;your-token&gt; \
+  inspect-agent:dev
+</div></code></pre>
+<p>如果需要挂载配置文件与状态目录：</p>
+<pre class="hljs"><code><div>docker run --rm \
+  -v $(<span class="hljs-built_in">pwd</span>)/config.yaml:/app/config.yaml \
+  -v $(<span class="hljs-built_in">pwd</span>)/state:/app/state \
+  inspect-agent:dev
+</div></code></pre>
+<h2 id="kubernetes-%E9%83%A8%E7%BD%B2%E7%A4%BA%E4%BE%8B">Kubernetes 部署示例</h2>
+<p><code>kubernetes/deployment.yaml</code> 给出了在集群中运行 Agent 的基础模板，包含：</p>
+<ul>
+<li>使用 <code>ServiceAccount</code> + <code>ClusterRole/ClusterRoleBinding</code> 提供集群只读权限（get/list/watch）；</li>
+<li>使用 <code>ConfigMap</code> 传递配置；</li>
+<li>通过 <code>Secret</code> 持有 Token（也可以在 Pod 内注册）；</li>
+<li>为容器挂载持久化卷保存 Token，并自动生成 kubeconfig。</li>
+</ul>
+<p>部署步骤：</p>
+<pre class="hljs"><code><div>kubectl apply -f kubernetes/deployment.yaml
+</div></code></pre>
+<p>请根据实际环境修改镜像地址、配置文件内容以及安全策略。</p>
+<h2 id="promql-%E6%89%A7%E8%A1%8C%E7%AD%96%E7%95%A5">PromQL 执行策略</h2>
+<ul>
+<li>巡检项 <code>config.promql</code> 存在时，Agent 调用 Prometheus 的 <code>/api/v1/query</code> 接口执行；</li>
+<li>查询成功且返回结果不为空视为 <code>passed</code>；结果为空时记为 <code>warning</code>；发生异常时记为 <code>failed</code>；</li>
+<li>未配置 PromQL 或未提供 Prometheus 地址时，默认返回 <code>warning</code> 并提示补充配置。</li>
+</ul>
+<h2 id="%E6%97%A5%E5%BF%97%E4%B8%8E%E6%8E%92%E9%94%99">日志与排错</h2>
+<ul>
+<li>默认日志级别为 <code>INFO</code>，可通过 <code>--log-level</code> 或环境变量 <code>INSPECT_AGENT_LOG_LEVEL</code> 调整；</li>
+<li>出现 HTTP 错误时会打印响应内容，方便定位；</li>
+<li>若 Agent 长时间未心跳，Server 会自动将任务回滚为 <code>queued</code>，需要重新领取后再执行。</li>
+</ul>
+
+</body>
+
+</html>

@@ -44,10 +44,10 @@ server:
   registration_token: REPLACE_WITH_TOKEN  # Server 端生成的 Agent Token
   token_file: ./state/agent.token   # Token 缓存路径，可选
 agent:
-  poll_interval: 10                 # 无任务时的轮询间隔（秒）
+  poll_interval: 10                 # 无任务时的轮询间隔
   batch_size: 1                     # 每次拉取的任务数
   verify_ssl: true                  # 是否校验 Server 证书
-  request_timeout: 15               # HTTP 请求超时（秒）
+  request_timeout: 15               # HTTP 请求超时
 cluster:
   name: demo-cluster               # Agent 所覆盖的集群名称
 prometheus:
