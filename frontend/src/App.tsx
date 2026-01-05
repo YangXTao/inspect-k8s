@@ -3748,6 +3748,17 @@ const RunDetailView = ({
         : null,
     [runs, resolvedRunId]
   );
+  const shouldPollRun = useMemo(() => {
+    const target = run ?? fallbackRun;
+    if (!target) {
+      return false;
+    }
+    return (
+      target.status === "running" ||
+      target.status === "queued" ||
+      (!target.report_path && target.progress >= 100)
+    );
+  }, [fallbackRun, run]);
 
   useEffect(() => {
     if (resolvedRunId === null) {
@@ -3780,6 +3791,56 @@ const RunDetailView = ({
       cancelled = true;
     };
   }, [resolvedRunId, refreshIndex]);
+
+  useEffect(() => {
+    if (!shouldPollRun || resolvedRunId === null || typeof window === "undefined") {
+      return;
+    }
+    let cancelled = false;
+    let timerId: number | null = null;
+
+    const poll = async () => {
+      try {
+        const data = await getInspectionRun(resolvedRunId);
+        if (cancelled) {
+          return;
+        }
+        setRun(data);
+        setError(null);
+        const shouldContinue =
+          data.status === "running" ||
+          data.status === "queued" ||
+          (!data.report_path && data.progress >= 100);
+        if (shouldContinue && !cancelled) {
+          timerId = window.setTimeout(() => {
+            if (!cancelled) {
+              void poll();
+            }
+          }, 800);
+        }
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+        const message =
+          err instanceof Error ? err.message : "获取巡检详情失败";
+        setError(message);
+        timerId = window.setTimeout(() => {
+          if (!cancelled) {
+            void poll();
+          }
+        }, 1200);
+      }
+    };
+
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [resolvedRunId, shouldPollRun]);
 
   const effectiveClusterId =
     run?.cluster_id ?? fallbackRun?.cluster_id ?? resolvedClusterId;

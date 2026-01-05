@@ -950,6 +950,16 @@ def agent_bootstrap(
             is_enabled=True,
             prometheus_url=final_prom_url or agent.prometheus_url,
         )
+        if cluster_was_pending and cluster is not None:
+            try:
+                _trigger_auto_connection_test(
+                    db,
+                    cluster,
+                    agent,
+                    message="已自动触发连接测试，等待结果更新。",
+                )
+            except Exception:
+                logger.warning("自动触发连接测试失败。", exc_info=True)
         _sync_cluster_prometheus_to_agents(db, cluster)
         crud.record_agent_heartbeat(db, agent, seen_at=datetime.utcnow())
         refreshed = crud.get_inspection_agent(db, agent.id)
@@ -1152,9 +1162,12 @@ def agent_submit_results(
         run,
         agent_status=agent_state,
     )
-    run = _attach_run_report(ctx.db, run)
     if run.operator == CONNECTION_TEST_OPERATOR:
         _apply_connection_test_result(ctx.db, run, payload.results)
+        refreshed = crud.get_inspection_run(ctx.db, run.id) or run
+        return _serialize_run(refreshed)
+
+    run = _attach_run_report(ctx.db, run)
     return _serialize_run(run)
 
 app.include_router(agent_router)
