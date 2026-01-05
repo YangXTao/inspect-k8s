@@ -281,6 +281,36 @@ class AgentConfig:
     verify_ssl: bool = True
     request_timeout: int = DEFAULT_TIMEOUT
 
+
+def _ensure_incluster_kubeconfig_file(config: AgentConfig) -> None:
+    if config.kubeconfig_path and config.kubeconfig_path.exists():
+        return
+    if config.kubeconfig_path and not config.kubeconfig_path.exists():
+        LOG.warning(
+            "未找到 kubeconfig 文件 %s，将尝试使用 ServiceAccount 自动生成。",
+            config.kubeconfig_path,
+        )
+        config.kubeconfig_path = None
+
+    incluster = _build_incluster_kubeconfig()
+    if not incluster:
+        return
+    data, _name = incluster
+    base_dir = (
+        config.token_file.parent
+        if config.token_file
+        else Path("/var/lib/inspect-agent")
+    )
+    try:
+        base_dir.mkdir(parents=True, exist_ok=True)
+        kubeconfig_path = base_dir / "incluster.kubeconfig"
+        kubeconfig_path.write_bytes(data)
+    except OSError as exc:
+        LOG.warning("写入 ServiceAccount kubeconfig 失败: %s", exc)
+        return
+    config.kubeconfig_path = kubeconfig_path
+    LOG.info("已生成 ServiceAccount kubeconfig: %s", kubeconfig_path)
+
     def load_token(self) -> Optional[str]:
         if self.token:
             return self.token
@@ -734,6 +764,8 @@ def main(argv: Optional[List[str]] = None) -> None:
     except Exception as exc:
         LOG.error('加载配置失败：%s', exc)
         sys.exit(1)
+
+    _ensure_incluster_kubeconfig_file(config)
 
     client = AgentClient(config)
     runner = AgentRunner(config, client)

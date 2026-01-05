@@ -50,13 +50,13 @@ agent:
   request_timeout: 15               # HTTP 请求超时（秒）
 cluster:
   name: demo-cluster               # Agent 所覆盖的集群名称
-  kubeconfig_path: ./config/kubeconfig.yaml  # 首次注册时上传的 kubeconfig
 prometheus:
   base_url: http://prometheus:9090  # Prometheus 查询入口（可选）
 ```
 
 - 在 Server 端生成注册 Token 后，将其填入 `server.registration_token`，或通过环境变量 `INSPECT_AGENT_REGISTRATION_TOKEN` 提供。
 - `token_file` 会缓存服务器分配的 Token，Agent 重启时会优先从文件加载。
+- 在集群内运行时，Agent 会自动使用 ServiceAccount 生成 kubeconfig，并写入 `/var/lib/inspect-agent/incluster.kubeconfig`。
 - 支持以下环境变量覆盖配置：
   - `INSPECT_AGENT_SERVER`、`INSPECT_AGENT_TOKEN`、`INSPECT_AGENT_TOKEN_FILE`
   - `INSPECT_AGENT_REGISTRATION_TOKEN`
@@ -96,9 +96,10 @@ docker run --rm \
 
 `kubernetes/deployment.yaml` 给出了在集群中运行 Agent 的基础模板，包含：
 
+- 使用 `ServiceAccount` + `ClusterRole/ClusterRoleBinding` 提供集群只读权限（get/list/watch）；
 - 使用 `ConfigMap` 传递配置；
 - 通过 `Secret` 持有 Token（也可以在 Pod 内注册）；
-- 为容器挂载持久化卷保存 Token。
+- 为容器挂载持久化卷保存 Token，并自动生成 kubeconfig。
 
 部署步骤：
 

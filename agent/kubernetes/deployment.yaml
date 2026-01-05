@@ -1,4 +1,32 @@
-﻿apiVersion: v1
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: inspect-agent
+  namespace: <NAMESPACE>
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: inspect-agent-readonly
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: inspect-agent-readonly
+subjects:
+  - kind: ServiceAccount
+    name: inspect-agent
+    namespace: <NAMESPACE>
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: inspect-agent-readonly
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: inspect-agent-config
@@ -15,7 +43,6 @@ data:
       request_timeout: 15
     cluster:
       name: demo-cluster
-      kubeconfig_path: /app/kubeconfig/cluster.yaml
     prometheus:
       base_url: http://prometheus.monitoring:9090
 ---
@@ -27,8 +54,6 @@ metadata:
 type: Opaque
 stringData:
   registration_token: ""
-  kubeconfig: |
-    # 将 kubeconfig 粘贴在这里（可选）。如果不提供，首次注册需要手动挂载。
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -45,18 +70,11 @@ spec:
       labels:
         app: inspect-agent
     spec:
-      serviceAccountName: default
+      serviceAccountName: inspect-agent
       volumes:
         - name: config
           configMap:
             name: inspect-agent-config
-        - name: kubeconfig
-          secret:
-            secretName: inspect-agent-secret
-            items:
-              - key: kubeconfig
-                path: cluster.yaml
-            optional: true
         - name: state
           emptyDir: {}
       containers:
@@ -75,8 +93,5 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /app/config
-            - name: kubeconfig
-              mountPath: /app/kubeconfig
-              readOnly: true
             - name: state
               mountPath: /var/lib/inspect-agent

@@ -11,6 +11,6 @@ agent:
 cluster:
   # 留空则默认与 agent.name 保持一致
   name: ""
-  kubeconfig_path: /app/config/kubeconfig.yaml
+  # 在集群内运行时会自动使用 ServiceAccount 生成 kubeconfig
 prometheus:
   base_url: http://prometheus:9090
