@@ -150,6 +150,18 @@ def _ensure_cluster_schema() -> None:
             f"ALTER TABLE cluster_configs ADD COLUMN default_agent_id {column_type} NULL"
         )
 
+    if "is_archived" not in existing_columns:
+        if dialect == "sqlite":
+            statements.append(
+                "ALTER TABLE cluster_configs "
+                "ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0"
+            )
+        else:
+            statements.append(
+                "ALTER TABLE cluster_configs "
+                "ADD COLUMN is_archived TINYINT(1) NOT NULL DEFAULT 0"
+            )
+
     if dialect != "sqlite":
         statements.append(
             "ALTER TABLE cluster_configs CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"

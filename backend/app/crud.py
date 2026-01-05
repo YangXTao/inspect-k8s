@@ -15,6 +15,7 @@ def list_clusters(db: Session) -> List[models.ClusterConfig]:
     return (
         db.query(models.ClusterConfig)
         .options(selectinload(models.ClusterConfig.default_agent))
+        .filter(models.ClusterConfig.is_archived.is_(False))
         .order_by(models.ClusterConfig.name)
         .all()
     )
@@ -90,6 +91,7 @@ def update_cluster(
     last_checked_at: Optional[datetime] = None,
     execution_mode: Optional[str] = None,
     default_agent_id: Any = UNSET,
+    is_archived: Any = UNSET,
     description: Optional[str] = None,
 ) -> models.ClusterConfig:
     if name is not None:
@@ -112,6 +114,8 @@ def update_cluster(
         cluster.description = description
     if default_agent_id is not UNSET:
         cluster.default_agent_id = default_agent_id
+    if is_archived is not UNSET:
+        cluster.is_archived = bool(is_archived)
     cluster.updated_at = datetime.utcnow()
     db.add(cluster)
     db.commit()
@@ -142,6 +146,48 @@ def delete_cluster(db: Session, cluster: models.ClusterConfig) -> None:
         db.delete(agent)
     db.delete(cluster)
     db.commit()
+    log_action(
+        db,
+        action="delete",
+        entity_type="cluster_config",
+        entity_id=cluster_id,
+        description=f"Deleted cluster '{cluster_name}'.",
+    )
+    if removed_agent_ids:
+        log_action(
+            db,
+            action="delete",
+            entity_type="inspection_agent",
+            entity_id=None,
+            description=(
+                f"Removed {len(removed_agent_ids)} agent(s) bound to cluster '{cluster_name}'."
+            ),
+        )
+
+
+def archive_cluster(db: Session, cluster: models.ClusterConfig) -> None:
+    cluster_id = cluster.id
+    cluster_name = cluster.name
+    related_agents = (
+        db.query(models.InspectionAgent)
+        .filter(
+            (models.InspectionAgent.cluster_id == cluster_id)
+            | (models.InspectionAgent.name == cluster_name)
+        )
+        .all()
+    )
+    removed_agent_ids = [agent.id for agent in related_agents]
+    for agent in related_agents:
+        db.delete(agent)
+
+    cluster.is_archived = True
+    cluster.default_agent_id = None
+    cluster.connection_status = "deleted"
+    cluster.connection_message = "集群已删除"
+    cluster.updated_at = datetime.utcnow()
+    db.add(cluster)
+    db.commit()
+
     log_action(
         db,
         action="delete",

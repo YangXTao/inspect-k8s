@@ -737,28 +737,45 @@ def register_agent(
     else:
         cluster = crud.get_cluster_by_name(db, trimmed_name)
         if cluster:
-            if cluster.connection_status != "pending":
-                raise HTTPException(
-                    status_code=400,
-                    detail="同名集群已存在，请更换 Agent 名称或删除旧集群。",
-                )
-            linked_agents = (
-                db.query(models.InspectionAgent)
-                .filter(models.InspectionAgent.cluster_id == cluster.id)
-                .count()
-            )
-            if linked_agents > 0:
-                raise HTTPException(
-                    status_code=400,
-                    detail="该 Agent 名称已保留 Token，如需重新创建请先删除旧 Token。",
-                )
-            update_kwargs: dict[str, Any] = {}
-            if normalized_description is not None:
-                update_kwargs["description"] = normalized_description
-            if normalized_prometheus_url is not None:
-                update_kwargs["prometheus_url"] = normalized_prometheus_url
-            if update_kwargs:
+            if getattr(cluster, "is_archived", False):
+                placeholder_path = _build_agent_managed_kubeconfig_ref()
+                update_kwargs: dict[str, Any] = {
+                    "kubeconfig_path": placeholder_path,
+                    "connection_status": "pending",
+                    "connection_message": "等待 Agent 注册",
+                    "last_checked_at": None,
+                    "execution_mode": "agent",
+                    "default_agent_id": None,
+                    "is_archived": False,
+                }
+                if normalized_description is not None:
+                    update_kwargs["description"] = normalized_description
+                if normalized_prometheus_url is not None:
+                    update_kwargs["prometheus_url"] = normalized_prometheus_url
                 cluster = crud.update_cluster(db, cluster, **update_kwargs)
+            else:
+                if cluster.connection_status != "pending":
+                    raise HTTPException(
+                        status_code=400,
+                        detail="同名集群已存在，请更换 Agent 名称或删除旧集群。",
+                    )
+                linked_agents = (
+                    db.query(models.InspectionAgent)
+                    .filter(models.InspectionAgent.cluster_id == cluster.id)
+                    .count()
+                )
+                if linked_agents > 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="该 Agent 名称已保留 Token，如需重新创建请先删除旧 Token。",
+                    )
+                update_kwargs: dict[str, Any] = {}
+                if normalized_description is not None:
+                    update_kwargs["description"] = normalized_description
+                if normalized_prometheus_url is not None:
+                    update_kwargs["prometheus_url"] = normalized_prometheus_url
+                if update_kwargs:
+                    cluster = crud.update_cluster(db, cluster, **update_kwargs)
         else:
             placeholder_path = _build_agent_managed_kubeconfig_ref()
             cluster = crud.create_cluster(
@@ -1152,7 +1169,7 @@ def delete_cluster(
     cluster_id: int,
     delete_files: bool = Query(
         False,
-        description="同时删除本地 kubeconfig 及关联巡检报告文件",
+        description="同时删除关联巡检的报告文件",
     ),
     db: Session = Depends(get_db),
 ):
@@ -1161,7 +1178,6 @@ def delete_cluster(
         raise HTTPException(status_code=404, detail="指定的集群不存在。")
 
     report_paths: list[str] = []
-    kubeconfig_path: str | None = None
     if delete_files:
         runs = (
             db.query(models.InspectionRun)
@@ -1169,12 +1185,12 @@ def delete_cluster(
             .all()
         )
         report_paths = [run.report_path for run in runs if run.report_path]
-        kubeconfig_path = cluster.kubeconfig_path
+        for run in runs:
+            run.report_path = None
 
-    crud.delete_cluster(db, cluster)
+    crud.archive_cluster(db, cluster)
 
     if delete_files:
-        _remove_file_safely(kubeconfig_path)
         for report_path in report_paths:
             _remove_file_safely(report_path)
 

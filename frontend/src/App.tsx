@@ -1977,14 +1977,24 @@ const HistoryView = ({
                         查看详情
                       </button>
                       {run.report_path && (
-                        <a
-                          className="link-button"
-                          href={getReportDownloadUrl(run.id)}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          下载报告
-                        </a>
+                        <>
+                          <a
+                            className="link-button"
+                            href={getReportDownloadUrl(run.id, "pdf")}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            下载 PDF
+                          </a>
+                          <a
+                            className="link-button"
+                            href={getReportDownloadUrl(run.id, "md")}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            下载 MD
+                          </a>
+                        </>
                       )}
                       {run.status === "running" && (
                         <button
@@ -2710,14 +2720,24 @@ const ClusterDetailView = ({
                           查看详情
                         </button>
                         {run.report_path && (
-                          <a
-                            className="link-button"
-                            href={getReportDownloadUrl(run.id)}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            下载报告
-                          </a>
+                          <>
+                            <a
+                              className="link-button"
+                              href={getReportDownloadUrl(run.id, "pdf")}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              下载 PDF
+                            </a>
+                            <a
+                              className="link-button"
+                              href={getReportDownloadUrl(run.id, "md")}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              下载 MD
+                            </a>
+                          </>
                         )}
                         {run.status === "running" && (
                           <button
@@ -3882,10 +3902,15 @@ const RunDetailView = ({
     (summaryRun?.agent_status
       ? describeAgentStatus(summaryRun.agent_status)
       : null);
-  const reportUrl = run?.report_path
-    ? getReportDownloadUrl(run.id)
+  const reportPdfUrl = run?.report_path
+    ? getReportDownloadUrl(run.id, "pdf")
     : summaryRun?.report_path
-      ? getReportDownloadUrl(summaryRun.id)
+      ? getReportDownloadUrl(summaryRun.id, "pdf")
+      : null;
+  const reportMdUrl = run?.report_path
+    ? getReportDownloadUrl(run.id, "md")
+    : summaryRun?.report_path
+      ? getReportDownloadUrl(summaryRun.id, "md")
       : null;
 
   const handleRefresh = () => {
@@ -3968,19 +3993,33 @@ const RunDetailView = ({
           返回上一页
         </Link>
         <div className="detail-header-actions">
-          {reportUrl ? (
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => {
-                if (license.canDownloadReports) {
-                  window.open(reportUrl, "_blank", "noreferrer");
-                }
-              }}
-              disabled={!license.canDownloadReports}
-            >
-              下载报告
-            </button>
+          {reportPdfUrl ? (
+            <>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => {
+                  if (license.canDownloadReports && reportPdfUrl) {
+                    window.open(reportPdfUrl, "_blank", "noreferrer");
+                  }
+                }}
+                disabled={!license.canDownloadReports}
+              >
+                下载 PDF
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => {
+                  if (license.canDownloadReports && reportMdUrl) {
+                    window.open(reportMdUrl, "_blank", "noreferrer");
+                  }
+                }}
+                disabled={!license.canDownloadReports}
+              >
+                下载 MD
+              </button>
+            </>
           ) : (
             <button type="button" className="secondary" disabled>
               无可下载报告
@@ -5417,7 +5456,7 @@ const hasManualKubeconfig = useMemo(
         options: [
           {
             id: "deleteLocalFiles",
-            label: "同时删除本地 kubeconfig 及关联巡检报告文件",
+            label: "同时删除关联巡检的报告文件",
           },
         ],
         onConfirm: async (optionsMap) => {
@@ -5454,7 +5493,7 @@ const hasManualKubeconfig = useMemo(
         options: [
           {
             id: "deleteLocalFiles",
-            label: "同时删除本地 kubeconfig 及关联巡检报告文件",
+            label: "同时删除关联巡检的报告文件",
           },
         ],
           onConfirm: async (optionsMap) => {

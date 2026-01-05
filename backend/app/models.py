@@ -20,6 +20,7 @@ class ClusterConfig(Base):
     connection_status = Column(String(20), nullable=False, default="unknown")
     connection_message = Column(Text, nullable=True)
     last_checked_at = Column(DateTime, nullable=True)
+    is_archived = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
