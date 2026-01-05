@@ -5517,7 +5517,7 @@ const hasManualKubeconfig = useMemo(
         options: [
           {
             id: "deleteLocalFiles",
-            label: "同时删除关联巡检的报告文件",
+            label: "同时删除关联巡检记录及报告文件",
           },
         ],
         onConfirm: async (optionsMap) => {
@@ -5554,7 +5554,7 @@ const hasManualKubeconfig = useMemo(
         options: [
           {
             id: "deleteLocalFiles",
-            label: "同时删除关联巡检的报告文件",
+            label: "同时删除关联巡检记录及报告文件",
           },
         ],
           onConfirm: async (optionsMap) => {

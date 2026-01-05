@@ -1178,7 +1178,7 @@ def delete_cluster(
     cluster_id: int,
     delete_files: bool = Query(
         False,
-        description="同时删除关联巡检的报告文件",
+        description="同时删除关联巡检记录及报告文件",
     ),
     db: Session = Depends(get_db),
 ):
@@ -1195,7 +1195,7 @@ def delete_cluster(
         )
         report_paths = [run.report_path for run in runs if run.report_path]
         for run in runs:
-            run.report_path = None
+            crud.delete_inspection_run(db, run)
 
     crud.archive_cluster(db, cluster)
 

@@ -33,11 +33,41 @@ PDF_REPORTS_DIR = REPORTS_ROOT / "pdf"
 MARKDOWN_REPORTS_DIR = REPORTS_ROOT / "md"
 
 
-def _get_report_dir_for_run(run: InspectionRun, base_dir: Path) -> Path:
-    cluster_id = getattr(run, "cluster_id", None)
+def _to_base36(value: int) -> str:
+    if value == 0:
+        return "0"
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    result = ""
+    while value:
+        value, rem = divmod(value, 36)
+        result = digits[rem] + result
+    return result
+
+
+def _hash_cluster_slug(seed: str) -> str:
+    encoded = seed.encode("utf-16-le")
+    hash_value = 0
+    for index in range(0, len(encoded), 2):
+        code_unit = encoded[index] | (encoded[index + 1] << 8)
+        hash_value = (hash_value * 33 + code_unit) & 0xFFFFFFFF
+        if hash_value & 0x80000000:
+            hash_value -= 0x100000000
+    base36 = _to_base36(abs(hash_value)).upper()
+    return base36[-4:].rjust(4, "0")
+
+
+def _build_cluster_slug(cluster_id: Optional[int], cluster_name: Optional[str]) -> str:
     if cluster_id is None:
-        return base_dir / "cluster-unknown"
-    return base_dir / f"cluster-{cluster_id}"
+        return "C-0000"
+    seed = f"{cluster_id}:{cluster_name or ''}"
+    return f"C-{_hash_cluster_slug(seed)}"
+
+
+def _get_report_dir_for_run(run: InspectionRun, base_dir: Path) -> Path:
+    cluster = getattr(run, "cluster", None)
+    cluster_id = getattr(cluster, "id", None) or getattr(run, "cluster_id", None)
+    cluster_name = getattr(cluster, "name", None) or getattr(run, "cluster_name", None)
+    return base_dir / _build_cluster_slug(cluster_id, cluster_name)
 
 
 def _prepare_output_path(default_dir: Path, filename: str, output_path: Optional[Path | str] = None) -> Path:
