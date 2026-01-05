@@ -2373,7 +2373,7 @@ const ClusterDetailView = ({
           <Link
             to="/"
             className="back-button"
-            onClick={handleBackLinkClick}
+            onClick={handleBackToPreviousPage}
           >
             返回上一页
           </Link>
@@ -5350,23 +5350,6 @@ const hasManualKubeconfig = useMemo(
       setSelectedItemIdsState((prev) => updater(prev));
     },
     []
-  );
-
-  const handleBackLinkClick = useCallback(
-    (event: React.MouseEvent<HTMLAnchorElement>) => {
-      if (
-        event.metaKey ||
-        event.ctrlKey ||
-        event.shiftKey ||
-        event.altKey ||
-        event.button !== 0
-      ) {
-        return;
-      }
-      event.preventDefault();
-      navigate(-1);
-    },
-    [navigate]
   );
 
   const handleStartInspection = useCallback(
