@@ -33,6 +33,13 @@ PDF_REPORTS_DIR = REPORTS_ROOT / "pdf"
 MARKDOWN_REPORTS_DIR = REPORTS_ROOT / "md"
 
 
+def _get_report_dir_for_run(run: InspectionRun, base_dir: Path) -> Path:
+    cluster_id = getattr(run, "cluster_id", None)
+    if cluster_id is None:
+        return base_dir / "cluster-unknown"
+    return base_dir / f"cluster-{cluster_id}"
+
+
 def _prepare_output_path(default_dir: Path, filename: str, output_path: Optional[Path | str] = None) -> Path:
     if output_path is None:
         default_dir.mkdir(parents=True, exist_ok=True)
@@ -96,7 +103,8 @@ def generate_markdown_report(
     output_path: Optional[Path | str] = None,
 ) -> str:
     safe_name = _build_report_basename(display_id, run.id)
-    path = _prepare_output_path(MARKDOWN_REPORTS_DIR, f"{safe_name}.md", output_path)
+    report_dir = _get_report_dir_for_run(run, MARKDOWN_REPORTS_DIR)
+    path = _prepare_output_path(report_dir, f"{safe_name}.md", output_path)
 
     results_list = list(results)
     cluster_name, version_label, node_count_label = _get_cluster_meta(run)
@@ -178,7 +186,8 @@ def generate_pdf_report(
 ) -> str:
     """Generate a nicely formatted PDF inspection report and return the path."""
     safe_name = _build_report_basename(display_id, run.id)
-    report_path = _prepare_output_path(PDF_REPORTS_DIR, f"{safe_name}.pdf")
+    report_dir = _get_report_dir_for_run(run, PDF_REPORTS_DIR)
+    report_path = _prepare_output_path(report_dir, f"{safe_name}.pdf")
 
     def _register_font_family() -> str:
         """Register a modern Sans Serif font with CJK support if available."""
