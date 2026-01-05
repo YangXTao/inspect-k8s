@@ -2214,7 +2214,6 @@ const ClusterDetailView = ({
   const isTesting = enableServerConnectionTest
     ? Boolean(cluster && testingClusterIds[cluster.id])
     : false;
-  const contexts = cluster?.contexts ?? [];
   const allItemsSelected =
     items.length > 0 && selectedIds.length === items.length;
   const shouldShowClusterNotice =
@@ -2471,17 +2470,6 @@ const ClusterDetailView = ({
               <strong>更新时间：</strong>
               {formatDate(cluster.updated_at)}
             </div>
-          </div>
-          <div className="cluster-contexts detail-contexts">
-            {contexts.length > 0 ? (
-              contexts.map((ctx) => (
-                <span key={ctx} className="chip">
-                  {ctx}
-                </span>
-              ))
-            ) : (
-              <span className="chip muted">未检测到上下文</span>
-            )}
           </div>
         </div>
 
@@ -5527,8 +5515,42 @@ const hasManualKubeconfig = useMemo(
               logWithTimestamp("info", "删除集群: %s", cluster.id);
               await apiDeleteCluster(cluster.id, { deleteFiles });
             }
+            const targetIds = targets.map((cluster) => cluster.id);
+            const targetNames = new Set(targets.map((cluster) => cluster.name.trim()));
+            setClusters((prev) =>
+              prev.filter((cluster) => !targetIds.includes(cluster.id))
+            );
+            setClusterDisplayIds((prev) => {
+              let changed = false;
+              const next = { ...prev };
+              targetIds.forEach((clusterId) => {
+                if (clusterId in next) {
+                  delete next[clusterId];
+                  changed = true;
+                }
+              });
+              return changed ? next : prev;
+            });
+            setAgents((prev) =>
+              prev.filter((agent) => {
+                const agentClusterId = agent.cluster_id ?? null;
+                if (agentClusterId !== null && targetIds.includes(agentClusterId)) {
+                  return false;
+                }
+                const agentName = agent.name?.trim() ?? "";
+                const agentClusterName = agent.cluster_name?.trim() ?? "";
+                if (agentName && targetNames.has(agentName)) {
+                  return false;
+                }
+                if (agentClusterName && targetNames.has(agentClusterName)) {
+                  return false;
+                }
+                return true;
+              })
+            );
             await refreshClusters();
             await refreshRuns();
+            await refreshAgents();
             showClusterNotice("overview", `已删除 ${targets.length} 个集群`, "success");
           } catch (err) {
             const message =
@@ -5541,7 +5563,16 @@ const hasManualKubeconfig = useMemo(
       });
       return Promise.resolve();
     },
-    [clusters, refreshClusters, refreshRuns, showClusterNotice]
+    [
+      clusters,
+      refreshAgents,
+      refreshClusters,
+      refreshRuns,
+      setAgents,
+      setClusterDisplayIds,
+      setClusters,
+      showClusterNotice,
+    ]
   );
 
   const handleDeleteCluster = useCallback(
@@ -5562,8 +5593,36 @@ const hasManualKubeconfig = useMemo(
               logWithTimestamp("info", "删除集群: %s", cluster.id);
               const deleteFiles = Boolean(optionsMap?.deleteLocalFiles);
               await apiDeleteCluster(cluster.id, { deleteFiles });
+              const clusterName = cluster.name.trim();
+              setClusters((prev) => prev.filter((item) => item.id !== cluster.id));
+              setClusterDisplayIds((prev) => {
+                if (!(cluster.id in prev)) {
+                  return prev;
+                }
+                const next = { ...prev };
+                delete next[cluster.id];
+                return next;
+              });
+              setAgents((prev) =>
+                prev.filter((agent) => {
+                  const agentClusterId = agent.cluster_id ?? null;
+                  if (agentClusterId === cluster.id) {
+                    return false;
+                  }
+                  const agentName = agent.name?.trim() ?? "";
+                  const agentClusterName = agent.cluster_name?.trim() ?? "";
+                  if (agentName && agentName === clusterName) {
+                    return false;
+                  }
+                  if (agentClusterName && agentClusterName === clusterName) {
+                    return false;
+                  }
+                  return true;
+                })
+              );
               await refreshClusters();
               await refreshRuns();
+              await refreshAgents();
               const successScope = location.pathname.includes("/clusters/")
                 ? "overview"
                 : currentNoticeScope;
@@ -5582,7 +5641,18 @@ const hasManualKubeconfig = useMemo(
         });
         return Promise.resolve();
     },
-    [refreshClusters, refreshRuns, location.pathname, navigate, currentNoticeScope, showClusterNotice]
+    [
+      refreshAgents,
+      refreshClusters,
+      refreshRuns,
+      location.pathname,
+      navigate,
+      currentNoticeScope,
+      setAgents,
+      setClusterDisplayIds,
+      setClusters,
+      showClusterNotice,
+    ]
   );
 
   const handleDeleteRunsBulk = useCallback(
