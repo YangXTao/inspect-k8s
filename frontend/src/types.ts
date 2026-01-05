@@ -34,6 +34,7 @@ export type InspectionAgentStatus = "queued" | "running" | "finished" | "failed"
 export type InspectionRunStatus =
   | "queued"
   | "running"
+  | "paused"
   | "finished"
   | "failed"
   | "cancelled";

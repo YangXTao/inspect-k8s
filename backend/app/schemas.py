@@ -207,6 +207,7 @@ class InspectionRunOut(BaseModel):
         mapping = {
             "queued": "排队中",
             "running": "执行中",
+            "paused": "已暂停",
             "finished": "已完成",
             "failed": "执行失败",
             "cancelled": "已取消",
@@ -262,6 +263,7 @@ class InspectionRunListOut(BaseModel):
         mapping = {
             "queued": "排队中",
             "running": "执行中",
+            "paused": "已暂停",
             "finished": "已完成",
             "failed": "执行失败",
             "cancelled": "已取消",

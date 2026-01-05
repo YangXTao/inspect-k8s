@@ -750,6 +750,7 @@ def cancel_inspection_run(
     reason: Optional[str] = None,
 ) -> models.InspectionRun:
     run.status = "cancelled"
+    run.report_path = None
     if run.executor == "agent":
         run.agent_status = "failed"
     run.completed_at = datetime.utcnow()

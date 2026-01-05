@@ -35,9 +35,9 @@ except ImportError:
 
 LOG = logging.getLogger("inspect-agent")
 if _ENGINE_SOURCE == "backend":
-    LOG.info("已加载 backend/app 中的巡检引擎。")
+    LOG.info("已加�?backend/app 中的巡检引擎�?)
 else:
-    LOG.info("未检测到 backend/app，使用 Agent 内置巡检引擎。")
+    LOG.info("未检测到 backend/app，使�?Agent 内置巡检引擎�?)
 
 DEFAULT_POLL_INTERVAL = 10
 DEFAULT_BATCH_SIZE = 1
@@ -63,13 +63,13 @@ def _as_int(value: Any, default: int) -> int:
 def _format_request_error(exc: Exception, base_url: str) -> str:
     if isinstance(exc, req_exc.Timeout):
         return (
-            f"访问 {base_url} 超时：{exc}。"
-            "请检查网络延迟或适当增大 request_timeout。"
+            f"访问 {base_url} 超时：{exc}�?
+            "请检查网络延迟或适当增大 request_timeout�?
         )
     if isinstance(exc, req_exc.ConnectionError):
         return (
-            f"无法连接到 {base_url}：{exc}。"
-            "请确认 Agent 所在网络可访问该地址，必要时配置公网映射或 VPN。"
+            f"无法连接�?{base_url}：{exc}�?
+            "请确�?Agent 所在网络可访问该地址，必要时配置公网映射�?VPN�?
         )
     if isinstance(exc, req_exc.HTTPError):
         status = exc.response.status_code if exc.response else "unknown"
@@ -90,7 +90,7 @@ def _read_kubeconfig_bytes(path: Path, *, strict: bool) -> Optional[bytes]:
     except FileNotFoundError as exc:
         if strict:
             raise RuntimeError(f"无法读取 kubeconfig 文件：{path}") from exc
-        LOG.debug("未找到 kubeconfig 文件 %s", path)
+        LOG.debug("未找�?kubeconfig 文件 %s", path)
     except OSError as exc:
         if strict:
             raise RuntimeError(f"读取 kubeconfig 文件失败：{path}: {exc}") from exc
@@ -202,7 +202,7 @@ def _capture_kubeconfig_from_kubectl() -> Optional[Tuple[bytes, str]]:
         return None
     stdout = result.stdout.strip()
     if not stdout:
-        LOG.warning("kubectl config view 未返回任何 kubeconfig 内容。")
+        LOG.warning("kubectl config view 未返回任�?kubeconfig 内容�?)
         return None
     return stdout.encode("utf-8"), "kubectl-export"
 
@@ -213,7 +213,7 @@ def _resolve_kubeconfig_bytes(
     if config.kubeconfig_path:
         data = _read_kubeconfig_bytes(config.kubeconfig_path, strict=True)
         if data:
-            LOG.info("使用显式指定的 kubeconfig: %s", config.kubeconfig_path)
+            LOG.info("使用显式指定�?kubeconfig: %s", config.kubeconfig_path)
             return data, config.kubeconfig_path.name
         return None, None
 
@@ -253,15 +253,15 @@ def _resolve_kubeconfig_bytes(
 
     incluster = _build_incluster_kubeconfig()
     if incluster:
-        LOG.info("已根据 ServiceAccount 自动生成 kubeconfig。")
+        LOG.info("已根�?ServiceAccount 自动生成 kubeconfig�?)
         return incluster
 
     kubectl_config = _capture_kubeconfig_from_kubectl()
     if kubectl_config:
-        LOG.info("已通过 kubectl config view 捕获 kubeconfig。")
+        LOG.info("已通过 kubectl config view 捕获 kubeconfig�?)
         return kubectl_config
 
-    LOG.warning("未能自动发现 kubeconfig，后端可能无法完成连通性校验。")
+    LOG.warning("未能自动发现 kubeconfig，后端可能无法完成连通性校验�?)
     return None, None
 
 
@@ -301,7 +301,7 @@ def _ensure_incluster_kubeconfig_file(config: AgentConfig) -> None:
         return
     if config.kubeconfig_path and not config.kubeconfig_path.exists():
         LOG.warning(
-            "未找到 kubeconfig 文件 %s，将尝试使用 ServiceAccount 自动生成。",
+            "未找�?kubeconfig 文件 %s，将尝试使用 ServiceAccount 自动生成�?,
             config.kubeconfig_path,
         )
         config.kubeconfig_path = None
@@ -323,7 +323,7 @@ def _ensure_incluster_kubeconfig_file(config: AgentConfig) -> None:
         LOG.warning("写入 ServiceAccount kubeconfig 失败: %s", exc)
         return
     config.kubeconfig_path = kubeconfig_path
-    LOG.info("已生成 ServiceAccount kubeconfig: %s", kubeconfig_path)
+    LOG.info("已生�?ServiceAccount kubeconfig: %s", kubeconfig_path)
 
 
 def _load_yaml_config(path: Optional[str]) -> Dict[str, Any]:
@@ -335,7 +335,7 @@ def _load_yaml_config(path: Optional[str]) -> Dict[str, Any]:
     with file_path.open("r", encoding="utf-8") as fh:
         data = yaml.safe_load(fh) or {}
     if not isinstance(data, dict):
-        raise ValueError("配置文件需为 YAML 对象。")
+        raise ValueError("配置文件需�?YAML 对象�?)
     return data
 
 
@@ -396,12 +396,12 @@ def load_config(config_path: Optional[str]) -> AgentConfig:
     if not cluster_name and agent_name:
         cluster_name = agent_name
         LOG.info(
-            "未显式配置 cluster.name，已自动使用 agent.name='%s' 作为集群名称。",
+            "未显式配�?cluster.name，已自动使用 agent.name='%s' 作为集群名称�?,
             agent_name,
         )
     if not cluster_name:
         raise ValueError(
-            "cluster.name 未配置，且无法从 agent.name 推导，请在配置或环境变量中指定。"
+            "cluster.name 未配置，且无法从 agent.name 推导，请在配置或环境变量中指定�?
         )
 
     config = AgentConfig(
@@ -453,11 +453,11 @@ class AgentClient:
         if cached:
             self.token = cached
             self.config.token = cached
-            LOG.info("已从本地缓存加载 Agent Token。")
+            LOG.info("已从本地缓存加载 Agent Token�?)
 
     def _headers(self) -> Dict[str, str]:
         if not self.token:
-            raise RuntimeError("缺少 Agent Token。")
+            raise RuntimeError("缺少 Agent Token�?)
         return {"Authorization": f"Bearer {self.token}"}
 
     def register_if_needed(self, cluster_payload: Optional[Dict[str, Any]]) -> None:
@@ -465,16 +465,16 @@ class AgentClient:
             return
         registration_token = self.config.registration_token
         if not registration_token:
-            raise RuntimeError("缺少注册 Token，无法完成引导流程。")
+            raise RuntimeError("缺少注册 Token，无法完成引导流程�?)
         if not cluster_payload:
-            raise RuntimeError("缺少集群信息，无法完成 Agent 注册。")
+            raise RuntimeError("缺少集群信息，无法完�?Agent 注册�?)
         payload: Dict[str, Any] = {
             "registration_token": registration_token,
             "prometheus_url": self.config.prometheus_url,
             "cluster": cluster_payload,
         }
         LOG.info(
-            "正在使用注册 Token 引导 Agent（cluster=%s）。",
+            "正在使用注册 Token 引导 Agent（cluster=%s）�?,
             cluster_payload.get("name"),
         )
         resp = self.session.post(
@@ -518,7 +518,7 @@ class AgentClient:
         resp.raise_for_status()
         data = resp.json()
         if not isinstance(data, list):
-            raise RuntimeError("服务端返回的任务列表格式异常。")
+            raise RuntimeError("服务端返回的任务列表格式异常�?)
         return data
 
     def claim_run(self, run_id: int) -> Dict[str, Any]:
@@ -547,6 +547,17 @@ class AgentClient:
         resp.raise_for_status()
         return resp.json()
 
+    def get_run_status(self, run_id: int) -> Optional[str]:
+        resp = self.session.get(
+            f"{self.config.server_base}/inspection-runs/{run_id}",
+            headers=self._headers(),
+            timeout=self.config.request_timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        status = str(data.get("status") or "").strip().lower()
+        return status or None
+
 
 class AgentRunner:
     def __init__(self, config: AgentConfig, client: AgentClient) -> None:
@@ -560,7 +571,7 @@ class AgentRunner:
         normalized = (url or "").strip()
         if not normalized:
             if self._active_prom_url:
-                LOG.info("Prometheus URL cleared,后续巡检将跳过需要 Prometheus 的检查。")
+                LOG.info("Prometheus URL cleared,后续巡检将跳过需�?Prometheus 的检查�?)
             self._active_prom_url = None
             self.prom_client = None
             self.config.prometheus_url = None
@@ -592,21 +603,21 @@ class AgentRunner:
                 payload["kubeconfig_name"] = kubeconfig_name
         else:
             LOG.warning(
-                "未找到可用的 kubeconfig，首次注册可能无法通过连接校验。"
+                "未找到可用的 kubeconfig，首次注册可能无法通过连接校验�?
             )
         return payload
 
     def run_forever(self, once: bool = False) -> None:
-        LOG.info("Agent 已启动，轮询间隔 %s 秒。", self.config.poll_interval)
+        LOG.info("Agent 已启动，轮询间隔 %s 秒�?, self.config.poll_interval)
         while True:
             has_task = False
             try:
                 has_task = self.run_once()
             except KeyboardInterrupt:
-                LOG.info("收到中断信号，准备退出。")
+                LOG.info("收到中断信号，准备退出�?)
                 raise
             except Exception as exc:
-                LOG.exception("执行周期失败：%s", exc)
+                LOG.exception("执行周期失败�?s", exc)
             if once:
                 break
             sleep_seconds = 1 if has_task else max(1, self.config.poll_interval)
@@ -623,46 +634,46 @@ class AgentRunner:
         except req_exc.RequestException as exc:
             heartbeat_blocked = True
             LOG.warning(
-                "心跳上报失败：%s",
+                "心跳上报失败�?s",
                 _format_request_error(exc, self.config.server_base),
             )
         except Exception as exc:
-            LOG.warning("心跳上报失败：%s", exc)
+            LOG.warning("心跳上报失败�?s", exc)
         if heartbeat_blocked:
             return False
         try:
             tasks = self.client.fetch_tasks(limit=max(1, self.config.batch_size))
         except req_exc.RequestException as exc:
             LOG.error(
-                "拉取任务失败：%s",
+                "拉取任务失败�?s",
                 _format_request_error(exc, self.config.server_base),
             )
             return False
         except Exception as exc:
-            LOG.error("拉取任务失败：%s", exc)
+            LOG.error("拉取任务失败�?s", exc)
             return False
         if not tasks:
-            LOG.debug("暂无待执行任务。")
+            LOG.debug("暂无待执行任务�?)
             return False
         for task in tasks:
             run_id = task.get("run_id")
             if run_id is None:
-                LOG.warning("收到异常任务：%s", task)
+                LOG.warning("收到异常任务�?s", task)
                 continue
             try:
                 self.client.claim_run(run_id)
             except requests.HTTPError as exc:
-                LOG.warning("领取巡检 %s 失败：%s", run_id, exc.response.text if exc.response else exc)
+                LOG.warning("领取巡检 %s 失败�?s", run_id, exc.response.text if exc.response else exc)
                 continue
             except Exception as exc:
-                LOG.warning("领取巡检 %s 失败：%s", run_id, exc)
+                LOG.warning("领取巡检 %s 失败�?s", run_id, exc)
                 continue
             results = self._execute_items(run_id, task)
             try:
                 self.client.submit_results(run_id, results)
-                LOG.info("巡检 %s 已回传结果。", run_id)
+                LOG.info("巡检 %s 已回传结果�?, run_id)
             except Exception as exc:
-                LOG.error("上报巡检 %s 结果失败：%s", run_id, exc)
+                LOG.error("上报巡检 %s 结果失败�?s", run_id, exc)
         return True
 
     def _execute_items(self, run_id: int, task: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -675,13 +686,112 @@ class AgentRunner:
             else None,
             prom=self.prom_client,
         )
+        def _fetch_run_status() -> Optional[str]
+
+            try:
+
+                return self.client.get_run_status(run_id)
+
+            except req_exc.RequestException as exc:
+
+                LOG.warning("Failed to fetch run %s status: %s", run_id, exc)
+
+                return None
+
+            except Exception as exc:
+
+                LOG.warning("Failed to fetch run %s status: %s", run_id, exc)
+
+                return None
+
+
+        def _wait_until_resumed() -> Optional[str]
+
+            while True:
+
+                status = _fetch_run_status()
+
+                if not status or status == "paused":
+
+                    time.sleep(2)
+
+                    continue
+
+                return status
+
+
         for item in items:
+
+            status = _fetch_run_status()
+
+            if status == "cancelled":
+
+                LOG.info("Run %s cancelled, stopping remaining tasks.", run_id)
+
+                break
+
+            if status == "paused":
+
+                LOG.info("Run %s paused, waiting to resume.", run_id)
+
+                resumed = _wait_until_resumed()
+
+                if resumed == "cancelled":
+
+                    LOG.info("Run %s cancelled, stopping remaining tasks.", run_id)
+
+                    break
+
+            elif status and status not in {"running", "queued"}:
+
+                LOG.info("Run %s status is %s, stopping remaining tasks.", run_id, status)
+
+                break
+
+
+            status = _fetch_run_status()
+
+            if status == "cancelled":
+
+                LOG.info("Run %s cancelled, stopping remaining tasks.", run_id)
+
+                break
+
+            if status == "paused":
+
+                LOG.info("Run %s paused, waiting to resume.", run_id)
+
+                resumed = _wait_until_resumed()
+
+                if resumed == "cancelled":
+
+                    LOG.info("Run %s cancelled, stopping remaining tasks.", run_id)
+
+                    break
+
+            elif status and status not in {"running", "queued"}:
+
+                LOG.info("Run %s status is %s, stopping remaining tasks.", run_id, status)
+
+                break            status = _fetch_run_status()
+            if status == "cancelled":
+                LOG.info("å·¡æ£�?%s å·²å–æ¶ˆï¼Œåœæ­¢åŽç»­ä»»åŠ¡ã€?", run_id)
+                break
+            if status == "paused":
+                LOG.info("å·¡æ£�?%s å·²æš‚åœï¼Œç­‰å¾…ç»§ç»­ã€?", run_id)
+                resumed = _wait_until_resumed()
+                if resumed == "cancelled":
+                    LOG.info("å·¡æ£�?%s å·²å–æ¶ˆï¼Œåœæ­¢åŽç»­ä»»åŠ¡ã€?", run_id)
+                    break
+            elif status and status not in {"running", "queued"}:
+                LOG.info("å·¡æ£�?%s çŠ¶æ�?ä¸º %sï¼Œåœæ­¢åŽç»­ä»»åŠ¡ã�?", run_id, status)
+                break
             item_id = item.get("id")
             name = item.get("name") or f"item-{item_id}"
             check_type = (item.get("check_type") or "").strip()
             config = item.get("config") or {}
             LOG.info(
-                "开始执行巡检项 %s (type=%s, cluster_id=%s)",
+                "开始执行巡检�?%s (type=%s, cluster_id=%s)",
                 name,
                 check_type or "unknown",
                 cluster_id,
@@ -691,12 +801,12 @@ class AgentRunner:
                     check_type or "custom", context, config
                 )
             except Exception as exc:  # pragma: no cover - 防御
-                LOG.exception("巡检项 %s 执行异常: %s", name, exc)
+                LOG.exception("巡检�?%s 执行异常: %s", name, exc)
                 status = "failed"
                 detail = f"Agent 执行 {name} 失败：{exc}"
-                suggestion = "查看 Agent 日志或检查巡检配置。"
+                suggestion = "查看 Agent 日志或检查巡检配置�?
             LOG.info(
-                "巡检项 %s 完成，状态=%s，摘要=%s",
+                "巡检�?%s 完成，状�?%s，摘�?%s",
                 name,
                 status,
                 (detail or "")[:120],
@@ -717,31 +827,31 @@ class AgentRunner:
             self.client.submit_results(run_id, [result], partial=True)
         except Exception as exc:
             LOG.warning(
-                "巡检 %s 局部结果上报失败，将在最终汇总时重试：%s",
+                "巡检 %s 局部结果上报失败，将在最终汇总时重试�?s",
                 run_id,
                 exc,
             )
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Inspection Agent 原型客户端")
+    parser = argparse.ArgumentParser(description="Inspection Agent 原型客户�?)
     parser.add_argument(
         "-c",
         "--config",
         dest="config",
-        help="YAML 配置文件路径（默认读取 INSPECT_AGENT_CONFIG）",
+        help="YAML 配置文件路径（默认读�?INSPECT_AGENT_CONFIG�?,
         default=os.getenv("INSPECT_AGENT_CONFIG"),
     )
     parser.add_argument(
         "--once",
         action="store_true",
-        help="仅执行一次任务轮询并退出。",
+        help="仅执行一次任务轮询并退出�?,
     )
     parser.add_argument(
         "--log-level",
         dest="log_level",
         default=os.getenv("INSPECT_AGENT_LOG_LEVEL", "INFO"),
-        help="日志级别，默认 INFO。",
+        help="日志级别，默�?INFO�?,
     )
     return parser
 
@@ -762,7 +872,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     try:
         config = load_config(args.config)
     except Exception as exc:
-        LOG.error('加载配置失败：%s', exc)
+        LOG.error('加载配置失败�?s', exc)
         sys.exit(1)
 
     _ensure_incluster_kubeconfig_file(config)
@@ -774,15 +884,17 @@ def main(argv: Optional[List[str]] = None) -> None:
         cluster_payload = runner.build_bootstrap_payload() if not client.token else None
         client.register_if_needed(cluster_payload)
     except Exception as exc:
-        LOG.error('初始化 Agent 失败：%s', exc)
+        LOG.error('初始�?Agent 失败�?s', exc)
         sys.exit(1)
 
     try:
         runner.run_forever(once=args.once)
     except KeyboardInterrupt:
-        LOG.info('Agent 已终止。')
+        LOG.info('Agent 已终止�?)
     except Exception as exc:
-        LOG.exception('Agent 运行失败：%s', exc)
+        LOG.exception('Agent 运行失败�?s', exc)
         sys.exit(2)
 if __name__ == "__main__":
     main()
+
+

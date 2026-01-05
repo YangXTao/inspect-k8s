@@ -111,6 +111,18 @@ export function getInspectionRun(runId: number): Promise<InspectionRun> {
   return request<InspectionRun>(`/inspection-runs/${runId}`);
 }
 
+export function pauseInspectionRun(runId: number): Promise<InspectionRun> {
+  return request<InspectionRun>(`/inspection-runs/${runId}/pause`, {
+    method: "POST",
+  });
+}
+
+export function resumeInspectionRun(runId: number): Promise<InspectionRun> {
+  return request<InspectionRun>(`/inspection-runs/${runId}/resume`, {
+    method: "POST",
+  });
+}
+
 export function getReportDownloadUrl(
   runId: number,
   format: "pdf" | "md" = "pdf"
