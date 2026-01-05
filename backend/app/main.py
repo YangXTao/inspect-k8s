@@ -699,7 +699,19 @@ def register_agent(
 
     existing_agent = crud.get_inspection_agent_by_name(db, trimmed_name)
     if existing_agent:
-        raise HTTPException(status_code=400, detail="Agent 名称已存在，请更换名称。")
+        cluster = (
+            crud.get_cluster(db, existing_agent.cluster_id)
+            if existing_agent.cluster_id
+            else crud.get_cluster_by_name(db, trimmed_name)
+        )
+        if cluster is None:
+            crud.delete_inspection_agent(
+                db,
+                existing_agent,
+                reason=f"清理无关联集群的 Agent '{trimmed_name}'。",
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Agent 名称已存在，请更换名称。")
 
     normalized_description = (payload.description or "").strip() or None
     normalized_prometheus_url = _normalize_prometheus_url(payload.prometheus_url)
@@ -809,12 +821,10 @@ def agent_bootstrap(
         if not cluster_name_reported:
             raise HTTPException(status_code=400, detail="集群名称不能为空")
         if cluster_name_reported and cluster_name_reported != agent_name:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Agent 名称“{agent_name}”与 Agent 端上报的集群名称"
-                    f"“{cluster_name_reported}”不一致，请保持两者一致后再注册。"
-                ),
+            logger.warning(
+                "Agent 上报的集群名称(%s)与平台注册名称(%s)不一致，已使用平台注册名称。",
+                cluster_name_reported,
+                agent_name,
             )
 
         cluster_name = agent_name

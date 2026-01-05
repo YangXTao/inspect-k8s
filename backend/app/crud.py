@@ -506,6 +506,25 @@ def update_inspection_agent(
     return agent
 
 
+def delete_inspection_agent(
+    db: Session,
+    agent: models.InspectionAgent,
+    *,
+    reason: Optional[str] = None,
+) -> None:
+    agent_id = agent.id
+    agent_name = agent.name
+    db.delete(agent)
+    db.commit()
+    log_action(
+        db,
+        action="delete",
+        entity_type="inspection_agent",
+        entity_id=agent_id,
+        description=reason or f"Deleted inspection agent '{agent_name}'.",
+    )
+
+
 def record_agent_heartbeat(
     db: Session,
     agent: models.InspectionAgent,
