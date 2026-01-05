@@ -404,10 +404,10 @@ pip install -r requirements.txt
   <span class="hljs-attr">registration_token:</span> <span class="hljs-string">REPLACE_WITH_TOKEN</span>  <span class="hljs-comment"># Server 端生成的 Agent Token</span>
   <span class="hljs-attr">token_file:</span> <span class="hljs-string">./state/agent.token</span>   <span class="hljs-comment"># Token 缓存路径，可选</span>
 <span class="hljs-attr">agent:</span>
-  <span class="hljs-attr">poll_interval:</span> <span class="hljs-number">10</span>                 <span class="hljs-comment"># 无任务时的轮询间隔</span>
+  <span class="hljs-attr">poll_interval:</span> <span class="hljs-number">10</span>                 <span class="hljs-comment"># 无任务时的轮询间隔（秒）</span>
   <span class="hljs-attr">batch_size:</span> <span class="hljs-number">1</span>                     <span class="hljs-comment"># 每次拉取的任务数</span>
   <span class="hljs-attr">verify_ssl:</span> <span class="hljs-literal">true</span>                  <span class="hljs-comment"># 是否校验 Server 证书</span>
-  <span class="hljs-attr">request_timeout:</span> <span class="hljs-number">15</span>               <span class="hljs-comment"># HTTP 请求超时</span>
+  <span class="hljs-attr">request_timeout:</span> <span class="hljs-number">15</span>               <span class="hljs-comment"># HTTP 请求超时（秒）</span>
 <span class="hljs-attr">cluster:</span>
   <span class="hljs-attr">name:</span> <span class="hljs-string">demo-cluster</span>               <span class="hljs-comment"># Agent 所覆盖的集群名称</span>
 <span class="hljs-attr">prometheus:</span>
