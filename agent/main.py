@@ -547,6 +547,18 @@ class AgentClient:
         resp.raise_for_status()
         return resp.json()
 
+    def get_run_status(self, run_id: int) -> Optional[str]:
+        resp = self.session.get(
+            f"{self.config.server_base}/inspection-runs/{run_id}",
+            timeout=self.config.request_timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, dict):
+            status = (data.get("status") or "").strip().lower()
+            return status or None
+        return None
+
 
 class AgentRunner:
     def __init__(self, config: AgentConfig, client: AgentClient) -> None:
@@ -555,6 +567,25 @@ class AgentRunner:
         self.prom_client: Optional[PrometheusClient] = None
         self._active_prom_url: Optional[str] = None
         self._apply_prometheus_url(config.prometheus_url)
+
+    def _await_run_active(self, run_id: int) -> bool:
+        poll_delay = max(1, min(5, self.config.poll_interval))
+        while True:
+            try:
+                status = self.client.get_run_status(run_id)
+            except Exception as exc:
+                LOG.warning("Failed to sync run status: %s", exc)
+                return True
+            if not status:
+                return True
+            if status in {"cancelled", "finished", "failed"}:
+                LOG.info("Run %s stopped by server status=%s", run_id, status)
+                return False
+            if status == "paused":
+                LOG.info("Run %s is paused, waiting...", run_id)
+                time.sleep(poll_delay)
+                continue
+            return True
 
     def _apply_prometheus_url(self, url: Optional[str]) -> None:
         normalized = (url or "").strip()
@@ -658,6 +689,9 @@ class AgentRunner:
                 LOG.warning("领取巡检 %s 失败：%s", run_id, exc)
                 continue
             results = self._execute_items(run_id, task)
+            if results is None:
+                LOG.info("Run %s aborted before completion.", run_id)
+                continue
             try:
                 self.client.submit_results(run_id, results)
                 LOG.info("巡检 %s 已回传结果。", run_id)
@@ -665,7 +699,9 @@ class AgentRunner:
                 LOG.error("上报巡检 %s 结果失败：%s", run_id, exc)
         return True
 
-    def _execute_items(self, run_id: int, task: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _execute_items(
+        self, run_id: int, task: Dict[str, Any]
+    ) -> Optional[List[Dict[str, Any]]]:
         items = task.get("items") or []
         results: List[Dict[str, Any]] = []
         cluster_id = task.get("cluster_id")
@@ -676,6 +712,8 @@ class AgentRunner:
             prom=self.prom_client,
         )
         for item in items:
+            if not self._await_run_active(run_id):
+                return None
             item_id = item.get("id")
             name = item.get("name") or f"item-{item_id}"
             check_type = (item.get("check_type") or "").strip()

@@ -29,11 +29,17 @@ export type ClusterConfig = {
   default_agent_description?: string | null;
 };
 
-export type InspectionAgentStatus = "queued" | "running" | "finished" | "failed";
+export type InspectionAgentStatus =
+  | "queued"
+  | "running"
+  | "paused"
+  | "finished"
+  | "failed";
 
 export type InspectionRunStatus =
   | "queued"
   | "running"
+  | "paused"
   | "finished"
   | "failed"
   | "cancelled";
