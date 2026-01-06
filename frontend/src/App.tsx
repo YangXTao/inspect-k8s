@@ -1924,8 +1924,7 @@ const HistoryView = ({
                 const clusterSlug =
                   clusterDisplayIds[run.cluster_id] ?? `#${run.cluster_id}`;
                 const isSelected = selectedRunIds.includes(run.id);
-                const canDelete =
-                  run.status !== "running" && run.status !== "paused";
+                const canDelete = run.status !== "running";
                 return (
                   <tr key={run.id}>
                     <td>
@@ -2634,8 +2633,7 @@ const ClusterDetailView = ({
                 {pagedClusterRuns.map((run) => {
                   const isSelected = selectedRunIds.includes(run.id);
                   const runSlug = runDisplayIds[run.id] ?? `#${run.id}`;
-                  const canDelete =
-                    run.status !== "running" && run.status !== "paused";
+                  const canDelete = run.status !== "running";
                   return (
                     <tr key={run.id}>
                       <td>
@@ -3938,8 +3936,7 @@ const RunDetailView = ({
   const statusLabel =
     summaryRun?.status_label ?? summaryRun?.status ?? "未知状态";
   const statusValue = summaryRun?.status ?? "queued";
-  const canDelete =
-    statusValue !== "running" && statusValue !== "paused";
+  const canDelete = statusValue !== "running";
   const agentStatusLabel =
     summaryRun?.agent_status_label ??
     (summaryRun?.agent_status
@@ -5760,13 +5757,11 @@ const hasManualKubeconfig = useMemo(
       if (targets.length === 0) {
         return Promise.resolve();
       }
-      const blockedTargets = targets.filter(
-        (run) => run.status === "running" || run.status === "paused"
-      );
+      const blockedTargets = targets.filter((run) => run.status === "running");
       if (blockedTargets.length > 0) {
         setConfirmState({
           title: "无法删除巡检记录",
-          message: "所选包含进行中或暂停中的巡检任务，请先取消后再删除。",
+          message: "所选包含进行中的巡检任务，请先取消后再删除。",
           confirmLabel: "知道了",
           cancelLabel: "关闭",
           onConfirm: () => Promise.resolve(),

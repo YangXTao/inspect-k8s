@@ -1650,7 +1650,7 @@ def delete_inspection_run(
     run = crud.get_inspection_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
-    if run.status in {"running", "paused"}:
+    if run.status == "running":
         raise HTTPException(status_code=400, detail="进行中的巡检任务不可删除，请先取消。")
     report_path = run.report_path if delete_files else None
     crud.delete_inspection_run(db, run)
