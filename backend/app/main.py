@@ -1005,12 +1005,21 @@ def agent_pull_tasks(
     )
     tasks: List[schemas.AgentTaskOut] = []
     for run in runs:
+        completed_item_ids = {
+            result.item_id for result in run.results if result.item_id is not None
+        }
         plan_items = _parse_run_plan(run)
         items_out: List[schemas.AgentTaskItemOut] = []
         for item in plan_items:
+            try:
+                item_id = int(item.get("id"))
+            except (TypeError, ValueError):
+                continue
+            if item_id in completed_item_ids:
+                continue
             items_out.append(
                 schemas.AgentTaskItemOut(
-                    id=int(item.get("id")),
+                    id=item_id,
                     name=str(item.get("name") or ""),
                     description=item.get("description"),
                     check_type=str(item.get("check_type") or ""),
