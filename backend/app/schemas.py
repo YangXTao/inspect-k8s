@@ -70,6 +70,7 @@ class ClusterConfigOut(BaseModel):
     description: Optional[str]
     connection_status: str
     connection_message: Optional[str]
+    agent_health_message: Optional[str] = None
     last_checked_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime

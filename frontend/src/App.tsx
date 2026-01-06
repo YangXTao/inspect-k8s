@@ -1275,7 +1275,11 @@ const OverviewView = ({
                 const summaryText =
                   versionLabel || nodeCountLabel
                     ? `版本 ${versionLabel ?? "未知"} · 节点数 ${nodeCountLabel ?? "未知"}`
-                    : cluster.connection_message || "未校验";
+                    : cluster.agent_health_message
+                      ? "版本 未知 · 节点数 未知"
+                      : cluster.connection_message || "未校验";
+                const healthMessage =
+                  cluster.agent_health_message?.trim() || null;
                 const descriptionText =
                   (cluster.description && cluster.description.trim()) ||
                   (cluster.default_agent_description &&
@@ -1353,6 +1357,11 @@ const OverviewView = ({
                         {summaryText}
                       </span>
                     </div>
+                    {healthMessage && (
+                      <div className="cluster-health-message">
+                        {healthMessage}
+                      </div>
+                    )}
                     {descriptionText && (
                       <div className="cluster-agent-description">
                         <span className="cluster-agent-description-label">

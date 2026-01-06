@@ -565,6 +565,7 @@ def _present_cluster(
     cluster: models.ClusterConfig,
 ) -> schemas.ClusterConfigOut:
     result = schemas.ClusterConfigOut.model_validate(cluster)
+    health_message = None
     if (
         cluster.execution_mode == "agent"
         and cluster.connection_status not in {"pending", "deleted"}
@@ -575,10 +576,16 @@ def _present_cluster(
             deadline = datetime.utcnow() - AGENT_HEARTBEAT_TIMEOUT
             if last_seen < deadline:
                 result.connection_status = "failed"
-                result.connection_message = (
+                health_message = (
                     f"Agent 超过 {AGENT_HEARTBEAT_TIMEOUT_MINUTES} 分钟未上报健康状态。"
                 )
-    if result.connection_status == "failed" and not result.connection_message:
+    if health_message:
+        result.agent_health_message = health_message
+    if (
+        result.connection_status == "failed"
+        and not result.connection_message
+        and not result.agent_health_message
+    ):
         result.connection_message = "连接异常"
     elif not result.connection_message:
         result.connection_message = "No additional details."

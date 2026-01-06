@@ -18,6 +18,7 @@ export type ClusterConfig = {
   description?: string | null;
   connection_status: "connected" | "failed" | "warning" | "unknown";
   connection_message?: string | null;
+  agent_health_message?: string | null;
   kubernetes_version?: string | null;
   node_count?: number | null;
   last_checked_at?: string | null;
