@@ -569,7 +569,6 @@ class AgentRunner:
         self._apply_prometheus_url(config.prometheus_url)
 
     def _await_run_active(self, run_id: int) -> bool:
-        poll_delay = max(1, min(5, self.config.poll_interval))
         while True:
             try:
                 status = self.client.get_run_status(run_id)
@@ -582,9 +581,8 @@ class AgentRunner:
                 LOG.info("Run %s stopped by server status=%s", run_id, status)
                 return False
             if status == "paused":
-                LOG.info("Run %s is paused, waiting...", run_id)
-                time.sleep(poll_delay)
-                continue
+                LOG.info("Run %s is paused, releasing agent.", run_id)
+                return False
             return True
 
     def _apply_prometheus_url(self, url: Optional[str]) -> None:

@@ -733,7 +733,7 @@ def resume_inspection_run(
 ) -> models.InspectionRun:
     run.status = "running"
     if run.executor == "agent":
-        run.agent_status = "running"
+        run.agent_status = "queued"
     run.completed_at = None
     db.add(run)
     db.commit()
