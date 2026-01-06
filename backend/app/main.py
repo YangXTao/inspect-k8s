@@ -145,9 +145,9 @@ def _summarize_run_outcome(
         warnings = status_counter.get("warning", 0)
         failed = status_counter.get("failed", 0)
         if failed > 0:
-            overall_status = "failed"
+            overall_status = "finished"
             summary = (
-                f"巡检失败：通过 {passed} 项，"
+                f"巡检完成，但存在失败：通过 {passed} 项，"
                 f"告警 {warnings} 项，"
                 f"失败 {failed} 项。"
             )
