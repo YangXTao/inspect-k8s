@@ -197,8 +197,35 @@ const parseNodesOutput = (output: string) => {
     if (cells.length < columns.length) {
       return [...cells, ...Array(columns.length - cells.length).fill("")];
     }
-    return cells;
+    return cells.slice(0, columns.length);
   });
+  const externalIndex = columns.findIndex(
+    (column) => column.trim().toUpperCase() === "EXTERNAL-IP"
+  );
+  if (externalIndex >= 0) {
+    const isNoneValue = (value: string) => {
+      const normalized = value.trim().toLowerCase();
+      return (
+        !normalized ||
+        normalized === "<none>" ||
+        normalized === "none" ||
+        normalized === "-" ||
+        normalized === "<unknown>"
+      );
+    };
+    const shouldHide = rows.every((row) =>
+      isNoneValue(row[externalIndex] || "")
+    );
+    if (shouldHide) {
+      const filteredColumns = columns.filter(
+        (_, index) => index !== externalIndex
+      );
+      const filteredRows = rows.map((row) =>
+        row.filter((_, index) => index !== externalIndex)
+      );
+      return { columns: filteredColumns, rows: filteredRows };
+    }
+  }
   return { columns, rows };
 };
 
@@ -4673,7 +4700,9 @@ const ClusterNodesView = ({
   const [refreshing, setRefreshing] = useState(false);
   const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
   const requestCounterRef = useRef(0);
-  const refreshTimerRef = useRef<number | null>(null);
+  const refreshPollingRef = useRef<number | null>(null);
+  const refreshInFlightRef = useRef(false);
+  const refreshRequestRef = useRef(0);
 
   const resolvedClusterId = useMemo(
     () =>
@@ -4733,9 +4762,10 @@ const ClusterNodesView = ({
     void loadNodes({ showLoading: true });
     return () => {
       requestCounterRef.current += 1;
-      if (refreshTimerRef.current !== null) {
-        window.clearTimeout(refreshTimerRef.current);
-        refreshTimerRef.current = null;
+      refreshRequestRef.current += 1;
+      if (refreshPollingRef.current !== null) {
+        window.clearInterval(refreshPollingRef.current);
+        refreshPollingRef.current = null;
       }
     };
   }, [loadNodes]);
@@ -4757,30 +4787,93 @@ const ClusterNodesView = ({
       setError("集群标识无效，请返回重试。");
       return;
     }
-    if (refreshTimerRef.current !== null) {
-      window.clearTimeout(refreshTimerRef.current);
-      refreshTimerRef.current = null;
+    if (refreshPollingRef.current !== null) {
+      window.clearInterval(refreshPollingRef.current);
+      refreshPollingRef.current = null;
     }
     setRefreshing(true);
     setRefreshNotice(null);
     setError(null);
+    const baselineOutput = output;
+    const baselineRetrievedAt = retrievedAt;
+    const refreshRequestId = ++refreshRequestRef.current;
     try {
       await refreshClusterNodes(resolvedClusterId);
-      setRefreshNotice("已通知 Agent 上报节点信息，请稍后刷新。");
-      if (refreshTimerRef.current !== null) {
-        window.clearTimeout(refreshTimerRef.current);
-      }
-      refreshTimerRef.current = window.setTimeout(() => {
-        void loadNodes({ showLoading: false });
-      }, 1200);
+      setRefreshNotice("已通知 Agent 上报节点信息，正在等待更新...");
+      let attempts = 0;
+      const maxAttempts = 10;
+      refreshPollingRef.current = window.setInterval(() => {
+        if (refreshInFlightRef.current) {
+          return;
+        }
+        if (refreshRequestRef.current !== refreshRequestId) {
+          if (refreshPollingRef.current !== null) {
+            window.clearInterval(refreshPollingRef.current);
+            refreshPollingRef.current = null;
+          }
+          return;
+        }
+        refreshInFlightRef.current = true;
+        attempts += 1;
+        getClusterNodes(resolvedClusterId)
+          .then((data) => {
+            if (refreshRequestRef.current !== refreshRequestId) {
+              return;
+            }
+            const nextOutput = (data.output || "").trim();
+            const nextRetrievedAt = data.retrieved_at ?? null;
+            const outputChanged =
+              nextOutput && nextOutput !== (baselineOutput || "");
+            const timeChanged =
+              nextRetrievedAt && nextRetrievedAt !== baselineRetrievedAt;
+            if (outputChanged || timeChanged) {
+              setOutput(nextOutput);
+              setRetrievedAt(nextRetrievedAt);
+              setRefreshNotice("节点信息已更新。");
+              if (refreshPollingRef.current !== null) {
+                window.clearInterval(refreshPollingRef.current);
+                refreshPollingRef.current = null;
+              }
+              setRefreshing(false);
+              return;
+            }
+            if (attempts >= maxAttempts) {
+              setRefreshNotice("已通知 Agent 上报节点信息，请稍后手动刷新。");
+              if (refreshPollingRef.current !== null) {
+                window.clearInterval(refreshPollingRef.current);
+                refreshPollingRef.current = null;
+              }
+              setRefreshing(false);
+            }
+          })
+          .catch((err) => {
+            if (refreshRequestRef.current !== refreshRequestId) {
+              return;
+            }
+            const message =
+              err instanceof Error ? err.message : "刷新节点信息失败";
+            setError(message);
+            if (refreshPollingRef.current !== null) {
+              window.clearInterval(refreshPollingRef.current);
+              refreshPollingRef.current = null;
+            }
+            setRefreshing(false);
+          })
+          .finally(() => {
+            refreshInFlightRef.current = false;
+          });
+      }, 2000);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "刷新节点信息失败";
       setError(message);
-    } finally {
       setRefreshing(false);
+    } finally {
+      if (!refreshPollingRef.current) {
+        setRefreshing(false);
+      }
     }
-  }, [loadNodes, resolvedClusterId]);
+  }, [output, retrievedAt, resolvedClusterId]);
 
   const parsedNodes = useMemo(() => {
     if (!output) {
