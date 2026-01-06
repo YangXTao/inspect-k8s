@@ -2205,6 +2205,8 @@ const ClusterDetailView = ({
         : null,
     [cluster, clusterDisplayIds]
   );
+  const healthMessage =
+    cluster?.agent_health_message?.trim() || null;
   const isTesting = enableServerConnectionTest
     ? Boolean(cluster && testingClusterIds[cluster.id])
     : false;
@@ -2419,6 +2421,11 @@ const ClusterDetailView = ({
                 {statusMeta.label}
               </span>
             </div>
+            {healthMessage && (
+              <div className="cluster-health-message">
+                {healthMessage}
+              </div>
+            )}
             {cluster.description && cluster.description.trim().length > 0 && (
               <div>
                 <strong>描述：</strong>

@@ -816,10 +816,8 @@ body {
 
 .cluster-health-message {
   width: 100%;
-  padding: 6px 8px;
-  border-radius: 8px;
-  background: #fee2e2;
-  color: #b91c1c;
+  margin: 2px 0 0;
+  color: #dc2626;
   font-size: 12px;
   line-height: 1.4;
 }
