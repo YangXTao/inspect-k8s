@@ -29,7 +29,7 @@ from .prometheus import PrometheusClient
 logger = logging.getLogger(__name__)
 
 _DEFAULT_INSPECTIONS_SENTINEL = Path("data/state/default_inspections_seeded.flag")
-AGENT_HEARTBEAT_TIMEOUT_MINUTES = 5
+AGENT_HEARTBEAT_TIMEOUT_MINUTES = 1
 AGENT_HEARTBEAT_TIMEOUT = timedelta(minutes=AGENT_HEARTBEAT_TIMEOUT_MINUTES)
 CONNECTION_TEST_OPERATOR = "__system_connection_test__"
 
@@ -565,7 +565,20 @@ def _present_cluster(
     cluster: models.ClusterConfig,
 ) -> schemas.ClusterConfigOut:
     result = schemas.ClusterConfigOut.model_validate(cluster)
-    if result.connection_status == "failed":
+    if (
+        cluster.execution_mode == "agent"
+        and cluster.connection_status not in {"pending", "deleted"}
+    ):
+        agent = cluster.default_agent
+        last_seen = agent.last_seen_at if agent and agent.is_enabled else None
+        if last_seen:
+            deadline = datetime.utcnow() - AGENT_HEARTBEAT_TIMEOUT
+            if last_seen < deadline:
+                result.connection_status = "failed"
+                result.connection_message = (
+                    f"Agent 超过 {AGENT_HEARTBEAT_TIMEOUT_MINUTES} 分钟未上报健康状态。"
+                )
+    if result.connection_status == "failed" and not result.connection_message:
         result.connection_message = "连接异常"
     elif not result.connection_message:
         result.connection_message = "No additional details."

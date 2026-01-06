@@ -152,6 +152,7 @@ const BEIJING_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
 
 const STATUS_CIRCLE_RADIUS = 18;
 const STATUS_CIRCLE_CIRCUMFERENCE = 2 * Math.PI * STATUS_CIRCLE_RADIUS;
+const CLUSTER_HEARTBEAT_REFRESH_INTERVAL = 30000;
 
 const clampProgress = (value?: number) => {
   if (typeof value !== "number" || Number.isNaN(value)) {
@@ -5235,6 +5236,18 @@ const backgroundLocation =
     void refreshRuns();
     void refreshItems();
   }, [refreshClusters, refreshRuns, refreshItems]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void refreshClusters();
+    }, CLUSTER_HEARTBEAT_REFRESH_INTERVAL);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [refreshClusters]);
 
   useEffect(() => {
     if (pendingClusterIds.length === 0 || typeof window === "undefined") {
