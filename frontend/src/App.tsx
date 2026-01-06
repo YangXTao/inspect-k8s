@@ -1332,11 +1332,6 @@ const OverviewView = ({
                         </button>
                       </div>
                     </div>
-                    {healthMessage && (
-                      <div className="cluster-health-message">
-                        {healthMessage}
-                      </div>
-                    )}
                     <div className="cluster-status-line">
                       {enableServerConnectionTest && (
                         <button
@@ -1356,12 +1351,17 @@ const OverviewView = ({
                       <span className={`status-chip ${statusMeta?.className}`}>
                         {statusMeta?.label}
                       </span>
-                      <span
-                        className="cluster-status-message"
-                        title={summaryText}
-                      >
-                        {summaryText}
-                      </span>
+                    </div>
+                    {healthMessage && (
+                      <div className="cluster-health-message">
+                        {healthMessage}
+                      </div>
+                    )}
+                    <div
+                      className="cluster-status-message"
+                      title={summaryText}
+                    >
+                      {summaryText}
                     </div>
                     {descriptionText && (
                       <div className="cluster-agent-description">
