@@ -1276,8 +1276,12 @@ th {
 }
 
 .history .actions {
-  display: flex;
-  gap: 8px;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.history .actions .link-button + .link-button {
+  margin-left: 8px;
 }
 
 .history .table-wrapper {

@@ -3783,6 +3783,7 @@ const RunDetailView = ({
     }
     return (
       target.status === "running" ||
+      target.status === "paused" ||
       target.status === "queued" ||
       (!target.report_path && target.progress >= 100)
     );
@@ -3837,6 +3838,7 @@ const RunDetailView = ({
         setError(null);
         const shouldContinue =
           data.status === "running" ||
+          data.status === "paused" ||
           data.status === "queued" ||
           (!data.report_path && data.progress >= 100);
         if (shouldContinue && !cancelled) {
