@@ -4703,6 +4703,7 @@ const ClusterNodesView = ({
   const refreshPollingRef = useRef<number | null>(null);
   const refreshInFlightRef = useRef(false);
   const refreshRequestRef = useRef(0);
+  const refreshNoticeTimerRef = useRef<number | null>(null);
 
   const resolvedClusterId = useMemo(
     () =>
@@ -4766,6 +4767,10 @@ const ClusterNodesView = ({
       if (refreshPollingRef.current !== null) {
         window.clearInterval(refreshPollingRef.current);
         refreshPollingRef.current = null;
+      }
+      if (refreshNoticeTimerRef.current !== null) {
+        window.clearTimeout(refreshNoticeTimerRef.current);
+        refreshNoticeTimerRef.current = null;
       }
     };
   }, [loadNodes]);
@@ -4881,6 +4886,19 @@ const ClusterNodesView = ({
     }
     return parseNodesOutput(output);
   }, [output]);
+
+  useEffect(() => {
+    if (!refreshNotice || refreshNotice !== "节点信息已更新。") {
+      return;
+    }
+    if (refreshNoticeTimerRef.current !== null) {
+      window.clearTimeout(refreshNoticeTimerRef.current);
+    }
+    refreshNoticeTimerRef.current = window.setTimeout(() => {
+      setRefreshNotice(null);
+      refreshNoticeTimerRef.current = null;
+    }, 2500);
+  }, [refreshNotice]);
 
   return (
       <section className="card nodes-card">

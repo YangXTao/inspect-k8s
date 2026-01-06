@@ -2192,7 +2192,7 @@ th {
 .nodes-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 14px;
   min-width: 760px;
 }
 
@@ -2229,7 +2229,7 @@ th {
   border: 1px solid #e2e8f0;
   background: #f8fafc;
   font-family: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.5;
   color: #0f172a;
   white-space: pre;
