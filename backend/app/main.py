@@ -1152,7 +1152,6 @@ def agent_submit_results(
         run = crud.update_inspection_run_agent_state(
             ctx.db,
             run,
-            status="running",
             processed_items=_clamp_processed(processed_total, display_total),
         )
         refreshed = crud.get_inspection_run(ctx.db, run.id) or run
