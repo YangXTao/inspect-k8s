@@ -1273,14 +1273,14 @@ const OverviewView = ({
                   typeof cluster.node_count === "number"
                     ? String(cluster.node_count)
                     : null;
+                const healthMessage =
+                  cluster.agent_health_message?.trim() || null;
                 const summaryText =
                   versionLabel || nodeCountLabel
                     ? `版本 ${versionLabel ?? "未知"} · 节点数 ${nodeCountLabel ?? "未知"}`
-                    : cluster.agent_health_message
+                    : healthMessage
                       ? "版本 未知 · 节点数 未知"
                       : cluster.connection_message || "未校验";
-                const healthMessage =
-                  cluster.agent_health_message?.trim() || null;
                 const descriptionText =
                   (cluster.description && cluster.description.trim()) ||
                   (cluster.default_agent_description &&
@@ -1332,6 +1332,11 @@ const OverviewView = ({
                         </button>
                       </div>
                     </div>
+                    {healthMessage && (
+                      <div className="cluster-health-message">
+                        {healthMessage}
+                      </div>
+                    )}
                     <div className="cluster-status-line">
                       {enableServerConnectionTest && (
                         <button
@@ -1348,9 +1353,9 @@ const OverviewView = ({
                           {isTesting ? "诊断中..." : "连接测试"}
                         </button>
                       )}
-              <span className={`status-chip ${statusMeta?.className}`}>
-                {statusMeta?.label}
-              </span>
+                      <span className={`status-chip ${statusMeta?.className}`}>
+                        {statusMeta?.label}
+                      </span>
                       <span
                         className="cluster-status-message"
                         title={summaryText}
@@ -1358,11 +1363,6 @@ const OverviewView = ({
                         {summaryText}
                       </span>
                     </div>
-                    {healthMessage && (
-                      <div className="cluster-health-message">
-                        {healthMessage}
-                      </div>
-                    )}
                     {descriptionText && (
                       <div className="cluster-agent-description">
                         <span className="cluster-agent-description-label">

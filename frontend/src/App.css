@@ -815,11 +815,17 @@ body {
 }
 
 .cluster-health-message {
-  width: 100%;
-  margin: 2px 0 0;
-  color: #dc2626;
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #b91c1c;
   font-size: 12px;
   line-height: 1.4;
+  margin: 0 0 4px;
 }
 
 .cluster-agent-description {
