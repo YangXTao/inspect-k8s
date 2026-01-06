@@ -1948,6 +1948,8 @@ const HistoryView = ({
                 const clusterSlug =
                   clusterDisplayIds[run.cluster_id] ?? `#${run.cluster_id}`;
                 const isSelected = selectedRunIds.includes(run.id);
+                const canDelete =
+                  run.status !== "running" && run.status !== "paused";
                 return (
                   <tr key={run.id}>
                     <td>
@@ -2022,6 +2024,7 @@ const HistoryView = ({
                         type="button"
                         className="link-button danger"
                         onClick={() => void onDeleteRun(run)}
+                        disabled={!canDelete}
                       >
                         删除
                       </button>
@@ -2678,6 +2681,8 @@ const ClusterDetailView = ({
                 {pagedClusterRuns.map((run) => {
                   const isSelected = selectedRunIds.includes(run.id);
                   const runSlug = runDisplayIds[run.id] ?? `#${run.id}`;
+                  const canDelete =
+                    run.status !== "running" && run.status !== "paused";
                   return (
                     <tr key={run.id}>
                       <td>
@@ -2776,6 +2781,7 @@ const ClusterDetailView = ({
                           type="button"
                           className="link-button danger"
                           onClick={() => void onDeleteRun(run)}
+                          disabled={!canDelete}
                         >
                           删除
                         </button>
@@ -3988,6 +3994,8 @@ const RunDetailView = ({
   const statusLabel =
     summaryRun?.status_label ?? summaryRun?.status ?? "未知状态";
   const statusValue = summaryRun?.status ?? "queued";
+  const canDelete =
+    statusValue !== "running" && statusValue !== "paused";
   const agentStatusLabel =
     summaryRun?.agent_status_label ??
     (summaryRun?.agent_status
@@ -4174,6 +4182,7 @@ const RunDetailView = ({
             type="button"
             className="secondary danger"
             onClick={handleDelete}
+            disabled={!canDelete}
           >
             删除
           </button>
@@ -5738,6 +5747,13 @@ const hasManualKubeconfig = useMemo(
     (runIds: number[], scope: NoticeScope): Promise<void> => {
       const targets = runs.filter((run) => runIds.includes(run.id));
       if (targets.length === 0) {
+        return Promise.resolve();
+      }
+      const blockedTargets = targets.filter(
+        (run) => run.status === "running" || run.status === "paused"
+      );
+      if (blockedTargets.length > 0) {
+        showClusterNotice(scope, "进行中的巡检任务不可删除，请先取消。", "warning");
         return Promise.resolve();
       }
       setConfirmState({
