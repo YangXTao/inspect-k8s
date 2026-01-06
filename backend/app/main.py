@@ -15,7 +15,7 @@ from uuid import uuid4
 import yaml
 from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, UploadFile, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
@@ -1274,6 +1274,25 @@ def export_inspection_items(db: Session = Depends(get_db)):
     }
 
 
+@app.get("/inspection-items/export-yaml")
+def export_inspection_items_yaml(db: Session = Depends(get_db)):
+    items = crud.get_inspection_items(db)
+    export_payload = schemas.InspectionItemsExportOut(
+        exported_at=datetime.utcnow(),
+        items=items,
+    )
+    payload = export_payload.model_dump(mode="json")
+    yaml_text = yaml.safe_dump(
+        payload,
+        allow_unicode=True,
+        sort_keys=False,
+    )
+    return PlainTextResponse(
+        yaml_text,
+        media_type="text/yaml; charset=utf-8",
+    )
+
+
 @app.post(
     "/inspection-items/import",
     response_model=schemas.InspectionItemsImportResult,
@@ -1291,27 +1310,31 @@ async def import_inspection_items(
     except UnicodeDecodeError as exc:
         raise HTTPException(status_code=400, detail="导入文件必须为 UTF-8 编码") from exc
 
+    payload: Any
     try:
         payload = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"导入文件不是有效的 JSON：{exc.msg}",
-        ) from exc
+    except json.JSONDecodeError:
+        try:
+            payload = yaml.safe_load(text)
+        except yaml.YAMLError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="导入文件不是有效的 JSON 或 YAML",
+            ) from exc
 
     if isinstance(payload, dict):
         items_data = payload.get("items")
         if items_data is None:
             raise HTTPException(
                 status_code=400,
-                detail="JSON 中缺少 items 字段",
+                detail="导入数据中缺少 items 字段",
             )
     elif isinstance(payload, list):
         items_data = payload
     else:
         raise HTTPException(
             status_code=400,
-            detail="JSON 格式不正确，应为巡检项数组或包含 items 字段的对象",
+            detail="导入数据格式不正确，应为巡检项数组或包含 items 字段的对象",
         )
 
     if not isinstance(items_data, list):

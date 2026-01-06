@@ -83,6 +83,17 @@ export function exportInspectionItems(): Promise<InspectionItemsExportPayload> {
   return request<InspectionItemsExportPayload>("/inspection-items/export");
 }
 
+export async function exportInspectionItemsYaml(): Promise<string> {
+  const response = await fetch(`${API_BASE}/inspection-items/export-yaml`, {
+    headers: { Accept: "text/yaml" },
+  });
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Request failed");
+  }
+  return response.text();
+}
+
 export function importInspectionItems(
   formData: FormData
 ): Promise<InspectionItemsImportResult> {

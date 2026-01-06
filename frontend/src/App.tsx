@@ -33,6 +33,7 @@ import {
   deleteInspectionItem as apiDeleteInspectionItem,
   deleteInspectionRun as apiDeleteInspectionRun,
   exportInspectionItems,
+  exportInspectionItemsYaml,
   getAgents,
   getClusters,
   getInspectionItems,
@@ -3216,7 +3217,7 @@ interface InspectionSettingsPanelProps {
   }) => Promise<void>;
   onDelete: (item: InspectionItem) => void;
   onDeleteMany: (ids: number[]) => void;
-  onExport: () => Promise<void> | void;
+  onExport: (format: "json" | "yaml") => Promise<void> | void;
   onImport: (file: File) => Promise<void>;
 }
 
@@ -3350,10 +3351,18 @@ const InspectionSettingsPanel = ({
           <button
             type="button"
             className="secondary"
-            onClick={() => onExport()}
+            onClick={() => onExport("json")}
             disabled={submitting}
           >
-            导出
+            导出 JSON
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => onExport("yaml")}
+            disabled={submitting}
+          >
+            导出 YAML
           </button>
           <button
             type="button"
@@ -3366,7 +3375,7 @@ const InspectionSettingsPanel = ({
           <input
             ref={importInputRef}
             type="file"
-            accept=".json"
+            accept=".json,.yaml,.yml"
             hidden
             onChange={handleImportChange}
           />
@@ -6177,17 +6186,34 @@ const hasManualKubeconfig = useMemo(
     [items, deleteInspectionItemsBatch]
   );
 
-  const handleExportInspectionItems = useCallback(async () => {
+  const handleExportInspectionItems = useCallback(async (format: "json" | "yaml") => {
     setSettingsSubmitting(true);
     setSettingsNotice(null);
     setSettingsError(null);
     let objectUrl: string | null = null;
     let tempLink: HTMLAnchorElement | null = null;
     try {
-      logWithTimestamp("info", "导出巡检项");
-      const payload = await exportInspectionItems();
-      const rawTimestamp = payload.exported_at ?? new Date().toISOString();
-      let exportDate = new Date(rawTimestamp);
+      logWithTimestamp("info", "导出巡检项，格式: %s", format);
+      let exportDate = new Date();
+      let fileContent = "";
+      let mimeType = "";
+      if (format === "yaml") {
+        fileContent = await exportInspectionItemsYaml();
+        mimeType = "text/yaml;charset=utf-8";
+      } else {
+        const payload = await exportInspectionItems();
+        const rawTimestamp = payload.exported_at ?? new Date().toISOString();
+        exportDate = new Date(rawTimestamp);
+        if (Number.isNaN(exportDate.getTime())) {
+          exportDate = new Date();
+        }
+        const exportPayload = {
+          exported_at: exportDate.toISOString(),
+          items: payload.items,
+        };
+        fileContent = JSON.stringify(exportPayload, null, 2);
+        mimeType = "application/json;charset=utf-8";
+      }
       if (Number.isNaN(exportDate.getTime())) {
         exportDate = new Date();
       }
@@ -6196,15 +6222,9 @@ const hasManualKubeconfig = useMemo(
         exportDate.getMonth() + 1
       )}${pad(exportDate.getDate())}-${pad(exportDate.getHours())}${pad(
         exportDate.getMinutes()
-      )}${pad(exportDate.getSeconds())}.json`;
-
-      const exportPayload = {
-        exported_at: exportDate.toISOString(),
-        items: payload.items,
-      };
-      const fileContent = JSON.stringify(exportPayload, null, 2);
+      )}${pad(exportDate.getSeconds())}.${format === "yaml" ? "yaml" : "json"}`;
       const blob = new Blob([fileContent], {
-        type: "application/json;charset=utf-8",
+        type: mimeType,
       });
       objectUrl = URL.createObjectURL(blob);
       tempLink = document.createElement("a");
