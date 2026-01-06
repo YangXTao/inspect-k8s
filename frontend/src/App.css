@@ -4,6 +4,7 @@
   color: #0f172a;
   background-color: #f8fafc;
   line-height: 1.5;
+  --top-nav-height: 64px;
 }
 
 body {
@@ -22,6 +23,16 @@ body {
   backdrop-filter: blur(6px);
   border-bottom: 1px solid #e2e8f0;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+}
+
+.global-notice-bar {
+  position: sticky;
+  top: calc(var(--top-nav-height) + 6px);
+  z-index: 19;
+  width: calc(100% - 20px);
+  margin: 6px auto 0;
+  display: grid;
+  gap: 8px;
 }
 
 .top-navigation-brand {

@@ -71,6 +71,11 @@ import type {
 type NoticeType = "success" | "warning" | "error" | null;
 type ConfirmVariant = "primary" | "danger";
 type NoticeScope = "overview" | "clusterDetail" | "history" | "runDetail";
+type GlobalNotice = {
+  key: string;
+  type: Exclude<NoticeType, null>;
+  message: string;
+};
 
 type LicenseCapabilities = {
   loading: boolean;
@@ -864,10 +869,6 @@ const AgentQuickCreate = ({
 
 interface OverviewProps {
   clusters: ClusterConfig[];
-  clusterError: string | null;
-  clusterNotice: string | null;
-  clusterNoticeType: NoticeType;
-  clusterNoticeScope: NoticeScope | null;
   clusterUploading: boolean;
   clusterNameInput: string;
   clusterPromInput: string;
@@ -905,10 +906,6 @@ interface OverviewProps {
 
 const OverviewView = ({
   clusters,
-  clusterError,
-  clusterNotice,
-  clusterNoticeType,
-  clusterNoticeScope,
   clusterUploading,
   clusterNameInput,
   clusterPromInput,
@@ -1246,14 +1243,6 @@ const OverviewView = ({
             </div>
           )}
         </div>
-        {clusterError && <div className="feedback error">{clusterError}</div>}
-        {clusterNotice &&
-          clusterNoticeType &&
-          clusterNoticeScope === "overview" && (
-            <div className={`feedback ${clusterNoticeType}`}>
-              {clusterNotice}
-            </div>
-          )}
         {clusters.length === 0 ? (
           <p className="placeholder">
             暂无集群，请在 Agent 端完成注册后刷新本页面。
@@ -1615,9 +1604,6 @@ interface HistoryViewProps {
   onCancelRun: (run: InspectionRunListItem) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
-  notice?: string | null;
-  noticeType?: NoticeType;
-  noticeScope?: NoticeScope | null;
   license: LicenseCapabilities;
 }
 
@@ -1629,14 +1615,9 @@ const HistoryView = ({
   onCancelRun,
   clusterDisplayIds,
   runDisplayIds,
-  notice,
-  noticeType,
-  noticeScope,
   license,
 }: HistoryViewProps) => {
   const navigate = useNavigate();
-  const shouldShowNotice =
-    notice && noticeType && noticeScope === "history";
 
   const [historyStatusFilter, setHistoryStatusFilter] = useState<
     InspectionRunStatus | "all"
@@ -1841,11 +1822,6 @@ const HistoryView = ({
           </div>
         </div>
       </div>
-      {shouldShowNotice && noticeType && (
-        <div className={`feedback ${noticeType}`}>
-          {notice}
-        </div>
-      )}
       <div className="history-toolbar">
         <div className="history-selection">
           <label className="table-checkbox">
@@ -2049,12 +2025,6 @@ interface ClusterDetailViewProps {
   operator: string;
   setOperator: (value: string) => void;
   inspectionLoading: boolean;
-  notice: string | null;
-  error: string | null;
-  clusterNotice: string | null;
-  clusterNoticeType: NoticeType;
-  clusterNoticeScope: NoticeScope | null;
-  clusterError: string | null;
   onStartInspection: (clusterId: number) => Promise<void>;
   onDeleteRun: (run: InspectionRunListItem) => Promise<void>;
   onDeleteRunsBulk: (runIds: number[]) => Promise<void>;
@@ -2082,12 +2052,6 @@ const ClusterDetailView = ({
   operator,
   setOperator,
   inspectionLoading,
-  notice,
-  error,
-  clusterNotice,
-  clusterNoticeType,
-  clusterNoticeScope,
-  clusterError,
   onStartInspection,
   onDeleteRun,
   onDeleteRunsBulk,
@@ -2236,10 +2200,6 @@ const ClusterDetailView = ({
     : false;
   const allItemsSelected =
     items.length > 0 && selectedIds.length === items.length;
-  const shouldShowClusterNotice =
-    clusterNotice &&
-    clusterNoticeType &&
-    clusterNoticeScope === "clusterDetail";
 
   const handleToggleItem = useCallback(
     (itemId: number) => {
@@ -2435,13 +2395,6 @@ const ClusterDetailView = ({
           </button>
         </div>
       </div>
-
-      {clusterError && <div className="feedback error">{clusterError}</div>}
-      {shouldShowClusterNotice && (
-        <div className={`feedback ${clusterNoticeType}`}>{clusterNotice}</div>
-      )}
-      {error && <div className="feedback error">{error}</div>}
-      {notice && <div className="feedback success">{notice}</div>}
 
       <section className="detail-grid">
         <div className="detail-card">
@@ -3726,9 +3679,6 @@ interface RunDetailViewProps {
   onResumeRun: (runId: number) => Promise<void>;
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
-  notice?: string | null;
-  noticeType?: NoticeType;
-  noticeScope?: NoticeScope | null;
   license: LicenseCapabilities;
 }
 
@@ -3742,9 +3692,6 @@ const RunDetailView = ({
   onResumeRun,
   clusterDisplayIds,
   runDisplayIds,
-  notice,
-  noticeType,
-  noticeScope,
   license,
 }: RunDetailViewProps) => {
   const { clusterKey, runKey } = useParams<{
@@ -3903,9 +3850,6 @@ const RunDetailView = ({
       navigate(backTarget);
     }
   }, [backTarget, navigate]);
-
-  const shouldShowNotice =
-    notice && noticeType && noticeScope === "runDetail";
 
   const resultStats = useMemo(() => {
     const stats = {
@@ -4189,9 +4133,6 @@ const RunDetailView = ({
         </div>
       </div>
 
-      {shouldShowNotice && noticeType && (
-        <div className={`feedback ${noticeType}`}>{notice}</div>
-      )}
       {error && <div className="feedback error">{error}</div>}
       {loading && <div className="feedback info">正在加载巡检详情...</div>}
 
@@ -4884,6 +4825,76 @@ const backgroundLocation =
     location.pathname.startsWith(SETTINGS_BASE_PATH) && backgroundLocation
       ? backgroundLocation
       : location;
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const updateOffset = () => {
+      const nav = document.querySelector<HTMLElement>(".top-navigation");
+      if (!nav) {
+        return;
+      }
+      document.documentElement.style.setProperty(
+        "--top-nav-height",
+        `${nav.offsetHeight}px`
+      );
+    };
+    updateOffset();
+    window.addEventListener("resize", updateOffset);
+    return () => {
+      window.removeEventListener("resize", updateOffset);
+    };
+  }, []);
+
+  const globalNotices = useMemo(() => {
+    const notices: GlobalNotice[] = [];
+    if (
+      clusterError &&
+      (currentNoticeScope === "overview" ||
+        currentNoticeScope === "clusterDetail")
+    ) {
+      notices.push({
+        key: "cluster-error",
+        type: "error",
+        message: clusterError,
+      });
+    }
+    if (currentNoticeScope === "clusterDetail" && inspectionError) {
+      notices.push({
+        key: "inspection-error",
+        type: "error",
+        message: inspectionError,
+      });
+    }
+    if (
+      clusterNotice &&
+      clusterNoticeType &&
+      clusterNoticeScope === currentNoticeScope
+    ) {
+      notices.push({
+        key: "cluster-notice",
+        type: clusterNoticeType,
+        message: clusterNotice,
+      });
+    }
+    if (currentNoticeScope === "clusterDetail" && inspectionNotice) {
+      notices.push({
+        key: "inspection-notice",
+        type: "success",
+        message: inspectionNotice,
+      });
+    }
+    return notices;
+  }, [
+    clusterError,
+    clusterNotice,
+    clusterNoticeScope,
+    clusterNoticeType,
+    currentNoticeScope,
+    inspectionError,
+    inspectionNotice,
+  ]);
 
   const runDisplayIds = useMemo(
     () => createRunDisplayIdMap(runs, clusters),
@@ -5753,7 +5764,13 @@ const hasManualKubeconfig = useMemo(
         (run) => run.status === "running" || run.status === "paused"
       );
       if (blockedTargets.length > 0) {
-        showClusterNotice(scope, "进行中的巡检任务不可删除，请先取消。", "warning");
+        setConfirmState({
+          title: "无法删除巡检记录",
+          message: "所选包含进行中或暂停中的巡检任务，请先取消后再删除。",
+          confirmLabel: "知道了",
+          cancelLabel: "关闭",
+          onConfirm: () => Promise.resolve(),
+        });
         return Promise.resolve();
       }
       setConfirmState({
@@ -6429,10 +6446,6 @@ const hasManualKubeconfig = useMemo(
   const overviewRouteElement = (
     <OverviewView
       clusters={clusters}
-      clusterError={clusterError}
-      clusterNotice={clusterNotice}
-      clusterNoticeType={clusterNoticeType}
-      clusterNoticeScope={clusterNoticeScope}
       clusterUploading={clusterUploading}
       clusterNameInput={clusterNameInput}
       clusterPromInput={clusterPromInput}
@@ -6469,6 +6482,15 @@ const hasManualKubeconfig = useMemo(
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
       </Helmet>
       <TopNavigation onOpenSettings={handleOpenSettings} />
+      {globalNotices.length > 0 && (
+        <div className="global-notice-bar" role="status" aria-live="polite">
+          {globalNotices.map((notice) => (
+            <div key={notice.key} className={`feedback ${notice.type}`}>
+              {notice.message}
+            </div>
+          ))}
+        </div>
+      )}
       <main className="app-shell">
         <Routes location={routesLocation}>
           <Route path="/" element={overviewRouteElement} />
@@ -6486,9 +6508,6 @@ const hasManualKubeconfig = useMemo(
                 onCancelRun={handleCancelRun}
                 clusterDisplayIds={clusterDisplayIds}
                 runDisplayIds={runDisplayIds}
-                notice={clusterNotice}
-                noticeType={clusterNoticeType}
-                noticeScope={clusterNoticeScope}
                 license={licenseCapabilities}
               />
             }
@@ -6505,12 +6524,6 @@ const hasManualKubeconfig = useMemo(
                 operator={operator}
                 setOperator={setOperator}
                 inspectionLoading={inspectionLoading}
-                notice={inspectionNotice}
-                error={inspectionError}
-                clusterNotice={clusterNotice}
-                clusterNoticeType={clusterNoticeType}
-                clusterNoticeScope={clusterNoticeScope}
-                clusterError={clusterError}
                 onStartInspection={handleStartInspection}
                 onDeleteRun={handleDeleteRun}
                 onDeleteRunsBulk={(ids) =>
@@ -6542,9 +6555,6 @@ const hasManualKubeconfig = useMemo(
                 onResumeRun={handleResumeRunById}
                 clusterDisplayIds={clusterDisplayIds}
                 runDisplayIds={runDisplayIds}
-                notice={clusterNotice}
-                noticeType={clusterNoticeType}
-                noticeScope={clusterNoticeScope}
                 license={licenseCapabilities}
               />
             }
