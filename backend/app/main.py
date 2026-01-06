@@ -758,6 +758,7 @@ def register_agent(
             if getattr(cluster, "is_archived", False):
                 placeholder_path = _build_agent_managed_kubeconfig_ref()
                 update_kwargs: dict[str, Any] = {
+                    "created_at": datetime.utcnow(),
                     "kubeconfig_path": placeholder_path,
                     "connection_status": "pending",
                     "connection_message": "等待 Agent 注册",
@@ -787,13 +788,12 @@ def register_agent(
                         status_code=400,
                         detail="该 Agent 名称已保留 Token，如需重新创建请先删除旧 Token。",
                     )
-                update_kwargs: dict[str, Any] = {}
+                update_kwargs: dict[str, Any] = {"created_at": datetime.utcnow()}
                 if normalized_description is not None:
                     update_kwargs["description"] = normalized_description
                 if normalized_prometheus_url is not None:
                     update_kwargs["prometheus_url"] = normalized_prometheus_url
-                if update_kwargs:
-                    cluster = crud.update_cluster(db, cluster, **update_kwargs)
+                cluster = crud.update_cluster(db, cluster, **update_kwargs)
         else:
             placeholder_path = _build_agent_managed_kubeconfig_ref()
             cluster = crud.create_cluster(

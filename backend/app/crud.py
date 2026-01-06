@@ -83,6 +83,7 @@ def update_cluster(
     cluster: models.ClusterConfig,
     *,
     name: Optional[str] = None,
+    created_at: Optional[datetime] = None,
     kubeconfig_path: Optional[str] = None,
     contexts_json: Optional[str] = None,
     prometheus_url: Optional[str] = None,
@@ -96,6 +97,8 @@ def update_cluster(
 ) -> models.ClusterConfig:
     if name is not None:
         cluster.name = name
+    if created_at is not None:
+        cluster.created_at = created_at
     if kubeconfig_path is not None:
         cluster.kubeconfig_path = kubeconfig_path
     if contexts_json is not None:

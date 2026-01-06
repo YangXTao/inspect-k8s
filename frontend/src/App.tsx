@@ -1330,7 +1330,7 @@ const OverviewView = ({
                       {enableServerConnectionTest && (
                         <button
                           type="button"
-                          className="secondary"
+                          className="secondary cluster-test-button"
                           onClick={(event) => {
                             event.stopPropagation();
                             void onTestClusterConnection(cluster.id, {
