@@ -114,6 +114,11 @@ class ClusterNodesOut(BaseModel):
     retrieved_at: datetime
 
 
+class ClusterNodesRefreshOut(BaseModel):
+    agent_id: int
+    requested_at: datetime
+
+
 class ClusterUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=150)
     prometheus_url: Optional[str] = Field(
@@ -303,6 +308,7 @@ class InspectionAgentOut(BaseModel):
     description: Optional[str]
     is_enabled: bool
     last_seen_at: Optional[datetime]
+    nodes_report_requested_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
     prometheus_url: Optional[str]

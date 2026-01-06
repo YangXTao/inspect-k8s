@@ -700,6 +700,30 @@ def get_cluster_nodes(cluster_id: int, db: Session = Depends(get_db)):
     )
 
 
+@app.post(
+    "/clusters/{cluster_id}/nodes/refresh",
+    response_model=schemas.ClusterNodesRefreshOut,
+)
+def refresh_cluster_nodes(cluster_id: int, db: Session = Depends(get_db)):
+    cluster = crud.get_cluster(db, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="指定的集群不存在。")
+    if cluster.execution_mode != "agent":
+        raise HTTPException(status_code=400, detail="当前仅支持 Agent 上报的节点信息。")
+    agent = _resolve_active_agent(db, cluster)
+    if not agent:
+        raise HTTPException(
+            status_code=409,
+            detail="未检测到可用 Agent，请先绑定或启用 Agent。",
+        )
+    updated = crud.request_agent_nodes_report(db, agent)
+    requested_at = updated.nodes_report_requested_at or datetime.utcnow()
+    return schemas.ClusterNodesRefreshOut(
+        agent_id=updated.id,
+        requested_at=requested_at,
+    )
+
+
 @app.put("/clusters/{cluster_id}", response_model=schemas.ClusterConfigOut)
 async def update_cluster(
     cluster_id: int,

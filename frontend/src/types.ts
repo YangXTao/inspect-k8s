@@ -115,6 +115,11 @@ export type ClusterNodesPayload = {
   retrieved_at: string;
 };
 
+export type ClusterNodesRefreshPayload = {
+  agent_id: number;
+  requested_at: string;
+};
+
 export type LicenseStatus = {
   valid: boolean;
   reason?: string | null;
@@ -135,6 +140,7 @@ export type InspectionAgent = {
   is_enabled: boolean;
   prometheus_url?: string | null;
   last_seen_at?: string | null;
+  nodes_report_requested_at?: string | null;
   created_at: string;
   updated_at: string;
 };

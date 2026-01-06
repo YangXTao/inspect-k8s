@@ -587,6 +587,7 @@ class AgentRunner:
         self.prom_client: Optional[PrometheusClient] = None
         self._active_prom_url: Optional[str] = None
         self._last_nodes_report_at: Optional[datetime] = None
+        self._last_nodes_report_request: Optional[str] = None
         self._apply_prometheus_url(config.prometheus_url)
 
     def _await_run_active(self, run_id: int) -> bool:
@@ -677,6 +678,31 @@ class AgentRunner:
             return None
         return output
 
+    def _refresh_nodes_on_demand(self, heartbeat_data: Optional[Dict[str, Any]]) -> None:
+        if not heartbeat_data:
+            return
+        raw_requested_at = heartbeat_data.get("nodes_report_requested_at")
+        requested_at = str(raw_requested_at).strip() if raw_requested_at else ""
+        if not requested_at:
+            return
+        if requested_at == self._last_nodes_report_request:
+            return
+        self._last_nodes_report_request = requested_at
+        now = datetime.now(timezone.utc)
+        nodes_output = self._collect_nodes_output()
+        if not nodes_output:
+            LOG.warning("节点信息刷新请求失败：未获取到节点输出。")
+            return
+        try:
+            self.client.send_heartbeat(
+                nodes_output=nodes_output,
+                nodes_retrieved_at=now.isoformat(),
+            )
+            self._last_nodes_report_at = now
+            LOG.info("已按需上报节点信息。")
+        except Exception as exc:
+            LOG.warning("按需上报节点信息失败：%s", exc)
+
     def sync_prometheus_from_config(self) -> None:
         self._apply_prometheus_url(self.config.prometheus_url)
 
@@ -732,6 +758,9 @@ class AgentRunner:
                 server_prom = (heartbeat_data.get("prometheus_url") or "").strip()
                 if server_prom and server_prom != (self._active_prom_url or ""):
                     self._apply_prometheus_url(server_prom)
+            self._refresh_nodes_on_demand(
+                heartbeat_data if isinstance(heartbeat_data, dict) else None
+            )
         except req_exc.RequestException as exc:
             heartbeat_blocked = True
             LOG.warning(

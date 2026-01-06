@@ -486,6 +486,11 @@ def _ensure_inspection_agents_schema() -> None:
         statements.append(
             f"ALTER TABLE inspection_agents ADD COLUMN nodes_output_at {column_type} NULL"
         )
+    if "nodes_report_requested_at" not in columns:
+        column_type = "DATETIME" if dialect == "sqlite" else "DATETIME"
+        statements.append(
+            f"ALTER TABLE inspection_agents ADD COLUMN nodes_report_requested_at {column_type} NULL"
+        )
 
     if dialect != "sqlite":
         statements.extend(

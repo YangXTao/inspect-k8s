@@ -3,6 +3,7 @@ import {
   AgentRegisterResponse,
   ClusterConfig,
   ClusterNodesPayload,
+  ClusterNodesRefreshPayload,
   InspectionAgent,
   InspectionItem,
   InspectionItemsExportPayload,
@@ -90,7 +91,18 @@ export async function exportInspectionItemsYaml(): Promise<string> {
   });
   if (!response.ok) {
     const message = await response.text();
-    throw new Error(message || "Request failed");
+    let errorMessage = message || response.statusText || "Request failed";
+    if (message) {
+      try {
+        const payload = JSON.parse(message) as { detail?: string };
+        if (payload && typeof payload.detail === "string" && payload.detail) {
+          errorMessage = payload.detail;
+        }
+      } catch {
+        // Keep original message when it is not JSON.
+      }
+    }
+    throw new Error(errorMessage);
   }
   return response.text();
 }
@@ -145,6 +157,17 @@ export function getClusterNodes(
   clusterId: number
 ): Promise<ClusterNodesPayload> {
   return request<ClusterNodesPayload>(`/clusters/${clusterId}/nodes`);
+}
+
+export function refreshClusterNodes(
+  clusterId: number
+): Promise<ClusterNodesRefreshPayload> {
+  return request<ClusterNodesRefreshPayload>(
+    `/clusters/${clusterId}/nodes/refresh`,
+    {
+      method: "POST",
+    }
+  );
 }
 
 export function registerCluster(formData: FormData): Promise<ClusterConfig> {

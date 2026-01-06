@@ -44,6 +44,7 @@ import {
   getReportDownloadUrl,
   importInspectionItems,
   pauseInspectionRun,
+  refreshClusterNodes,
   registerCluster,
   resumeInspectionRun,
   testClusterConnection,
@@ -167,6 +168,38 @@ const clampProgress = (value?: number) => {
     return 100;
   }
   return Math.round(value);
+};
+
+const parseNodesOutput = (output: string) => {
+  const lines = output
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim().length > 0);
+  if (lines.length < 2) {
+    return null;
+  }
+  const header = lines[0].trim();
+  if (!header) {
+    return null;
+  }
+  const columns = header
+    .split(/\s{2,}/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (!columns.length) {
+    return null;
+  }
+  const rows = lines.slice(1).map((line) => {
+    const cells = line
+      .trim()
+      .split(/\s{2,}/)
+      .map((item) => item.trim());
+    if (cells.length < columns.length) {
+      return [...cells, ...Array(columns.length - cells.length).fill("")];
+    }
+    return cells;
+  });
+  return { columns, rows };
 };
 
 const statusClass = (status: InspectionRunStatus) => {
@@ -4637,6 +4670,10 @@ const ClusterNodesView = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retrievedAt, setRetrievedAt] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
+  const requestCounterRef = useRef(0);
+  const refreshTimerRef = useRef<number | null>(null);
 
   const resolvedClusterId = useMemo(
     () =>
@@ -4653,25 +4690,29 @@ const ClusterNodesView = ({
     ? getClusterDisplayId(clusterDisplayIds, cluster.id, cluster)
     : clusterKey ?? "-";
 
-  useEffect(() => {
-    if (resolvedClusterId === null) {
-      setError("集群标识无效，请返回重试。");
-      setOutput("");
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    getClusterNodes(resolvedClusterId)
-      .then((data) => {
-        if (cancelled) {
+  const loadNodes = useCallback(
+    async (options?: { showLoading?: boolean }) => {
+      if (resolvedClusterId === null) {
+        setError("集群标识无效，请返回重试。");
+        setOutput("");
+        setRetrievedAt(null);
+        return;
+      }
+      const requestId = ++requestCounterRef.current;
+      const showLoading = options?.showLoading ?? true;
+      if (showLoading) {
+        setLoading(true);
+      }
+      setError(null);
+      try {
+        const data = await getClusterNodes(resolvedClusterId);
+        if (requestId !== requestCounterRef.current) {
           return;
         }
         setOutput((data.output || "").trim());
         setRetrievedAt(data.retrieved_at ?? null);
-      })
-      .catch((err) => {
-        if (cancelled) {
+      } catch (err) {
+        if (requestId !== requestCounterRef.current) {
           return;
         }
         const message =
@@ -4679,16 +4720,25 @@ const ClusterNodesView = ({
         setError(message);
         setOutput("");
         setRetrievedAt(null);
-      })
-      .finally(() => {
-        if (!cancelled) {
+      } finally {
+        if (requestId === requestCounterRef.current) {
           setLoading(false);
         }
-      });
+      }
+    },
+    [resolvedClusterId]
+  );
+
+  useEffect(() => {
+    void loadNodes({ showLoading: true });
     return () => {
-      cancelled = true;
+      requestCounterRef.current += 1;
+      if (refreshTimerRef.current !== null) {
+        window.clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
     };
-  }, [resolvedClusterId]);
+  }, [loadNodes]);
 
   const handleBackNavigation = useCallback(() => {
     if (window.history.length > 1) {
@@ -4702,38 +4752,113 @@ const ClusterNodesView = ({
     navigate("/");
   }, [cluster, clusterSlug, navigate]);
 
+  const handleRefreshNodes = useCallback(async () => {
+    if (resolvedClusterId === null) {
+      setError("集群标识无效，请返回重试。");
+      return;
+    }
+    if (refreshTimerRef.current !== null) {
+      window.clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = null;
+    }
+    setRefreshing(true);
+    setRefreshNotice(null);
+    setError(null);
+    try {
+      await refreshClusterNodes(resolvedClusterId);
+      setRefreshNotice("已通知 Agent 上报节点信息，请稍后刷新。");
+      if (refreshTimerRef.current !== null) {
+        window.clearTimeout(refreshTimerRef.current);
+      }
+      refreshTimerRef.current = window.setTimeout(() => {
+        void loadNodes({ showLoading: false });
+      }, 1200);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "刷新节点信息失败";
+      setError(message);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadNodes, resolvedClusterId]);
+
+  const parsedNodes = useMemo(() => {
+    if (!output) {
+      return null;
+    }
+    return parseNodesOutput(output);
+  }, [output]);
+
   return (
-    <section className="card nodes-card">
-      <div className="detail-header">
-        <button
-          type="button"
-          className="back-button"
-          onClick={handleBackNavigation}
-        >
-          返回上一页
-        </button>
-      </div>
-      <div className="nodes-header">
-        <h2>节点信息</h2>
-        <span className="nodes-subtitle">
-          {cluster ? `${cluster.name}（${clusterSlug}）` : clusterSlug}
-        </span>
-        {retrievedAt && (
-          <span className="nodes-meta">
-            获取时间：{formatDate(retrievedAt)}
-          </span>
+      <section className="card nodes-card">
+        <div className="detail-header">
+          <button
+            type="button"
+            className="back-button"
+            onClick={handleBackNavigation}
+          >
+            返回上一页
+          </button>
+        </div>
+        <div className="nodes-header">
+          <div className="nodes-header-top">
+            <div className="nodes-title-group">
+              <h2>节点信息</h2>
+              <span className="nodes-subtitle">
+                {cluster ? `${cluster.name}（${clusterSlug}）` : clusterSlug}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="nodes-refresh-button"
+              onClick={handleRefreshNodes}
+              disabled={refreshing || loading}
+            >
+              {refreshing ? "刷新中..." : "刷新节点信息"}
+            </button>
+          </div>
+          {retrievedAt && (
+            <span className="nodes-meta">
+              获取时间：{formatDate(retrievedAt)}
+            </span>
+          )}
+        </div>
+        {refreshNotice && <div className="feedback info">{refreshNotice}</div>}
+        {error && <div className="feedback error">{error}</div>}
+        {loading && <div className="feedback info">正在加载节点信息...</div>}
+        {!loading && !error && output && parsedNodes && (
+          <div className="nodes-table-wrapper">
+            <table className="nodes-table">
+              <thead>
+                <tr>
+                  {parsedNodes.columns.map((column) => (
+                    <th key={column}>{column}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {parsedNodes.rows.map((row, rowIndex) => (
+                  <tr key={`${rowIndex}-${row[0] ?? "row"}`}>
+                    {parsedNodes.columns.map((column, columnIndex) => (
+                      <td key={`${column}-${columnIndex}`}>
+                        {row[columnIndex] || "-"}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
-      </div>
-      {error && <div className="feedback error">{error}</div>}
-      {loading && <div className="feedback info">正在加载节点信息...</div>}
-      {!loading && !error && (
-        <pre className="nodes-output">
-          {output || "暂无节点信息"}
-        </pre>
-      )}
-    </section>
-  );
-};
+        {!loading && !error && output && !parsedNodes && (
+          <pre className="nodes-output">{output}</pre>
+        )}
+        {!loading && !error && !output && (
+          <div className="placeholder">暂无节点信息</div>
+        )}
+      </section>
+    );
+  };
 
 const App = () => {
   const [clusters, setClusters] = useState<ClusterConfig[]>([]);
