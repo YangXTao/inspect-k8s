@@ -579,8 +579,13 @@ def record_agent_heartbeat(
     agent: models.InspectionAgent,
     *,
     seen_at: Optional[datetime] = None,
+    nodes_output: Optional[str] = None,
+    nodes_output_at: Optional[datetime] = None,
 ) -> models.InspectionAgent:
     agent.last_seen_at = seen_at or datetime.utcnow()
+    if nodes_output is not None:
+        agent.nodes_output = nodes_output
+        agent.nodes_output_at = nodes_output_at or agent.last_seen_at
     agent.updated_at = datetime.utcnow()
     db.add(agent)
     db.commit()

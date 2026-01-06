@@ -109,6 +109,11 @@ class ClusterConfigOut(BaseModel):
         return None
 
 
+class ClusterNodesOut(BaseModel):
+    output: str
+    retrieved_at: datetime
+
+
 class ClusterUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=150)
     prometheus_url: Optional[str] = Field(
@@ -335,6 +340,12 @@ class InspectionAgentUpdate(BaseModel):
 class AgentHeartbeatIn(BaseModel):
     reported_at: Optional[datetime] = Field(
         None, description="Agent 上报时间（可选），默认使用服务器时间"
+    )
+    nodes_output: Optional[str] = Field(
+        None, description="kubectl get nodes -o wide 输出"
+    )
+    nodes_retrieved_at: Optional[datetime] = Field(
+        None, description="节点信息获取时间（可选）"
     )
 
 

@@ -2116,6 +2116,45 @@ th {
   color: #0f172a;
 }
 
+.nodes-card {
+  gap: 12px;
+}
+
+.nodes-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nodes-header h2 {
+  margin: 0;
+  color: #0f172a;
+}
+
+.nodes-subtitle {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.nodes-meta {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.nodes-output {
+  margin: 0;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-family: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #0f172a;
+  white-space: pre;
+  overflow-x: auto;
+}
+
 .cluster-summary,
 .inspection-summary {
   display: grid;

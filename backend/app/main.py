@@ -497,6 +497,17 @@ def _remove_report_dir_safely(path: Path) -> None:
         pass
 
 
+def _normalize_nodes_output(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.replace("\r\n", "\n").strip()
+    if not normalized:
+        return None
+    if len(normalized) > 20000:
+        normalized = normalized[:20000]
+    return normalized
+
+
 def _sanitize_optional_text(value: str | None) -> str | None:
     if value is None:
         return None
@@ -649,6 +660,44 @@ def test_cluster_connection(cluster_id: int, db: Session = Depends(get_db)):
         connection_message="已下发连接测试请求，等待 Agent 返回结果。",
     )
     return _present_cluster(cluster)
+
+
+@app.get(
+    "/clusters/{cluster_id}/nodes",
+    response_model=schemas.ClusterNodesOut,
+)
+def get_cluster_nodes(cluster_id: int, db: Session = Depends(get_db)):
+    cluster = crud.get_cluster(db, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="指定的集群不存在。")
+    if cluster.execution_mode != "agent":
+        raise HTTPException(status_code=400, detail="当前仅支持 Agent 上报的节点信息。")
+    candidate = None
+    if cluster.default_agent and cluster.default_agent.is_enabled:
+        if cluster.default_agent.nodes_output:
+            candidate = cluster.default_agent
+    if candidate is None:
+        candidate = (
+            db.query(models.InspectionAgent)
+            .filter(
+                models.InspectionAgent.cluster_id == cluster.id,
+                models.InspectionAgent.is_enabled.is_(True),
+                models.InspectionAgent.nodes_output.isnot(None),
+            )
+            .order_by(models.InspectionAgent.nodes_output_at.desc())
+            .first()
+        )
+    if not candidate or not candidate.nodes_output:
+        raise HTTPException(
+            status_code=404,
+            detail="暂无节点信息，请等待 Agent 上报后重试。",
+        )
+    output = candidate.nodes_output
+    retrieved_at = candidate.nodes_output_at or candidate.last_seen_at or datetime.utcnow()
+    return schemas.ClusterNodesOut(
+        output=output,
+        retrieved_at=retrieved_at,
+    )
 
 
 @app.put("/clusters/{cluster_id}", response_model=schemas.ClusterConfigOut)
@@ -1007,8 +1056,14 @@ def agent_heartbeat(
     payload: schemas.AgentHeartbeatIn,
     ctx: AgentRequestContext = Depends(_agent_request_dependency),
 ):
+    nodes_output = _normalize_nodes_output(payload.nodes_output)
+    nodes_retrieved_at = payload.nodes_retrieved_at
     updated = crud.record_agent_heartbeat(
-        ctx.db, ctx.agent, seen_at=payload.reported_at or datetime.utcnow()
+        ctx.db,
+        ctx.agent,
+        seen_at=payload.reported_at or datetime.utcnow(),
+        nodes_output=nodes_output,
+        nodes_output_at=nodes_retrieved_at,
     )
     refreshed = crud.get_inspection_agent(ctx.db, updated.id) or updated
     return _serialize_agent(refreshed)

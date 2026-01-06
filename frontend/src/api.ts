@@ -2,6 +2,7 @@ import { appConfig } from "./config";
 import {
   AgentRegisterResponse,
   ClusterConfig,
+  ClusterNodesPayload,
   InspectionAgent,
   InspectionItem,
   InspectionItemsExportPayload,
@@ -138,6 +139,12 @@ export function getReportDownloadUrl(
 
 export function getClusters(): Promise<ClusterConfig[]> {
   return request<ClusterConfig[]>("/clusters");
+}
+
+export function getClusterNodes(
+  clusterId: number
+): Promise<ClusterNodesPayload> {
+  return request<ClusterNodesPayload>(`/clusters/${clusterId}/nodes`);
 }
 
 export function registerCluster(formData: FormData): Promise<ClusterConfig> {

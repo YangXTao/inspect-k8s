@@ -476,6 +476,16 @@ def _ensure_inspection_agents_schema() -> None:
         statements.append(
             f"ALTER TABLE inspection_agents ADD COLUMN prometheus_url {column_type} NULL"
         )
+    if "nodes_output" not in columns:
+        column_type = "TEXT" if dialect == "sqlite" else "TEXT"
+        statements.append(
+            f"ALTER TABLE inspection_agents ADD COLUMN nodes_output {column_type} NULL"
+        )
+    if "nodes_output_at" not in columns:
+        column_type = "DATETIME" if dialect == "sqlite" else "DATETIME"
+        statements.append(
+            f"ALTER TABLE inspection_agents ADD COLUMN nodes_output_at {column_type} NULL"
+        )
 
     if dialect != "sqlite":
         statements.extend(

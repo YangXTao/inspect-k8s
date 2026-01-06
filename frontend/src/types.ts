@@ -110,6 +110,11 @@ export type InspectionItemsImportResult = {
   total: number;
 };
 
+export type ClusterNodesPayload = {
+  output: string;
+  retrieved_at: string;
+};
+
 export type LicenseStatus = {
   valid: boolean;
   reason?: string | null;

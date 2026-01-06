@@ -42,6 +42,7 @@ else:
 DEFAULT_POLL_INTERVAL = 10
 DEFAULT_BATCH_SIZE = 1
 DEFAULT_TIMEOUT = 15
+DEFAULT_NODE_REPORT_INTERVAL = 86400
 
 
 def _as_bool(value: Any) -> bool:
@@ -280,6 +281,7 @@ class AgentConfig:
     batch_size: int = DEFAULT_BATCH_SIZE
     verify_ssl: bool = True
     request_timeout: int = DEFAULT_TIMEOUT
+    node_report_interval: int = DEFAULT_NODE_REPORT_INTERVAL
 
     def load_token(self) -> Optional[str]:
         if self.token:
@@ -435,6 +437,13 @@ def load_config(config_path: Optional[str]) -> AgentConfig:
             os.getenv('INSPECT_AGENT_TIMEOUT', agent_cfg.get('request_timeout')),
             DEFAULT_TIMEOUT,
         ),
+        node_report_interval=_as_int(
+            os.getenv(
+                'INSPECT_AGENT_NODE_REPORT_INTERVAL',
+                agent_cfg.get('node_report_interval'),
+            ),
+            DEFAULT_NODE_REPORT_INTERVAL,
+        ),
     )
     return config
 class AgentClient:
@@ -494,8 +503,19 @@ class AgentClient:
         if self.config.token_file:
             self.config.save_token(self.token)
 
-    def send_heartbeat(self) -> Optional[Dict[str, Any]]:
-        payload = {"reported_at": datetime.now(timezone.utc).isoformat()}
+    def send_heartbeat(
+        self,
+        *,
+        nodes_output: Optional[str] = None,
+        nodes_retrieved_at: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        payload: Dict[str, Any] = {
+            "reported_at": datetime.now(timezone.utc).isoformat()
+        }
+        if nodes_output:
+            payload["nodes_output"] = nodes_output
+        if nodes_retrieved_at:
+            payload["nodes_retrieved_at"] = nodes_retrieved_at
         resp = self.session.post(
             f"{self.config.server_base}/agent/heartbeat",
             json=payload,
@@ -566,6 +586,7 @@ class AgentRunner:
         self.client = client
         self.prom_client: Optional[PrometheusClient] = None
         self._active_prom_url: Optional[str] = None
+        self._last_nodes_report_at: Optional[datetime] = None
         self._apply_prometheus_url(config.prometheus_url)
 
     def _await_run_active(self, run_id: int) -> bool:
@@ -604,6 +625,57 @@ class AgentRunner:
             verify_ssl=self.config.verify_ssl,
         )
         LOG.info("Prometheus URL 已同步为 %s", normalized)
+
+    def _should_report_nodes(self, now: datetime) -> bool:
+        interval = max(0, self.config.node_report_interval)
+        if interval == 0:
+            return False
+        if not self._last_nodes_report_at:
+            return True
+        elapsed = (now - self._last_nodes_report_at).total_seconds()
+        return elapsed >= interval
+
+    def _collect_nodes_output(self) -> Optional[str]:
+        kubeconfig_path = self.config.kubeconfig_path
+        if not kubeconfig_path or not kubeconfig_path.exists():
+            LOG.warning("节点信息上报跳过：未找到 kubeconfig。")
+            return None
+        kube_binary = os.getenv("KUBECTL_BINARY", "kubectl")
+        if shutil.which(kube_binary) is None:
+            LOG.warning("节点信息上报跳过：未找到 kubectl。")
+            return None
+        cmd = [
+            kube_binary,
+            "--kubeconfig",
+            str(kubeconfig_path),
+            "get",
+            "nodes",
+            "-o",
+            "wide",
+        ]
+        try:
+            completed = subprocess.run(
+                cmd,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=max(10, int(self.config.request_timeout)),
+            )
+        except subprocess.TimeoutExpired:
+            LOG.warning("节点信息上报超时。")
+            return None
+        except Exception as exc:
+            LOG.warning("节点信息上报失败: %s", exc)
+            return None
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "").strip()
+            LOG.warning("kubectl get nodes 失败: %s", detail)
+            return None
+        output = (completed.stdout or "").strip()
+        if not output:
+            LOG.warning("kubectl 未返回节点信息。")
+            return None
+        return output
 
     def sync_prometheus_from_config(self) -> None:
         self._apply_prometheus_url(self.config.prometheus_url)
@@ -644,7 +716,18 @@ class AgentRunner:
     def run_once(self) -> bool:
         heartbeat_blocked = False
         try:
-            heartbeat_data = self.client.send_heartbeat()
+            nodes_output = None
+            nodes_retrieved_at = None
+            now = datetime.now(timezone.utc)
+            if self._should_report_nodes(now):
+                self._last_nodes_report_at = now
+                nodes_output = self._collect_nodes_output()
+                if nodes_output:
+                    nodes_retrieved_at = now.isoformat()
+            heartbeat_data = self.client.send_heartbeat(
+                nodes_output=nodes_output,
+                nodes_retrieved_at=nodes_retrieved_at,
+            )
             if isinstance(heartbeat_data, dict):
                 server_prom = (heartbeat_data.get("prometheus_url") or "").strip()
                 if server_prom and server_prom != (self._active_prom_url or ""):

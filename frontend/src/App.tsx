@@ -36,6 +36,7 @@ import {
   exportInspectionItemsYaml,
   getAgents,
   getClusters,
+  getClusterNodes,
   getInspectionItems,
   getInspectionRun,
   getInspectionRuns,
@@ -2113,6 +2114,7 @@ const ClusterDetailView = ({
     }
   }, [navigate]);
 
+
   const clusterRuns = useMemo(() => {
     if (!cluster) {
       return [];
@@ -2207,6 +2209,12 @@ const ClusterDetailView = ({
   );
   const healthMessage =
     cluster?.agent_health_message?.trim() || null;
+  const handleViewNodes = useCallback(() => {
+    if (!clusterSlug) {
+      return;
+    }
+    navigate(`/clusters/${clusterSlug}/nodes`);
+  }, [clusterSlug, navigate]);
   const isTesting = enableServerConnectionTest
     ? Boolean(cluster && testingClusterIds[cluster.id])
     : false;
@@ -2379,6 +2387,13 @@ const ClusterDetailView = ({
             返回上一页
           </Link>
         <div className="detail-header-actions">
+          <button
+            type="button"
+            className="secondary"
+            onClick={handleViewNodes}
+          >
+            节点
+          </button>
           {enableServerConnectionTest && (
             <button
               type="button"
@@ -4607,6 +4622,119 @@ const ClusterEditModal = ({
   );
 };
 
+interface ClusterNodesViewProps {
+  clusters: ClusterConfig[];
+  clusterDisplayIds: Record<number, string>;
+}
+
+const ClusterNodesView = ({
+  clusters,
+  clusterDisplayIds,
+}: ClusterNodesViewProps) => {
+  const { clusterKey } = useParams<{ clusterKey?: string }>();
+  const navigate = useNavigate();
+  const [output, setOutput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retrievedAt, setRetrievedAt] = useState<string | null>(null);
+
+  const resolvedClusterId = useMemo(
+    () =>
+      resolveClusterIdFromRouteKey(clusterKey, clusterDisplayIds, clusters),
+    [clusterKey, clusterDisplayIds, clusters]
+  );
+  const cluster = useMemo(() => {
+    if (resolvedClusterId === null) {
+      return null;
+    }
+    return clusters.find((item) => item.id === resolvedClusterId) ?? null;
+  }, [clusters, resolvedClusterId]);
+  const clusterSlug = cluster
+    ? getClusterDisplayId(clusterDisplayIds, cluster.id, cluster)
+    : clusterKey ?? "-";
+
+  useEffect(() => {
+    if (resolvedClusterId === null) {
+      setError("集群标识无效，请返回重试。");
+      setOutput("");
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    getClusterNodes(resolvedClusterId)
+      .then((data) => {
+        if (cancelled) {
+          return;
+        }
+        setOutput((data.output || "").trim());
+        setRetrievedAt(data.retrieved_at ?? null);
+      })
+      .catch((err) => {
+        if (cancelled) {
+          return;
+        }
+        const message =
+          err instanceof Error ? err.message : "获取节点信息失败";
+        setError(message);
+        setOutput("");
+        setRetrievedAt(null);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedClusterId]);
+
+  const handleBackNavigation = useCallback(() => {
+    if (window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    if (cluster) {
+      navigate(`/clusters/${clusterSlug}`);
+      return;
+    }
+    navigate("/");
+  }, [cluster, clusterSlug, navigate]);
+
+  return (
+    <section className="card nodes-card">
+      <div className="detail-header">
+        <button
+          type="button"
+          className="back-button"
+          onClick={handleBackNavigation}
+        >
+          返回上一页
+        </button>
+      </div>
+      <div className="nodes-header">
+        <h2>节点信息</h2>
+        <span className="nodes-subtitle">
+          {cluster ? `${cluster.name}（${clusterSlug}）` : clusterSlug}
+        </span>
+        {retrievedAt && (
+          <span className="nodes-meta">
+            获取时间：{formatDate(retrievedAt)}
+          </span>
+        )}
+      </div>
+      {error && <div className="feedback error">{error}</div>}
+      {loading && <div className="feedback info">正在加载节点信息...</div>}
+      {!loading && !error && (
+        <pre className="nodes-output">
+          {output || "暂无节点信息"}
+        </pre>
+      )}
+    </section>
+  );
+};
+
 const App = () => {
   const [clusters, setClusters] = useState<ClusterConfig[]>([]);
   const [agents, setAgents] = useState<InspectionAgent[]>([]);
@@ -6583,6 +6711,15 @@ const hasManualKubeconfig = useMemo(
                 onTestClusterConnection={handleTestClusterConnection}
                 testingClusterIds={testingClusterIds}
                 license={licenseCapabilities}
+              />
+            }
+          />
+          <Route
+            path="/clusters/:clusterKey/nodes"
+            element={
+              <ClusterNodesView
+                clusters={clusters}
+                clusterDisplayIds={clusterDisplayIds}
               />
             }
           />

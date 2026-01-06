@@ -171,6 +171,8 @@ class InspectionAgent(Base):
     is_enabled = Column(Boolean, nullable=False, default=True)
     last_seen_at = Column(DateTime, nullable=True)
     prometheus_url = Column(String(255), nullable=True)
+    nodes_output = Column(Text, nullable=True)
+    nodes_output_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
