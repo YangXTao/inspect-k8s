@@ -669,7 +669,6 @@ body {
   gap: 10px;
   align-items: flex-start;
   width: 100%;
-  max-width: 600px;
   height: 100%;
   box-sizing: border-box;
   padding: 12px;

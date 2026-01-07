@@ -1180,34 +1180,32 @@ const OverviewView = ({
     [handlePageJump]
   );
 
-  const currentPageCount = useMemo(() => {
-    const start = (effectivePage - 1) * clusterPageSize;
-    const remaining = filteredClusters.length - start;
-    if (remaining <= 0) {
-      return 0;
-    }
-    return Math.min(clusterPageSize, remaining);
-  }, [clusterPageSize, effectivePage, filteredClusters.length]);
-
   const columnsForPage = useMemo(() => {
-    if (currentPageCount <= 1) {
+    const count = pagedClusters.length;
+    if (count <= 1) {
       return 1;
     }
-    if (currentPageCount === 2) {
+    if (count === 2) {
       return 2;
     }
-    return Math.min(currentPageCount, 3);
-  }, [currentPageCount]);
+    if (count <= 4) {
+      return count;
+    }
+    return Math.min(count, 5);
+  }, [pagedClusters.length]);
 
   const listStyle = useMemo<CSSProperties>(() => {
     const gap = 14;
-    const cardWidth = 260;
+    const cardWidth = 280;
     const maxWidth =
       columnsForPage * cardWidth + Math.max(columnsForPage - 1, 0) * gap;
     return {
       width: `min(100%, ${Math.max(maxWidth, cardWidth)}px)`,
       maxWidth: `${Math.max(maxWidth, cardWidth)}px`,
-      gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+      gridTemplateColumns:
+        columnsForPage === 1
+          ? "minmax(280px, 360px)"
+          : `repeat(${columnsForPage}, minmax(240px, 1fr))`,
       margin: 0,
     };
   }, [columnsForPage]);
