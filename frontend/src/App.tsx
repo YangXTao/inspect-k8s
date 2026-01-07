@@ -3340,7 +3340,6 @@ const SettingsOverviewPanel = ({
           )}
           <div className="settings-branding-copy">
             <h3>{brandingText}</h3>
-            <p>统一管理巡检项、Agent 节点以及 License 授权。</p>
           </div>
         </div>
         <div className="settings-overview-status">
@@ -3375,28 +3374,25 @@ const SettingsOverviewPanel = ({
         </div>
       </div>
       <div className="settings-overview-card">
-        <h4>License 详情</h4>
-        <div className="settings-overview-status">
-          <span className={`status-pill ${licenseStatusClass}`}>
-            {licenseStatusLabel}
-          </span>
-          {licenseHint && (
-            <span className="settings-overview-hint">{licenseHint}</span>
+        <div className="settings-overview-card-head">
+          <h4>License 信息</h4>
+          {licenseStatus?.expires_at && (
+            <span className="settings-overview-hint">
+              有效期至 {formatDate(licenseStatus.expires_at)}
+            </span>
           )}
         </div>
-        <div className="settings-overview-list">
-          <strong>功能列表</strong>
-          {featureList.length === 0 ? (
-            <span className="settings-overview-hint">暂无启用功能</span>
-          ) : (
-            <div className="chip-group settings-overview-badges">
-              {featureList.map((feature) => (
-                <span key={`license-${feature}`}  className="chip">
-                  {feature}
-                </span>
+        <div className="settings-overview-table">
+          <table>
+            <tbody>
+              {statusRows.map((row) => (
+                <tr key={row.label}>
+                  <th>{row.label}</th>
+                  <td>{row.value}</td>
+                </tr>
               ))}
-            </div>
-          )}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

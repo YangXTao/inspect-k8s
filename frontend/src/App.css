@@ -1841,17 +1841,20 @@ th {
   display: grid;
   grid-template-columns: minmax(220px, 280px) 1fr;
   gap: 18px;
+  align-content: start;
+  flex: 0 0 auto;
+  align-self: flex-start;
 }
 
 .settings-overview-card {
   border: 1px solid #e2e8f0;
   border-radius: 18px;
-  padding: 18px 20px;
+  padding: 16px 18px;
   background: #f8fafc;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
 .settings-overview-headline {
@@ -1884,6 +1887,14 @@ th {
 .settings-overview h4 {
   margin: 0;
   color: #1e293b;
+}
+
+.settings-overview-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .settings-overview-actions {
@@ -1930,9 +1941,14 @@ th {
 .settings-overview-card th,
 .settings-overview-card td {
   text-align: left;
-  padding: 6px 4px;
+  padding: 5px 4px;
   border-bottom: 1px solid #e2e8f0;
   color: #475569;
+}
+
+.settings-overview-table tr:last-child th,
+.settings-overview-table tr:last-child td {
+  border-bottom: none;
 }
 
 .settings-branding {
