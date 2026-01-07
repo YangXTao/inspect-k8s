@@ -2011,7 +2011,9 @@ const HistoryView = ({
                         type="button"
                         className="link-button"
                         onClick={() =>
-                          navigate(`/clusters/${clusterSlug}/runs/${runSlug}`)
+                          navigate(`/clusters/${clusterSlug}/runs/${runSlug}`, {
+                            state: { backTarget: "/history" },
+                          })
                         }
                       >
                         查看详情
@@ -4115,6 +4117,7 @@ const RunDetailView = ({
     runKey?: string;
   }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [run, setRun] = useState<InspectionRun | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -4257,7 +4260,11 @@ const RunDetailView = ({
     resolvedRunId !== null
       ? runDisplayIds[resolvedRunId] ?? `#${resolvedRunId}`
       : runKey ?? "-";
-  const backTarget = cluster ? `/clusters/${clusterSlug}` : "/history";
+  const backTargetFromState = (
+    location.state as { backTarget?: string } | null
+  )?.backTarget;
+  const backTarget =
+    backTargetFromState ?? (cluster ? `/clusters/${clusterSlug}` : "/history");
   const summaryRun = run ?? fallbackRun;
   const handleBackNavigation = useCallback(() => {
     if (window.history.length > 1) {
