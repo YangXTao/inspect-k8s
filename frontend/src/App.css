@@ -2101,20 +2101,21 @@ th {
 }
 
 .license-panel {
-  max-height: 100%;
-  overflow-y: auto;
-  padding-right: 2px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .license-panel .settings-list,
 .license-panel .settings-form {
   flex: 0 0 auto;
+  width: 100%;
 }
 
 .license-detail-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(240px, 1fr));
+  grid-template-columns: minmax(280px, 1.2fr) minmax(260px, 1fr);
   gap: 16px;
+  width: 100%;
 }
 
 .license-form {
