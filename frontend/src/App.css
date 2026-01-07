@@ -1595,29 +1595,22 @@ th {
 .settings-modal {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
   width: 100%;
   max-width: 960px;
-  max-height: calc(100vh - 32px);
-  height: min(calc(100vh - 32px), 860px);
+  max-height: calc(100vh - 48px);
+  height: min(calc(100vh - 48px), 920px);
   position: relative;
   overflow: hidden;
-  padding: 24px 28px;
+  padding: 28px 32px;
   background: #ffffff;
   border-radius: 24px;
   box-shadow: 0 32px 80px rgba(15, 23, 42, 0.35);
 }
 
-@supports (height: 100dvh) {
-  .settings-modal {
-    max-height: calc(100dvh - 32px);
-    height: min(calc(100dvh - 32px), 860px);
-  }
-}
-
 .settings-modal-compact {
   height: auto;
-  max-height: calc(100vh - 32px);
+  max-height: calc(100vh - 48px);
 }
 
 .settings-confirm-backdrop {
