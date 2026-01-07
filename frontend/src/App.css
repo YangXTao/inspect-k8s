@@ -2116,16 +2116,19 @@ th {
   grid-template-columns: minmax(280px, 1.2fr) minmax(260px, 1fr);
   gap: 16px;
   width: 100%;
+  min-width: 0;
 }
 
 .license-form {
   width: 100%;
+  min-width: 0;
 }
 
 .license-form input[type="file"],
 .license-form textarea,
 .license-form form {
   width: 100%;
+  box-sizing: border-box;
 }
 
 @media (max-width: 900px) {
