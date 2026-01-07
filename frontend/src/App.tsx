@@ -1145,35 +1145,13 @@ const OverviewView = ({
     [handlePageJump]
   );
 
-  const columnsForPage = useMemo(() => {
-    const count = pagedClusters.length;
-    if (count <= 1) {
-      return 1;
-    }
-    if (count === 2) {
-      return 2;
-    }
-    if (count <= 4) {
-      return count;
-    }
-    return Math.min(count, 5);
-  }, [pagedClusters.length]);
-
   const listStyle = useMemo<CSSProperties>(() => {
-    const gap = 14;
-    const cardWidth = 280;
-    const maxWidth =
-      columnsForPage * cardWidth + Math.max(columnsForPage - 1, 0) * gap;
     return {
-      width: `min(100%, ${Math.max(maxWidth, cardWidth)}px)`,
-      maxWidth: `${Math.max(maxWidth, cardWidth)}px`,
-      gridTemplateColumns:
-        columnsForPage === 1
-          ? "minmax(280px, 360px)"
-          : `repeat(${columnsForPage}, minmax(240px, 1fr))`,
+      width: "100%",
+      gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
       margin: 0,
     };
-  }, [columnsForPage]);
+  }, []);
 
   const [selectedClusterIds, setSelectedClusterIds] = useState<number[]>([]);
 
