@@ -3445,6 +3445,7 @@ const InspectionSettingsPanel = ({
   >("other");
   const [customCheckType, setCustomCheckType] = useState("custom");
   const [commandText, setCommandText] = useState("");
+  const [commandSuggestion, setCommandSuggestion] = useState("");
   const [promqlExpression, setPromqlExpression] = useState("");
   const [promqlComparison, setPromqlComparison] = useState(">=");
   const [promqlThreshold, setPromqlThreshold] = useState("");
@@ -3494,6 +3495,11 @@ const InspectionSettingsPanel = ({
       } else {
         setCommandText("");
       }
+      setCommandSuggestion(
+        String(
+          config.suggestion_on_fail ?? config.suggestion_on_success ?? ""
+        )
+      );
     } else if (rawType === "promql") {
       setFormTypeMode("promql");
       setCustomCheckType("custom");
@@ -3531,6 +3537,7 @@ const InspectionSettingsPanel = ({
     setFormTypeMode("other");
     setCustomCheckType("custom");
     setCommandText("");
+    setCommandSuggestion("");
     setPromqlExpression("");
     setPromqlComparison(">=");
     setPromqlThreshold("");
@@ -3572,6 +3579,12 @@ const InspectionSettingsPanel = ({
         ...baseConfig,
         command: commandText.trim(),
       };
+      delete parsedConfig.suggestion_on_fail;
+      delete parsedConfig.suggestion_on_success;
+      if (commandSuggestion.trim()) {
+        parsedConfig.suggestion_on_fail = commandSuggestion.trim();
+        parsedConfig.suggestion_on_success = commandSuggestion.trim();
+      }
     } else if (formTypeMode === "promql") {
       if (!promqlExpression.trim()) {
         setFormError("PromQL 表达式不能为空");
@@ -4027,6 +4040,18 @@ const InspectionSettingsPanel = ({
                   onChange={(event) => setCommandText(event.target.value)}
                   disabled={submitting}
                   placeholder="例如：kubectl get nodes"
+                />
+              </label>
+            )}
+            {formTypeMode === "command" && (
+              <label>
+                告警建议
+                <textarea
+                  value={commandSuggestion}
+                  onChange={(event) => setCommandSuggestion(event.target.value)}
+                  disabled={submitting}
+                  rows={3}
+                  placeholder="例如：检查证书是否临近过期"
                 />
               </label>
             )}
