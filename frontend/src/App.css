@@ -1608,6 +1608,11 @@ th {
   box-shadow: 0 32px 80px rgba(15, 23, 42, 0.35);
 }
 
+.settings-modal-compact {
+  height: auto;
+  max-height: calc(100vh - 48px);
+}
+
 .settings-confirm-backdrop {
   backdrop-filter: blur(2px);
 }
@@ -1704,6 +1709,10 @@ th {
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
   flex: 1;
   min-height: 0;
+}
+
+.settings-modal-compact .settings-modal-main > * {
+  flex: 0 0 auto;
 }
 
 .inspection-settings-panel {

@@ -3206,10 +3206,16 @@ const SettingsModal = ({
     onTabChange(tabId);
   };
 
+  const isCompactTab =
+    effectiveTabId === "overview" || effectiveTabId === "license";
+  const modalClassName = `settings-modal${
+    isCompactTab ? " settings-modal-compact" : ""
+  }`;
+
   return (
     <div className="modal-backdrop settings-confirm-backdrop" aria-modal="true">
       <div
-        className="settings-modal"
+        className={modalClassName}
         role="dialog"
         aria-label="系统设置"
         ref={containerRef}
