@@ -24,6 +24,7 @@ from reportlab.platypus import (
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfbase.ttfonts import TTFont
+from xml.sax.saxutils import escape
 
 from .models import InspectionResult, InspectionRun
 from .schemas import _extract_connection_meta
@@ -270,6 +271,25 @@ def generate_pdf_report(
         return fallback
 
     base_font = _register_font_family()
+    latin_font = "Helvetica"
+
+    def _wrap_latin(text: str | None) -> str:
+        if text is None:
+            return "-"
+        raw = str(text)
+        if not raw.strip():
+            return "-"
+        parts: list[str] = []
+        last = 0
+        for match in re.finditer(r"[A-Za-z0-9][A-Za-z0-9 .:/_%+=,-]*", raw):
+            start, end = match.span()
+            if start > last:
+                parts.append(escape(raw[last:start]))
+            parts.append(f'<font face="{latin_font}">{escape(match.group(0))}</font>')
+            last = end
+        if last < len(raw):
+            parts.append(escape(raw[last:]))
+        return "".join(parts)
 
     results_list = list(results)
     cluster_name, version_label, node_count_label = _get_cluster_meta(run)
@@ -404,7 +424,7 @@ def generate_pdf_report(
         ("巡检完成时间", format_dt(run.completed_at or datetime.utcnow())),
     ]
     meta_table_data = [
-        [Paragraph(label, styles["MetaLabel"]), Paragraph(value, styles["MetaValue"])]
+        [Paragraph(label, styles["MetaLabel"]), Paragraph(_wrap_latin(value), styles["MetaValue"])]
         for label, value in meta_rows
     ]
     meta_table = Table(meta_table_data, colWidths=[90, doc.width - 90], hAlign="LEFT")
@@ -468,7 +488,7 @@ def generate_pdf_report(
 
     story.append(Paragraph("巡检摘要", styles["SectionHeading"]))
     summary_text = (run.summary or "").strip() or "暂无巡检摘要。"
-    story.append(Paragraph(summary_text, styles["Muted"]))
+    story.append(Paragraph(_wrap_latin(summary_text), styles["Muted"]))
     story.append(Spacer(1, 14))
 
     story.append(Paragraph("巡检明细", styles["SectionHeading"]))
@@ -500,12 +520,16 @@ def generate_pdf_report(
         data.append(
             [
                 Paragraph(
-                    result.item.name if result.item else (result.item_name_cached or "巡检项已删除"),
+                    _wrap_latin(
+                        result.item.name
+                        if result.item
+                        else (result.item_name_cached or "巡检项已删除")
+                    ),
                     styles["BodyText"],
                 ),
                 Paragraph(status_label, styles["TableStatus"]),
-                Paragraph(result.detail or "-", detail_style),
-                Paragraph(result.suggestion or "-", suggestion_style),
+                Paragraph(_wrap_latin(result.detail), detail_style),
+                Paragraph(_wrap_latin(result.suggestion), suggestion_style),
             ]
         )
     table = LongTable(data, colWidths=[130, 70, 210, 160], repeatRows=1)
