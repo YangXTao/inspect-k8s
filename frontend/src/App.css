@@ -1613,6 +1613,11 @@ th {
   max-height: calc(100vh - 48px);
 }
 
+.settings-modal-compact .settings-modal-shell,
+.settings-modal-compact .settings-modal-main {
+  flex: 0 0 auto;
+}
+
 .settings-confirm-backdrop {
   backdrop-filter: blur(2px);
 }
@@ -2093,6 +2098,11 @@ th {
 
 .settings-content-stack .settings-header {
   width: 100%;
+}
+
+.license-panel .settings-list,
+.license-panel .settings-form {
+  flex: 0 0 auto;
 }
 
 .settings-content.grid {

@@ -4211,7 +4211,7 @@ const LicenseSettingsPanel = ({
   }, [localNotice]);
 
   return (
-    <div className="settings-content settings-content-stack">
+    <div className="settings-content settings-content-stack license-panel">
       <div className="settings-header">
         <div>
           <h3>License 管理</h3>
