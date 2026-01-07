@@ -1563,6 +1563,7 @@ th {
   width: 100%;
   max-width: 960px;
   max-height: calc(100vh - 48px);
+  height: min(calc(100vh - 48px), 920px);
   position: relative;
   overflow: hidden;
   padding: 28px 32px;
@@ -1653,7 +1654,10 @@ th {
   min-width: 0;
   padding: 4px;
   max-height: 100%;
-  overflow: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .settings-modal-main > * {
@@ -1662,6 +1666,8 @@ th {
   padding: 18px 20px;
   background: #fff;
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+  flex: 1;
+  min-height: 0;
 }
 
 .inspection-settings-panel {
@@ -1670,6 +1676,7 @@ th {
   flex-direction: column;
   gap: 16px;
   min-height: 0;
+  flex: 1;
 }
 
 .inspection-settings-body {

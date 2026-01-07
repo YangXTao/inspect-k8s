@@ -3305,6 +3305,7 @@ const InspectionSettingsPanel = ({
   const [promqlExpression, setPromqlExpression] = useState("");
   const [promqlComparison, setPromqlComparison] = useState(">=");
   const [promqlThreshold, setPromqlThreshold] = useState("");
+  const [promqlDescribe, setPromqlDescribe] = useState("");
   const [configText, setConfigText] = useState("{}");
   const [formError, setFormError] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -3322,6 +3323,7 @@ const InspectionSettingsPanel = ({
       setPromqlExpression("");
       setPromqlComparison(">=");
       setPromqlThreshold("");
+      setPromqlDescribe("");
       setConfigText("{}");
       setFormError(null);
     }
@@ -3352,6 +3354,13 @@ const InspectionSettingsPanel = ({
       setPromqlExpression(String(config.expression ?? ""));
       const comparisonRaw = String(config.comparison ?? ">=");
       setPromqlComparison(comparisonRaw === "=" ? "==" : comparisonRaw);
+      setPromqlDescribe(
+        String(
+          config.suggestion_on_warn ??
+            config.suggestion_on_fail ??
+            ""
+        )
+      );
       const threshold =
         config.warn_threshold ?? config.fail_threshold ?? "";
       setPromqlThreshold(
@@ -3364,6 +3373,7 @@ const InspectionSettingsPanel = ({
       setPromqlExpression("");
       setPromqlComparison(">=");
       setPromqlThreshold("");
+      setPromqlDescribe("");
     }
     setFormError(null);
   };
@@ -3378,6 +3388,7 @@ const InspectionSettingsPanel = ({
     setPromqlExpression("");
     setPromqlComparison(">=");
     setPromqlThreshold("");
+    setPromqlDescribe("");
     setConfigText("{}");
     setFormError(null);
   };
@@ -3437,8 +3448,13 @@ const InspectionSettingsPanel = ({
       };
       delete parsedConfig.warn_threshold;
       delete parsedConfig.fail_threshold;
+      delete parsedConfig.suggestion_on_warn;
+      delete parsedConfig.suggestion_on_fail;
       if (thresholdValue !== undefined) {
         parsedConfig.warn_threshold = thresholdValue;
+      }
+      if (promqlDescribe.trim()) {
+        parsedConfig.suggestion_on_warn = promqlDescribe.trim();
       }
     } else {
       if (configText.trim()) {
@@ -3856,6 +3872,16 @@ const InspectionSettingsPanel = ({
                   />
                 </label>
               </div>
+              <label>
+                告警建议
+                <textarea
+                  value={promqlDescribe}
+                  onChange={(event) => setPromqlDescribe(event.target.value)}
+                  disabled={submitting}
+                  rows={3}
+                  placeholder="达到阈值时写入巡检建议，例如：检查集群负载或扩容"
+                />
+              </label>
             </>
           )}
           {formTypeMode === "other" && (
