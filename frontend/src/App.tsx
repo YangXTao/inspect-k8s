@@ -1128,6 +1128,27 @@ const OverviewView = ({
     return filteredClusters.slice(start, start + clusterPageSize);
   }, [filteredClusters, effectivePage, clusterPageSize]);
 
+  const clusterListRef = useRef<HTMLDivElement | null>(null);
+  const [clusterListWidth, setClusterListWidth] = useState(0);
+
+  useEffect(() => {
+    const node = clusterListRef.current;
+    if (!node) {
+      return;
+    }
+    const updateWidth = () => {
+      setClusterListWidth(node.clientWidth);
+    };
+    updateWidth();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateWidth);
+      return () => window.removeEventListener("resize", updateWidth);
+    }
+    const observer = new ResizeObserver(() => updateWidth());
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
   const handlePageChange = useCallback(
     (page: number) => {
       const target = Math.min(Math.max(page, 1), totalPages);
@@ -1181,27 +1202,22 @@ const OverviewView = ({
   );
 
   const columnsForPage = useMemo(() => {
-    const count = pagedClusters.length;
-    if (count <= 1) {
-      return 1;
+    const maxColumns = 5;
+    const minCardWidth = 240;
+    const gap = 14;
+    const count = Math.max(pagedClusters.length, 1);
+    if (!clusterListWidth) {
+      return Math.min(count, maxColumns);
     }
-    if (count === 2) {
-      return 2;
-    }
-    if (count <= 4) {
-      return count;
-    }
-    return Math.min(count, 5);
-  }, [pagedClusters.length]);
+    const maxFit = Math.max(
+      1,
+      Math.floor((clusterListWidth + gap) / (minCardWidth + gap))
+    );
+    return Math.min(count, maxColumns, maxFit);
+  }, [clusterListWidth, pagedClusters.length]);
 
   const listStyle = useMemo<CSSProperties>(() => {
-    const gap = 14;
-    const cardWidth = 280;
-    const maxWidth =
-      columnsForPage * cardWidth + Math.max(columnsForPage - 1, 0) * gap;
     return {
-      width: `min(100%, ${Math.max(maxWidth, cardWidth)}px)`,
-      maxWidth: `${Math.max(maxWidth, cardWidth)}px`,
       gridTemplateColumns:
         columnsForPage === 1
           ? "minmax(280px, 360px)"
@@ -1390,7 +1406,7 @@ const OverviewView = ({
           <p className="placeholder">未找到匹配的集群。</p>
         ) : (
           <>
-            <div className="cluster-list" style={listStyle}>
+            <div className="cluster-list" style={listStyle} ref={clusterListRef}>
               {pagedClusters.map((cluster) => {
                 const statusMeta = getClusterStatusMeta(
                   cluster.connection_status
