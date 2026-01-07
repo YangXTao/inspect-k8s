@@ -3297,16 +3297,31 @@ const InspectionSettingsPanel = ({
   const [editingItem, setEditingItem] = useState<InspectionItem | null>(null);
   const [formName, setFormName] = useState("");
   const [formDescription, setFormDescription] = useState("");
-  const [formCheckType, setFormCheckType] = useState("custom");
+  const [formTypeMode, setFormTypeMode] = useState<
+    "command" | "promql" | "other"
+  >("other");
+  const [customCheckType, setCustomCheckType] = useState("custom");
+  const [commandText, setCommandText] = useState("");
+  const [promqlExpression, setPromqlExpression] = useState("");
+  const [promqlComparison, setPromqlComparison] = useState(">=");
+  const [promqlThreshold, setPromqlThreshold] = useState("");
   const [configText, setConfigText] = useState("{}");
   const [formError, setFormError] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const [pageSize, setPageSize] = useState(20);
+  const [page, setPage] = useState(1);
+  const [pageInput, setPageInput] = useState("");
 
   useEffect(() => {
     if (!editingItem) {
       setFormName("");
       setFormDescription("");
-      setFormCheckType("custom");
+      setFormTypeMode("other");
+      setCustomCheckType("custom");
+      setCommandText("");
+      setPromqlExpression("");
+      setPromqlComparison(">=");
+      setPromqlThreshold("");
       setConfigText("{}");
       setFormError(null);
     }
@@ -3316,17 +3331,53 @@ const InspectionSettingsPanel = ({
     setEditingItem(item);
     setFormName(item.name ?? "");
     setFormDescription(item.description ?? "");
-    setFormCheckType(item.check_type ?? "custom");
-    setConfigText(
-      item.config ? JSON.stringify(item.config, null, 2) : "{}"
-    );
+    const rawType = (item.check_type ?? "custom").trim();
+    const config =
+      item.config && typeof item.config === "object" ? item.config : {};
+    setConfigText(JSON.stringify(config, null, 2));
+    if (rawType === "command") {
+      setFormTypeMode("command");
+      setCustomCheckType("custom");
+      const commandValue = config.command;
+      if (Array.isArray(commandValue)) {
+        setCommandText(commandValue.map(String).join(" "));
+      } else if (commandValue) {
+        setCommandText(String(commandValue));
+      } else {
+        setCommandText("");
+      }
+    } else if (rawType === "promql") {
+      setFormTypeMode("promql");
+      setCustomCheckType("custom");
+      setPromqlExpression(String(config.expression ?? ""));
+      const comparisonRaw = String(config.comparison ?? ">=");
+      setPromqlComparison(comparisonRaw === "=" ? "==" : comparisonRaw);
+      const threshold =
+        config.warn_threshold ?? config.fail_threshold ?? "";
+      setPromqlThreshold(
+        threshold === null || threshold === undefined ? "" : String(threshold)
+      );
+    } else {
+      setFormTypeMode("other");
+      setCustomCheckType(rawType || "custom");
+      setCommandText("");
+      setPromqlExpression("");
+      setPromqlComparison(">=");
+      setPromqlThreshold("");
+    }
+    setFormError(null);
   };
 
   const resetForm = () => {
     setEditingItem(null);
     setFormName("");
     setFormDescription("");
-    setFormCheckType("custom");
+    setFormTypeMode("other");
+    setCustomCheckType("custom");
+    setCommandText("");
+    setPromqlExpression("");
+    setPromqlComparison(">=");
+    setPromqlThreshold("");
     setConfigText("{}");
     setFormError(null);
   };
@@ -3337,13 +3388,66 @@ const InspectionSettingsPanel = ({
       setFormError("巡检项名称不能为空");
       return;
     }
+    const resolvedCheckType =
+      formTypeMode === "command"
+        ? "command"
+        : formTypeMode === "promql"
+          ? "promql"
+          : customCheckType.trim() || "custom";
+    if (formTypeMode === "other" && !customCheckType.trim()) {
+      setFormError("请输入自定义类型名称");
+      return;
+    }
+    const baseConfig =
+      editingItem &&
+      editingItem.check_type === resolvedCheckType &&
+      editingItem.config &&
+      typeof editingItem.config === "object"
+        ? editingItem.config
+        : {};
     let parsedConfig: Record<string, unknown> = {};
-    if (configText.trim()) {
-      try {
-        parsedConfig = JSON.parse(configText);
-      } catch (err) {
-        setFormError("Config 必须是合法的 JSON");
+    if (formTypeMode === "command") {
+      if (!commandText.trim()) {
+        setFormError("命令不能为空");
         return;
+      }
+      parsedConfig = {
+        ...baseConfig,
+        command: commandText.trim(),
+      };
+    } else if (formTypeMode === "promql") {
+      if (!promqlExpression.trim()) {
+        setFormError("PromQL 表达式不能为空");
+        return;
+      }
+      const thresholdText = promqlThreshold.trim();
+      let thresholdValue: number | undefined;
+      if (thresholdText) {
+        const parsedValue = Number(thresholdText);
+        if (Number.isNaN(parsedValue)) {
+          setFormError("告警阈值必须为数字");
+          return;
+        }
+        thresholdValue = parsedValue;
+      }
+      parsedConfig = {
+        ...baseConfig,
+        expression: promqlExpression.trim(),
+        comparison: promqlComparison || ">=",
+      };
+      delete parsedConfig.warn_threshold;
+      delete parsedConfig.fail_threshold;
+      if (thresholdValue !== undefined) {
+        parsedConfig.warn_threshold = thresholdValue;
+      }
+    } else {
+      if (configText.trim()) {
+        try {
+          parsedConfig = JSON.parse(configText);
+        } catch (err) {
+          setFormError("Config 必须是合法的 JSON");
+          return;
+        }
       }
     }
     setFormError(null);
@@ -3351,7 +3455,7 @@ const InspectionSettingsPanel = ({
       id: editingItem?.id,
       name: formName.trim(),
       description: formDescription.trim() || undefined,
-      check_type: formCheckType.trim() || "custom",
+      check_type: resolvedCheckType,
       config: parsedConfig,
     });
     resetForm();
@@ -3392,6 +3496,47 @@ const InspectionSettingsPanel = ({
     }
     await onImport(file);
   };
+
+  useEffect(() => {
+    setSelectedIds((prev) =>
+      prev.filter((id) => items.some((item) => item.id === id))
+    );
+  }, [items]);
+
+  const sortedItems = useMemo(
+    () => items.slice().sort(compareInspectionItemByName),
+    [items]
+  );
+  const totalItems = sortedItems.length;
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(totalItems / Math.max(1, pageSize))),
+    [pageSize, totalItems]
+  );
+  const pagedItems = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return sortedItems.slice(start, start + pageSize);
+  }, [page, pageSize, sortedItems]);
+
+  useEffect(() => {
+    setPage(1);
+    setPageInput("");
+  }, [pageSize, totalItems]);
+
+  useEffect(() => {
+    setPage((prev) => Math.min(Math.max(prev, 1), totalPages));
+  }, [totalPages]);
+
+  const handlePageJump = useCallback(() => {
+    const trimmed = pageInput.trim();
+    if (!trimmed) {
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isNaN(parsed)) {
+      setPage(Math.min(Math.max(Math.floor(parsed), 1), totalPages));
+    }
+    setPageInput("");
+  }, [pageInput, totalPages]);
 
   const currentSummary = editingItem
     ? `正在编辑：${editingItem.name}`
@@ -3446,24 +3591,29 @@ const InspectionSettingsPanel = ({
       {formError && <div className="feedback error">{formError}</div>}
       <div className="settings-content grid">
         <div className="settings-list">
-          <div className="settings-actions">
-            <label className="table-checkbox">
-              <input
-                type="checkbox"
-                checked={selectedIds.length === items.length && items.length > 0}
-                onChange={toggleSelectAll}
-              />
-              <span>全选</span>
-            </label>
-            <span>已选 {selectedIds.length} / {items.length}</span>
-            <button
-              type="button"
-              className="link-button danger"
-              onClick={handleDeleteSelected}
-              disabled={selectedIds.length === 0}
-            >
-              批量删除
-            </button>
+          <div className="settings-list-header">
+            <div className="settings-actions">
+              <label className="table-checkbox">
+                <input
+                  type="checkbox"
+                  checked={
+                    selectedIds.length === items.length && items.length > 0
+                  }
+                  onChange={toggleSelectAll}
+                />
+                <span>全选</span>
+              </label>
+              <span>已选 {selectedIds.length} / {totalItems}</span>
+              <button
+                type="button"
+                className="link-button danger"
+                onClick={handleDeleteSelected}
+                disabled={selectedIds.length === 0}
+              >
+                批量删除
+              </button>
+            </div>
+            <span className="settings-list-count">共 {totalItems} 条</span>
           </div>
           <div className="table-wrapper">
             {items.length === 0 ? (
@@ -3479,7 +3629,7 @@ const InspectionSettingsPanel = ({
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((item) => (
+                  {pagedItems.map((item) => (
                     <tr key={item.id}>
                       <td>
                         <label className="table-checkbox">
@@ -3515,6 +3665,69 @@ const InspectionSettingsPanel = ({
               </table>
             )}
           </div>
+          {items.length > 0 && (
+            <div className="settings-pagination">
+              <label className="page-size-control">
+                每页
+                <select
+                  value={pageSize}
+                  onChange={(event) =>
+                    setPageSize(Number(event.target.value))
+                  }
+                >
+                  {[20, 50, 100].map((size) => (
+                    <option key={size} value={size}>
+                      {size}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="history-pagination-buttons">
+                <button
+                  type="button"
+                  className="page-button"
+                  disabled={page <= 1}
+                  onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
+                >
+                  上一页
+                </button>
+                <span>
+                  第 {page} / {totalPages} 页
+                </span>
+                <button
+                  type="button"
+                  className="page-button"
+                  disabled={page >= totalPages}
+                  onClick={() =>
+                    setPage((prev) => Math.min(prev + 1, totalPages))
+                  }
+                >
+                  下一页
+                </button>
+              </div>
+              <div className="page-jump">
+                跳转
+                <input
+                  className="page-jump-input"
+                  value={pageInput}
+                  onChange={(event) => setPageInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      handlePageJump();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="page-button"
+                  onClick={handlePageJump}
+                >
+                  确定
+                </button>
+              </div>
+            </div>
+          )}
         </div>
         <form className="settings-form" onSubmit={handleSubmit}>
           <h4>{editingItem ? "编辑巡检项" : "新增巡检项"}</h4>
@@ -3530,14 +3743,32 @@ const InspectionSettingsPanel = ({
           </label>
           <label>
             类型
-            <input
-              type="text"
-              value={formCheckType}
-              onChange={(event) => setFormCheckType(event.target.value)}
+            <select
+              value={formTypeMode}
+              onChange={(event) =>
+                setFormTypeMode(
+                  event.target.value as "command" | "promql" | "other"
+                )
+              }
               disabled={submitting}
-              placeholder="custom"
-            />
+            >
+              <option value="command">命令行</option>
+              <option value="promql">PromQL</option>
+              <option value="other">其他</option>
+            </select>
           </label>
+          {formTypeMode === "other" && (
+            <label>
+              自定义类型
+              <input
+                type="text"
+                value={customCheckType}
+                onChange={(event) => setCustomCheckType(event.target.value)}
+                disabled={submitting}
+                placeholder="custom"
+              />
+            </label>
+          )}
           <label>
             描述
             <input
@@ -3548,15 +3779,78 @@ const InspectionSettingsPanel = ({
               placeholder="可选"
             />
           </label>
-          <label>
-            Config (JSON)
-            <textarea
-              value={configText}
-              onChange={(event) => setConfigText(event.target.value)}
-              rows={6}
-              disabled={submitting}
-            />
-          </label>
+          {formTypeMode === "command" && (
+            <label>
+              命令
+              <input
+                type="text"
+                value={commandText}
+                onChange={(event) => setCommandText(event.target.value)}
+                disabled={submitting}
+                placeholder="例如：kubectl get nodes"
+              />
+            </label>
+          )}
+          {formTypeMode === "promql" && (
+            <>
+              <label>
+                PromQL 表达式
+                <input
+                  type="text"
+                  value={promqlExpression}
+                  onChange={(event) => setPromqlExpression(event.target.value)}
+                  disabled={submitting}
+                  placeholder="例如：sum(rate(container_cpu_usage_seconds_total[5m]))"
+                />
+              </label>
+              <div className="field-row">
+                <label>
+                  比较符
+                  <select
+                    value={promqlComparison}
+                    onChange={(event) =>
+                      setPromqlComparison(event.target.value)
+                    }
+                    disabled={submitting}
+                  >
+                    {[
+                      ">",
+                      "<",
+                      "=",
+                      ">=",
+                      "<=",
+                      "!=",
+                    ].map((symbol) => (
+                      <option key={symbol} value={symbol === "=" ? "==" : symbol}>
+                        {symbol}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  告警阈值
+                  <input
+                    type="number"
+                    value={promqlThreshold}
+                    onChange={(event) => setPromqlThreshold(event.target.value)}
+                    disabled={submitting}
+                    placeholder="例如：0.8"
+                  />
+                </label>
+              </div>
+            </>
+          )}
+          {formTypeMode === "other" && (
+            <label>
+              配置 (JSON)
+              <textarea
+                value={configText}
+                onChange={(event) => setConfigText(event.target.value)}
+                rows={6}
+                disabled={submitting}
+              />
+            </label>
+          )}
           <div className="settings-actions">
             <button
               type="button"
