@@ -3589,148 +3589,166 @@ const InspectionSettingsPanel = ({
       {notice && <div className="feedback success">{notice}</div>}
       {error && <div className="feedback error">{error}</div>}
       {formError && <div className="feedback error">{formError}</div>}
-      <div className="settings-content grid">
-        <div className="settings-list">
-          <div className="settings-list-header">
-            <div className="settings-actions">
-              <label className="table-checkbox">
-                <input
-                  type="checkbox"
-                  checked={
-                    selectedIds.length === items.length && items.length > 0
-                  }
-                  onChange={toggleSelectAll}
-                />
-                <span>全选</span>
-              </label>
-              <span>已选 {selectedIds.length} / {totalItems}</span>
-              <button
-                type="button"
-                className="link-button danger"
-                onClick={handleDeleteSelected}
-                disabled={selectedIds.length === 0}
-              >
-                批量删除
-              </button>
+      <div className="inspection-settings-body">
+        <section className="inspection-section inspection-section-list">
+          <div className="inspection-section-header">
+            <div>
+              <h4>已有巡检项</h4>
+              <span className="inspection-section-hint">
+                支持批量选择、导出与删除操作
+              </span>
             </div>
-            <span className="settings-list-count">共 {totalItems} 条</span>
+            <span className="inspection-section-count">共 {totalItems} 条</span>
           </div>
-          <div className="table-wrapper">
-            {items.length === 0 ? (
-              <div className="placeholder">暂无巡检项</div>
-            ) : (
-              <table>
-                <thead>
-                  <tr>
-                    <th>名称</th>
-                    <th>类型</th>
-                    <th>更新时间</th>
-                    <th>操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pagedItems.map((item) => (
-                    <tr key={item.id}>
-                      <td>
-                        <label className="table-checkbox">
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.includes(item.id)}
-                            onChange={() => toggleSelection(item.id)}
-                          />
-                          <span>{item.name}</span>
-                        </label>
-                      </td>
-                      <td>{item.check_type}</td>
-                      <td>{formatDate(item.updated_at)}</td>
-                      <td className="actions">
-                        <button
-                          type="button"
-                          className="link-button"
-                          onClick={() => startEdit(item)}
-                        >
-                          编辑
-                        </button>
-                        <button
-                          type="button"
-                          className="link-button danger"
-                          onClick={() => onDelete(item)}
-                        >
-                          删除
-                        </button>
-                      </td>
+          <div className="settings-list">
+            <div className="settings-list-header">
+              <div className="settings-actions">
+                <label className="table-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={
+                      selectedIds.length === items.length && items.length > 0
+                    }
+                    onChange={toggleSelectAll}
+                  />
+                  <span>全选</span>
+                </label>
+                <span>已选 {selectedIds.length} / {totalItems}</span>
+                <button
+                  type="button"
+                  className="link-button danger"
+                  onClick={handleDeleteSelected}
+                  disabled={selectedIds.length === 0}
+                >
+                  批量删除
+                </button>
+              </div>
+            </div>
+            <div className="table-wrapper">
+              {items.length === 0 ? (
+                <div className="placeholder">暂无巡检项</div>
+              ) : (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>名称</th>
+                      <th>类型</th>
+                      <th>更新时间</th>
+                      <th>操作</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {pagedItems.map((item) => (
+                      <tr key={item.id}>
+                        <td>
+                          <label className="table-checkbox">
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.includes(item.id)}
+                              onChange={() => toggleSelection(item.id)}
+                            />
+                            <span>{item.name}</span>
+                          </label>
+                        </td>
+                        <td>{item.check_type}</td>
+                        <td>{formatDate(item.updated_at)}</td>
+                        <td className="actions">
+                          <button
+                            type="button"
+                            className="link-button"
+                            onClick={() => startEdit(item)}
+                          >
+                            编辑
+                          </button>
+                          <button
+                            type="button"
+                            className="link-button danger"
+                            onClick={() => onDelete(item)}
+                          >
+                            删除
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            {items.length > 0 && (
+              <div className="settings-pagination">
+                <label className="page-size-control">
+                  每页
+                  <select
+                    value={pageSize}
+                    onChange={(event) =>
+                      setPageSize(Number(event.target.value))
+                    }
+                  >
+                    {[20, 50, 100].map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="history-pagination-buttons">
+                  <button
+                    type="button"
+                    className="page-button"
+                    disabled={page <= 1}
+                    onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
+                  >
+                    上一页
+                  </button>
+                  <span>
+                    第 {page} / {totalPages} 页
+                  </span>
+                  <button
+                    type="button"
+                    className="page-button"
+                    disabled={page >= totalPages}
+                    onClick={() =>
+                      setPage((prev) => Math.min(prev + 1, totalPages))
+                    }
+                  >
+                    下一页
+                  </button>
+                </div>
+                <div className="page-jump">
+                  跳转
+                  <input
+                    className="page-jump-input"
+                    value={pageInput}
+                    onChange={(event) => setPageInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        handlePageJump();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="page-button"
+                    onClick={handlePageJump}
+                  >
+                    确定
+                  </button>
+                </div>
+              </div>
             )}
           </div>
-          {items.length > 0 && (
-            <div className="settings-pagination">
-              <label className="page-size-control">
-                每页
-                <select
-                  value={pageSize}
-                  onChange={(event) =>
-                    setPageSize(Number(event.target.value))
-                  }
-                >
-                  {[20, 50, 100].map((size) => (
-                    <option key={size} value={size}>
-                      {size}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="history-pagination-buttons">
-                <button
-                  type="button"
-                  className="page-button"
-                  disabled={page <= 1}
-                  onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
-                >
-                  上一页
-                </button>
-                <span>
-                  第 {page} / {totalPages} 页
-                </span>
-                <button
-                  type="button"
-                  className="page-button"
-                  disabled={page >= totalPages}
-                  onClick={() =>
-                    setPage((prev) => Math.min(prev + 1, totalPages))
-                  }
-                >
-                  下一页
-                </button>
-              </div>
-              <div className="page-jump">
-                跳转
-                <input
-                  className="page-jump-input"
-                  value={pageInput}
-                  onChange={(event) => setPageInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      handlePageJump();
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  className="page-button"
-                  onClick={handlePageJump}
-                >
-                  确定
-                </button>
-              </div>
+        </section>
+        <section className="inspection-section inspection-section-form">
+          <div className="inspection-section-header">
+            <div>
+              <h4>{editingItem ? "编辑巡检项" : "新增巡检项"}</h4>
+              <span className="inspection-section-hint">
+                选择类型后填写配置，保存后立即生效
+              </span>
             </div>
-          )}
-        </div>
-        <form className="settings-form" onSubmit={handleSubmit}>
-          <h4>{editingItem ? "编辑巡检项" : "新增巡检项"}</h4>
+          </div>
+          <form className="settings-form inspection-form" onSubmit={handleSubmit}>
           <label>
             名称
             <input
@@ -3864,7 +3882,8 @@ const InspectionSettingsPanel = ({
               {editingItem ? "保存修改" : "新增"}
             </button>
           </div>
-        </form>
+          </form>
+        </section>
       </div>
     </div>
   );
