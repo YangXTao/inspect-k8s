@@ -198,8 +198,9 @@ def _execute_command_check(
             or _truncate(stderr)
             or str(config.get("success_message") or "命令执行成功。")
         )
+        status = CHECK_STATUS_WARNING if config.get("force_warning") else CHECK_STATUS_PASSED
         return (
-            CHECK_STATUS_PASSED,
+            status,
             detail,
             config.get("suggestion_on_success") or "",
         )
