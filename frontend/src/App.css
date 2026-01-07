@@ -1677,6 +1677,7 @@ th {
   gap: 16px;
   min-height: 0;
   flex: 1;
+  overflow: hidden;
 }
 
 .inspection-settings-body {

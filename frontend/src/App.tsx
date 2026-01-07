@@ -3559,7 +3559,7 @@ const InspectionSettingsPanel = ({
     : "新增巡检项";
 
   return (
-    <div className="settings-content inspection-settings-panel">
+    <div className="inspection-settings-panel">
       <div className="settings-header">
         <div>
           <h3>巡检项管理</h3>
