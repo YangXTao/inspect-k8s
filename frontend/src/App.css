@@ -2093,7 +2093,10 @@ th {
 .inspection-form label {
   font-weight: 600;
   color: #1e293b;
-  gap: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
 }
 
 .inspection-form input,
@@ -2104,6 +2107,8 @@ th {
   padding: 8px 10px;
   font-size: 13px;
   background: #fff;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .inspection-form input:focus,
@@ -2135,12 +2140,15 @@ th {
 }
 
 .field-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(180px, 1.2fr);
   gap: 12px;
+  width: 100%;
+  align-items: end;
 }
 
 .field-row label {
-  flex: 1;
+  margin: 0;
 }
 
 .kubeconfig-modal-upload {

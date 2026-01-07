@@ -3765,125 +3765,125 @@ const InspectionSettingsPanel = ({
             </div>
           </div>
           <form className="settings-form inspection-form" onSubmit={handleSubmit}>
-          <label>
-            名称
-            <input
-              type="text"
-              value={formName}
-              onChange={(event) => setFormName(event.target.value)}
-              disabled={submitting}
-              placeholder="例如：etcd-health"
-            />
-          </label>
-          <label>
-            类型
-            <select
-              value={formTypeMode}
-              onChange={(event) =>
-                setFormTypeMode(
-                  event.target.value as "command" | "promql" | "other"
-                )
-              }
-              disabled={submitting}
-            >
-              <option value="command">命令行</option>
-              <option value="promql">PromQL</option>
-              <option value="other">其他</option>
-            </select>
-          </label>
-          {formTypeMode === "other" && (
             <label>
-              自定义类型
+              名称
               <input
                 type="text"
-                value={customCheckType}
-                onChange={(event) => setCustomCheckType(event.target.value)}
+                value={formName}
+                onChange={(event) => setFormName(event.target.value)}
                 disabled={submitting}
-                placeholder="custom"
+                placeholder="例如：etcd-health"
               />
             </label>
-          )}
-          <label>
-            描述
-            <input
-              type="text"
-              value={formDescription}
-              onChange={(event) => setFormDescription(event.target.value)}
-              disabled={submitting}
-              placeholder="可选"
-            />
-          </label>
-          {formTypeMode === "command" && (
             <label>
-              命令
-              <input
-                type="text"
-                value={commandText}
-                onChange={(event) => setCommandText(event.target.value)}
+              类型
+              <select
+                value={formTypeMode}
+                onChange={(event) =>
+                  setFormTypeMode(
+                    event.target.value as "command" | "promql" | "other"
+                  )
+                }
                 disabled={submitting}
-                placeholder="例如：kubectl get nodes"
-              />
+              >
+                <option value="command">命令行</option>
+                <option value="promql">PromQL</option>
+                <option value="other">其他</option>
+              </select>
             </label>
-          )}
-          {formTypeMode === "promql" && (
-            <>
+            {formTypeMode === "other" && (
               <label>
-                PromQL 表达式
+                自定义类型
                 <input
                   type="text"
-                  value={promqlExpression}
-                  onChange={(event) => setPromqlExpression(event.target.value)}
+                  value={customCheckType}
+                  onChange={(event) => setCustomCheckType(event.target.value)}
                   disabled={submitting}
-                  placeholder="例如：sum(rate(container_cpu_usage_seconds_total[5m]))"
+                  placeholder="custom"
                 />
               </label>
-              <div className="field-row">
+            )}
+            <label>
+              描述
+              <input
+                type="text"
+                value={formDescription}
+                onChange={(event) => setFormDescription(event.target.value)}
+                disabled={submitting}
+                placeholder="可选"
+              />
+            </label>
+            {formTypeMode === "command" && (
+              <label>
+                命令
+                <input
+                  type="text"
+                  value={commandText}
+                  onChange={(event) => setCommandText(event.target.value)}
+                  disabled={submitting}
+                  placeholder="例如：kubectl get nodes"
+                />
+              </label>
+            )}
+            {formTypeMode === "promql" && (
+              <>
                 <label>
-                  比较符
-                  <select
-                    value={promqlComparison}
-                    onChange={(event) =>
-                      setPromqlComparison(event.target.value)
-                    }
-                    disabled={submitting}
-                  >
-                    {[
-                      ">",
-                      "<",
-                      "=",
-                      ">=",
-                      "<=",
-                      "!=",
-                    ].map((symbol) => (
-                      <option key={symbol} value={symbol === "=" ? "==" : symbol}>
-                        {symbol}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  告警阈值
+                  PromQL 表达式
                   <input
-                    type="number"
-                    value={promqlThreshold}
-                    onChange={(event) => setPromqlThreshold(event.target.value)}
+                    type="text"
+                    value={promqlExpression}
+                    onChange={(event) => setPromqlExpression(event.target.value)}
                     disabled={submitting}
-                    placeholder="例如：0.8"
+                    placeholder="例如：sum(rate(container_cpu_usage_seconds_total[5m]))"
                   />
                 </label>
-              </div>
-              <label>
-                告警建议
-                <textarea
-                  value={promqlDescribe}
-                  onChange={(event) => setPromqlDescribe(event.target.value)}
-                  disabled={submitting}
-                  rows={3}
-                  placeholder="达到阈值时写入巡检建议，例如：检查集群负载或扩容"
-                />
-              </label>
-            </>
-          )}
+                <div className="field-row">
+                  <label>
+                    比较符
+                    <select
+                      value={promqlComparison}
+                      onChange={(event) =>
+                        setPromqlComparison(event.target.value)
+                      }
+                      disabled={submitting}
+                    >
+                      {[
+                        ">",
+                        "<",
+                        "=",
+                        ">=",
+                        "<=",
+                        "!=",
+                      ].map((symbol) => (
+                        <option key={symbol} value={symbol === "=" ? "==" : symbol}>
+                          {symbol}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    告警阈值
+                    <input
+                      type="number"
+                      value={promqlThreshold}
+                      onChange={(event) => setPromqlThreshold(event.target.value)}
+                      disabled={submitting}
+                      placeholder="例如：0.8"
+                    />
+                  </label>
+                </div>
+                <label>
+                  告警建议
+                  <textarea
+                    value={promqlDescribe}
+                    onChange={(event) => setPromqlDescribe(event.target.value)}
+                    disabled={submitting}
+                    rows={3}
+                    placeholder="达到阈值时写入巡检建议，例如：检查集群负载或扩容"
+                  />
+                </label>
+              </>
+            )}
           {formTypeMode === "other" && (
             <label>
               配置 (JSON)
