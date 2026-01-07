@@ -4143,6 +4143,8 @@ const LicenseSettingsPanel = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [textValue, setTextValue] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
+  const [localNotice, setLocalNotice] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const handleFileChange = async (
     event: ChangeEvent<HTMLInputElement>
@@ -4182,19 +4184,34 @@ const LicenseSettingsPanel = ({
 
   const handleRefresh = async () => {
     try {
+      setRefreshing(true);
       setLocalError(null);
+      setLocalNotice(null);
       await onRefresh();
+      setLocalNotice("已刷新 License 状态");
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "刷新 License 状态失败";
       setLocalError(message);
+    } finally {
+      setRefreshing(false);
     }
   };
 
   const licenseStatus = status.status;
 
+  useEffect(() => {
+    if (!localNotice || typeof window === "undefined") {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setLocalNotice(null);
+    }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [localNotice]);
+
   return (
-    <div className="settings-content">
+    <div className="settings-content settings-content-stack">
       <div className="settings-header">
         <div>
           <h3>License 管理</h3>
@@ -4205,11 +4222,13 @@ const LicenseSettingsPanel = ({
             type="button"
             className="secondary"
             onClick={handleRefresh}
+            disabled={refreshing}
           >
-            刷新状态
+            {refreshing ? "刷新中..." : "刷新状态"}
           </button>
         </div>
       </div>
+      {localNotice && <div className="feedback success">{localNotice}</div>}
       {status.reason && !status.valid && (
         <div className="feedback warning">{status.reason}</div>
       )}
