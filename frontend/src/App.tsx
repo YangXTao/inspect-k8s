@@ -1180,14 +1180,37 @@ const OverviewView = ({
     [handlePageJump]
   );
 
+  const currentPageCount = useMemo(() => {
+    const start = (effectivePage - 1) * clusterPageSize;
+    const remaining = filteredClusters.length - start;
+    if (remaining <= 0) {
+      return 0;
+    }
+    return Math.min(clusterPageSize, remaining);
+  }, [clusterPageSize, effectivePage, filteredClusters.length]);
+
+  const columnsForPage = useMemo(() => {
+    if (currentPageCount <= 1) {
+      return 1;
+    }
+    if (currentPageCount === 2) {
+      return 2;
+    }
+    return Math.min(currentPageCount, 3);
+  }, [currentPageCount]);
+
   const listStyle = useMemo<CSSProperties>(() => {
+    const gap = 14;
+    const cardWidth = 260;
+    const maxWidth =
+      columnsForPage * cardWidth + Math.max(columnsForPage - 1, 0) * gap;
     return {
-      width: "100%",
-      maxWidth: "900px",
-      gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+      width: `min(100%, ${Math.max(maxWidth, cardWidth)}px)`,
+      maxWidth: `${Math.max(maxWidth, cardWidth)}px`,
+      gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
       margin: 0,
     };
-  }, []);
+  }, [columnsForPage]);
 
   const [selectedClusterIds, setSelectedClusterIds] = useState<number[]>([]);
 
