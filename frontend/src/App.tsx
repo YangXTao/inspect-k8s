@@ -3751,9 +3751,6 @@ const InspectionSettingsPanel = ({
           <p>{currentSummary}</p>
         </div>
         <div className="settings-actions">
-          <button type="button" className="secondary" onClick={onClose}>
-            关闭
-          </button>
           <button
             type="button"
             className="secondary"
