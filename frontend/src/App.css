@@ -2100,9 +2100,37 @@ th {
   width: 100%;
 }
 
+.license-panel {
+  max-height: 100%;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
 .license-panel .settings-list,
 .license-panel .settings-form {
   flex: 0 0 auto;
+}
+
+.license-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.license-form {
+  width: 100%;
+}
+
+.license-form input[type="file"],
+.license-form textarea,
+.license-form form {
+  width: 100%;
+}
+
+@media (max-width: 900px) {
+  .license-detail-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .settings-content.grid {

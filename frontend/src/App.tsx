@@ -4274,8 +4274,9 @@ const LicenseSettingsPanel = ({
           </tbody>
         </table>
       </section>
-      <section className="settings-form">
-        <h4>License 详情</h4>
+      <div className="license-detail-grid">
+        <section className="settings-form license-form">
+          <h4>License 文件</h4>
           <input
             ref={fileInputRef}
             type="file"
@@ -4283,31 +4284,32 @@ const LicenseSettingsPanel = ({
             onChange={handleFileChange}
             disabled={uploading}
           />
-        <p className="settings-overview-hint">
-          支持 .lic / .txt / .json 文件，上传后立即生效。
-        </p>
-      </section>
-      <section className="settings-form">
-        <h4>License 详情</h4>
-        <form onSubmit={handleSubmitText}>
-          <textarea
-            rows={6}
-            value={textValue}
-            onChange={(event) => setTextValue(event.target.value)}
-            placeholder="-----BEGIN LICENSE-----"
-            disabled={textUploading}
-          />
-          <div className="settings-actions">
-            <button
-              type="submit"
-              className="primary"
+          <p className="settings-overview-hint">
+            支持 .lic / .txt / .json 文件，上传后立即生效。
+          </p>
+        </section>
+        <section className="settings-form license-form">
+          <h4>License 文本</h4>
+          <form onSubmit={handleSubmitText}>
+            <textarea
+              rows={6}
+              value={textValue}
+              onChange={(event) => setTextValue(event.target.value)}
+              placeholder="-----BEGIN LICENSE-----"
               disabled={textUploading}
-            >
-              {textUploading ? "导入中..." : "导入文本"}
-            </button>
-          </div>
-        </form>
-      </section>
+            />
+            <div className="settings-actions">
+              <button
+                type="submit"
+                className="primary"
+                disabled={textUploading}
+              >
+                {textUploading ? "导入中..." : "导入文本"}
+              </button>
+            </div>
+          </form>
+        </section>
+      </div>
     </div>
   );
 };
