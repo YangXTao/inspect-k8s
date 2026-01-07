@@ -1003,6 +1003,10 @@ const OverviewView = ({
     DEFAULT_CLUSTER_PAGE_SIZE
   );
   const [pageJumpInput, setPageJumpInput] = useState("");
+  const [clusterFilterStatus, setClusterFilterStatus] = useState<
+    ClusterConnectionStatus | "all"
+  >("all");
+  const [clusterKeyword, setClusterKeyword] = useState("");
   const enabledAgents = useMemo(
     () => agents.filter((agent) => agent.is_enabled),
     [agents]
@@ -1044,9 +1048,36 @@ const OverviewView = ({
     setCurrentPage(pageFromSearch);
   }, [pageFromSearch]);
 
+  const filteredClusters = useMemo(() => {
+    let list = clusters.slice();
+    if (clusterFilterStatus !== "all") {
+      list = list.filter(
+        (cluster) => cluster.connection_status === clusterFilterStatus
+      );
+    }
+    const keyword = clusterKeyword.trim().toLowerCase();
+    if (keyword) {
+      list = list.filter((cluster) => {
+        const name = (cluster.name ?? "").toLowerCase();
+        const displayId = getClusterDisplayId(
+          clusterDisplayIds,
+          cluster.id,
+          cluster
+        ).toLowerCase();
+        const message = (cluster.connection_message ?? "").toLowerCase();
+        return (
+          name.includes(keyword) ||
+          displayId.includes(keyword) ||
+          message.includes(keyword)
+        );
+      });
+    }
+    return list;
+  }, [clusters, clusterFilterStatus, clusterKeyword, clusterDisplayIds]);
+
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(clusters.length / clusterPageSize)),
-    [clusters.length, clusterPageSize]
+    () => Math.max(1, Math.ceil(filteredClusters.length / clusterPageSize)),
+    [filteredClusters.length, clusterPageSize]
   );
 
   const updatePage = useCallback(
@@ -1070,12 +1101,16 @@ const OverviewView = ({
   useEffect(() => {
     const maxPage = Math.max(
       1,
-      Math.ceil(clusters.length / clusterPageSize) || 1
+      Math.ceil(filteredClusters.length / clusterPageSize) || 1
     );
     if (currentPage > maxPage) {
       updatePage(maxPage, { replace: true });
     }
-  }, [clusters.length, clusterPageSize, currentPage, updatePage]);
+  }, [filteredClusters.length, clusterPageSize, currentPage, updatePage]);
+
+  useEffect(() => {
+    updatePage(1, { replace: true });
+  }, [clusterFilterStatus, clusterKeyword, updatePage]);
 
   const effectivePage = useMemo(
     () => Math.min(Math.max(currentPage, 1), totalPages),
@@ -1090,8 +1125,8 @@ const OverviewView = ({
 
   const pagedClusters = useMemo(() => {
     const start = (effectivePage - 1) * clusterPageSize;
-    return clusters.slice(start, start + clusterPageSize);
-  }, [clusters, effectivePage, clusterPageSize]);
+    return filteredClusters.slice(start, start + clusterPageSize);
+  }, [filteredClusters, effectivePage, clusterPageSize]);
 
   const handlePageChange = useCallback(
     (page: number) => {
@@ -1148,6 +1183,7 @@ const OverviewView = ({
   const listStyle = useMemo<CSSProperties>(() => {
     return {
       width: "100%",
+      maxWidth: "900px",
       gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
       margin: 0,
     };
@@ -1161,8 +1197,19 @@ const OverviewView = ({
     );
   }, [clusters]);
 
+  const filteredClusterIdSet = useMemo(
+    () => new Set(filteredClusters.map((cluster) => cluster.id)),
+    [filteredClusters]
+  );
+  const selectedFilteredCount = useMemo(
+    () => selectedClusterIds.filter((id) => filteredClusterIdSet.has(id)).length,
+    [filteredClusterIdSet, selectedClusterIds]
+  );
   const allSelected =
-    clusters.length > 0 && selectedClusterIds.length === clusters.length;
+    filteredClusters.length > 0 &&
+    filteredClusters.every((cluster) =>
+      selectedClusterIds.includes(cluster.id)
+    );
 
   const handleToggleCluster = useCallback((clusterId: number) => {
     setSelectedClusterIds((prev) =>
@@ -1174,22 +1221,31 @@ const OverviewView = ({
 
   const handleToggleAllClusters = useCallback(() => {
     setSelectedClusterIds((prev) => {
-      if (clusters.length === 0) {
-        return [];
+      if (filteredClusters.length === 0) {
+        return prev;
       }
-      if (prev.length === clusters.length) {
-        return [];
+      const next = new Set(prev);
+      const allFilteredSelected = filteredClusters.every((cluster) =>
+        next.has(cluster.id)
+      );
+      if (allFilteredSelected) {
+        filteredClusters.forEach((cluster) => next.delete(cluster.id));
+        return Array.from(next);
       }
-      return clusters.map((cluster) => cluster.id);
+      filteredClusters.forEach((cluster) => next.add(cluster.id));
+      return Array.from(next);
     });
-  }, [clusters]);
+  }, [filteredClusters]);
 
   const handleDeleteSelectedClusters = useCallback(() => {
-    if (selectedClusterIds.length === 0) {
+    const targetIds = selectedClusterIds.filter((id) =>
+      filteredClusterIdSet.has(id)
+    );
+    if (targetIds.length === 0) {
       return;
     }
-    void onDeleteClustersBulk(selectedClusterIds);
-  }, [onDeleteClustersBulk, selectedClusterIds]);
+    void onDeleteClustersBulk(targetIds);
+  }, [filteredClusterIdSet, onDeleteClustersBulk, selectedClusterIds]);
 
   return (
     <>
@@ -1263,8 +1319,29 @@ const OverviewView = ({
           <h2>集群列表</h2>
           {clusters.length > 0 && (
             <div className="card-actions">
+              <div className="cluster-filters">
+                <select
+                  value={clusterFilterStatus}
+                  onChange={(event) =>
+                    setClusterFilterStatus(
+                      event.target.value as ClusterConnectionStatus | "all"
+                    )
+                  }
+                >
+                  <option value="all">全部状态</option>
+                  <option value="connected">连接正常</option>
+                  <option value="failed">连接失败</option>
+                  <option value="pending">待注册</option>
+                </select>
+                <input
+                  type="text"
+                  value={clusterKeyword}
+                  onChange={(event) => setClusterKeyword(event.target.value)}
+                  placeholder="关键字筛选"
+                />
+              </div>
               <span className="selection-hint">
-                已选 {selectedClusterIds.length} / {clusters.length}
+                已选 {selectedFilteredCount} / {filteredClusters.length}
               </span>
               <button
                 type="button"
@@ -1288,6 +1365,8 @@ const OverviewView = ({
           <p className="placeholder">
             暂无集群，请在 Agent 端完成注册后刷新本页面。
           </p>
+        ) : filteredClusters.length === 0 ? (
+          <p className="placeholder">未找到匹配的集群。</p>
         ) : (
           <>
             <div className="cluster-list" style={listStyle}>
@@ -2132,6 +2211,7 @@ const ClusterDetailView = ({
   );
   const [itemPage, setItemPage] = useState(1);
   const [itemPageInput, setItemPageInput] = useState("");
+  const [itemKeyword, setItemKeyword] = useState("");
 
   const resolvedClusterId = useMemo(
     () =>
@@ -2208,31 +2288,43 @@ const ClusterDetailView = ({
     return clusterRuns.slice(start, start + clusterRunPageSize);
   }, [clusterRuns, clusterRunPage, clusterRunPageSize]);
 
+  const filteredInspectionItems = useMemo(() => {
+    const keyword = itemKeyword.trim().toLowerCase();
+    if (!keyword) {
+      return items;
+    }
+    return items.filter((item) => {
+      const name = (item.name ?? "").toLowerCase();
+      const desc = (item.description ?? "").toLowerCase();
+      return name.includes(keyword) || desc.includes(keyword);
+    });
+  }, [itemKeyword, items]);
+
   const totalInspectionPages = useMemo(
     () =>
       Math.max(
         1,
-        Math.ceil(items.length / Math.max(itemPageSize, 1))
+        Math.ceil(filteredInspectionItems.length / Math.max(itemPageSize, 1))
       ),
-    [items.length, itemPageSize]
+    [filteredInspectionItems.length, itemPageSize]
   );
 
   useEffect(() => {
     setItemPage(1);
     setItemPageInput("");
-  }, [itemPageSize, items.length]);
+  }, [itemPageSize, filteredInspectionItems.length, itemKeyword]);
 
   useEffect(() => {
     setItemPage((prev) => Math.min(Math.max(prev, 1), totalInspectionPages));
   }, [totalInspectionPages]);
 
   const pagedInspectionItems = useMemo(() => {
-    if (items.length === 0) {
+    if (filteredInspectionItems.length === 0) {
       return [];
     }
     const start = (itemPage - 1) * itemPageSize;
-    return items.slice(start, start + itemPageSize);
-  }, [items, itemPage, itemPageSize]);
+    return filteredInspectionItems.slice(start, start + itemPageSize);
+  }, [filteredInspectionItems, itemPage, itemPageSize]);
 
   const statusMeta = useMemo(() => {
     if (!cluster) {
@@ -2258,8 +2350,17 @@ const ClusterDetailView = ({
   const isTesting = enableServerConnectionTest
     ? Boolean(cluster && testingClusterIds[cluster.id])
     : false;
+  const filteredInspectionItemIdSet = useMemo(
+    () => new Set(filteredInspectionItems.map((item) => item.id)),
+    [filteredInspectionItems]
+  );
+  const selectedFilteredItemsCount = useMemo(
+    () => selectedIds.filter((id) => filteredInspectionItemIdSet.has(id)).length,
+    [filteredInspectionItemIdSet, selectedIds]
+  );
   const allItemsSelected =
-    items.length > 0 && selectedIds.length === items.length;
+    filteredInspectionItems.length > 0 &&
+    filteredInspectionItems.every((item) => selectedIds.includes(item.id));
 
   const handleToggleItem = useCallback(
     (itemId: number) => {
@@ -2274,15 +2375,21 @@ const ClusterDetailView = ({
 
   const handleToggleAllItems = useCallback(() => {
     setSelectedIds((prev) => {
-      if (items.length === 0) {
+      if (filteredInspectionItems.length === 0) {
         return prev;
       }
-      if (prev.length === items.length) {
-        return [];
+      const next = new Set(prev);
+      const allFilteredSelected = filteredInspectionItems.every((item) =>
+        next.has(item.id)
+      );
+      if (allFilteredSelected) {
+        filteredInspectionItems.forEach((item) => next.delete(item.id));
+        return Array.from(next);
       }
-      return items.map((item) => item.id);
+      filteredInspectionItems.forEach((item) => next.add(item.id));
+      return Array.from(next);
     });
-  }, [items, setSelectedIds]);
+  }, [filteredInspectionItems, setSelectedIds]);
 
   const handleToggleRunSelection = useCallback((runId: number) => {
     setSelectedRunIds((prev) =>
@@ -2531,9 +2638,16 @@ const ClusterDetailView = ({
           </label>
           <div className="inspection-items-toolbar">
             <span className="selection-hint">
-              已选择 {selectedIds.length} / {items.length} 个巡检项
+              已选择 {selectedFilteredItemsCount} / {filteredInspectionItems.length} 个巡检项
             </span>
             <div className="inspection-items-toolbar-actions">
+              <input
+                type="text"
+                className="inspection-items-filter"
+                value={itemKeyword}
+                onChange={(event) => setItemKeyword(event.target.value)}
+                placeholder="关键字筛选"
+              />
               <button
                 type="button"
                 className="secondary"
@@ -2558,6 +2672,10 @@ const ClusterDetailView = ({
           {items.length === 0 ? (
             <ul className="item-list">
               <li className="placeholder">暂无巡检项，请在设置中添加。</li>
+            </ul>
+          ) : filteredInspectionItems.length === 0 ? (
+            <ul className="item-list">
+              <li className="placeholder">未找到匹配的巡检项。</li>
             </ul>
           ) : (
             <>
@@ -3311,6 +3429,9 @@ const InspectionSettingsPanel = ({
   const [configText, setConfigText] = useState("{}");
   const [formError, setFormError] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const [itemFilterType, setItemFilterType] = useState<
+    "all" | "command" | "promql" | "other"
+  >("all");
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
   const [pageInput, setPageInput] = useState("");
@@ -3485,19 +3606,39 @@ const InspectionSettingsPanel = ({
     );
   };
 
+  const filteredItemIdSet = useMemo(
+    () => new Set(filteredItems.map((item) => item.id)),
+    [filteredItems]
+  );
+  const selectedFilteredCount = useMemo(
+    () => selectedIds.filter((id) => filteredItemIdSet.has(id)).length,
+    [filteredItemIdSet, selectedIds]
+  );
+
   const toggleSelectAll = () => {
-    if (selectedIds.length === items.length) {
-      setSelectedIds([]);
-      return;
-    }
-    setSelectedIds(items.map((item) => item.id));
+    setSelectedIds((prev) => {
+      if (filteredItems.length === 0) {
+        return prev;
+      }
+      const next = new Set(prev);
+      const allFilteredSelected = filteredItems.every((item) =>
+        next.has(item.id)
+      );
+      if (allFilteredSelected) {
+        filteredItems.forEach((item) => next.delete(item.id));
+        return Array.from(next);
+      }
+      filteredItems.forEach((item) => next.add(item.id));
+      return Array.from(next);
+    });
   };
 
   const handleDeleteSelected = () => {
-    if (selectedIds.length === 0) {
+    const targetIds = selectedIds.filter((id) => filteredItemIdSet.has(id));
+    if (targetIds.length === 0) {
       return;
     }
-    onDeleteMany(selectedIds);
+    onDeleteMany(targetIds);
   };
 
   const handleImportClick = () => {
@@ -3525,20 +3666,39 @@ const InspectionSettingsPanel = ({
     () => items.slice().sort(compareInspectionItemByName),
     [items]
   );
-  const totalItems = sortedItems.length;
+  const filteredItems = useMemo(() => {
+    if (itemFilterType === "all") {
+      return sortedItems;
+    }
+    if (itemFilterType === "command") {
+      return sortedItems.filter((item) => item.check_type === "command");
+    }
+    if (itemFilterType === "promql") {
+      return sortedItems.filter((item) => item.check_type === "promql");
+    }
+    return sortedItems.filter(
+      (item) => item.check_type !== "command" && item.check_type !== "promql"
+    );
+  }, [itemFilterType, sortedItems]);
+  const totalItems = filteredItems.length;
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(totalItems / Math.max(1, pageSize))),
     [pageSize, totalItems]
   );
   const pagedItems = useMemo(() => {
     const start = (page - 1) * pageSize;
-    return sortedItems.slice(start, start + pageSize);
-  }, [page, pageSize, sortedItems]);
+    return filteredItems.slice(start, start + pageSize);
+  }, [filteredItems, page, pageSize]);
 
   useEffect(() => {
     setPage(1);
     setPageInput("");
   }, [pageSize, totalItems]);
+
+  useEffect(() => {
+    setPage(1);
+    setPageInput("");
+  }, [itemFilterType]);
 
   useEffect(() => {
     setPage((prev) => Math.min(Math.max(prev, 1), totalPages));
@@ -3625,26 +3785,49 @@ const InspectionSettingsPanel = ({
                   <input
                     type="checkbox"
                     checked={
-                      selectedIds.length === items.length && items.length > 0
+                      filteredItems.length > 0 &&
+                      selectedFilteredCount === filteredItems.length
                     }
                     onChange={toggleSelectAll}
                   />
                   <span>全选</span>
                 </label>
-                <span>已选 {selectedIds.length} / {totalItems}</span>
+                <span>已选 {selectedFilteredCount} / {totalItems}</span>
                 <button
                   type="button"
                   className="link-button danger"
                   onClick={handleDeleteSelected}
-                  disabled={selectedIds.length === 0}
+                  disabled={selectedFilteredCount === 0}
                 >
                   批量删除
                 </button>
+                <label className="settings-filter">
+                  类型
+                  <select
+                    value={itemFilterType}
+                    onChange={(event) =>
+                      setItemFilterType(
+                        event.target.value as
+                          | "all"
+                          | "command"
+                          | "promql"
+                          | "other"
+                      )
+                    }
+                  >
+                    <option value="all">全部</option>
+                    <option value="command">命令行</option>
+                    <option value="promql">PromQL</option>
+                    <option value="other">其他</option>
+                  </select>
+                </label>
               </div>
             </div>
             <div className="table-wrapper">
               {items.length === 0 ? (
                 <div className="placeholder">暂无巡检项</div>
+              ) : filteredItems.length === 0 ? (
+                <div className="placeholder">未找到匹配的巡检项</div>
               ) : (
                 <table>
                   <thead>
@@ -6321,7 +6504,7 @@ const hasManualKubeconfig = useMemo(
       }
       setConfirmState({
         title: "批量删除集群",
-        message: `确认删除选中的 ${targets.length} 个集群？该操作不可恢复。`,
+        message: `确认删除当前筛选结果中选中的 ${targets.length} 个集群？该操作不可恢复。`,
         confirmLabel: "删除",
         variant: "danger",
         options: [
@@ -6867,7 +7050,7 @@ const hasManualKubeconfig = useMemo(
       }
       setConfirmState({
         title: "批量删除巡检项",
-        message: `确认删除选中的 ${targetIds.length} 条巡检项？该操作不可恢复。`,
+        message: `确认删除当前筛选结果中选中的 ${targetIds.length} 条巡检项？该操作不可恢复。`,
         confirmLabel: "删除",
         variant: "danger",
         scope: "settings",

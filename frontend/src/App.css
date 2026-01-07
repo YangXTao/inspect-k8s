@@ -356,6 +356,27 @@ body {
   flex-wrap: wrap;
 }
 
+.cluster-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cluster-filters select,
+.cluster-filters input {
+  border: 1px solid #cbd5f5;
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 13px;
+  background: #fff;
+  color: #1e293b;
+}
+
+.cluster-filters input {
+  min-width: 160px;
+}
+
 .selection-hint {
   font-size: 13px;
   color: #64748b;
@@ -396,6 +417,16 @@ body {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.inspection-items-filter {
+  border: 1px solid #cbd5f5;
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 13px;
+  min-width: 180px;
+  background: #fff;
+  color: #1e293b;
 }
 
 .card-actions-group {
@@ -525,7 +556,7 @@ body {
 }
 
 .page-jump-input {
-  width: 72px;
+  width: 46px;
   padding: 4px 8px;
   border: 1px solid #bfdbfe;
   border-radius: 6px;
@@ -638,6 +669,7 @@ body {
   gap: 10px;
   align-items: flex-start;
   width: 100%;
+  max-width: 820px;
   height: 100%;
   box-sizing: border-box;
   padding: 12px;
@@ -1395,6 +1427,11 @@ th {
   background: #fff;
 }
 
+.history-pagination-controls input {
+  width: 48px;
+  padding: 4px 6px;
+}
+
 .history-pagination-buttons {
   display: inline-flex;
   align-items: center;
@@ -1999,6 +2036,23 @@ th {
 
 .settings-actions .link-button {
   white-space: nowrap;
+}
+
+.settings-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.settings-filter select {
+  border: 1px solid #cbd5f5;
+  border-radius: 10px;
+  padding: 4px 8px;
+  font-size: 12px;
+  background: #fff;
+  color: #1e293b;
 }
 
 .settings-content {
