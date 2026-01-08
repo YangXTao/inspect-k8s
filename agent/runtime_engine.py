@@ -406,21 +406,16 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext):
     )
     if status == CHECK_STATUS_CRITICAL:
         matches_to_show = critical_matches
-        label = "严重"
     elif status == CHECK_STATUS_WARNING:
         matches_to_show = warn_matches
-        label = "告警"
     else:
         matches_to_show = sorted_samples
-        label = "正常"
 
     limit = min(len(matches_to_show), max_rows)
     if limit == 0:
-        lines = [f"{label}，无可展示记录。"]
+        lines = []
     else:
         lines = []
-        if status == CHECK_STATUS_PASSED:
-            lines.append(f"正常，只显示前{limit}条记录：")
         for entry in matches_to_show[:max_rows]:
             metric = entry.get("metric") if isinstance(entry, dict) else {}
             value = entry.get("value", 0.0)
