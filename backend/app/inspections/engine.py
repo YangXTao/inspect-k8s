@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 import shutil
 import subprocess
 import shlex
@@ -431,34 +430,7 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> T
             return "-"
         return str(raw)
 
-    detail_template = config.get("detail_template")
-    detail_prefix = ""
-    show_expression = bool(config.get("show_expression", False))
-    expression_for_detail = expression if show_expression else ""
-    if isinstance(detail_template, str) and detail_template.strip():
-        template = detail_template.strip()
-        if not show_expression and "{expression}" in template:
-            template = template.replace("{expression}", "").strip()
-        try:
-            detail_prefix = template.format(
-                value=aggregate_value,
-                values=values,
-                expression=expression_for_detail,
-            )
-        except Exception:
-            detail_prefix = ""
-        if detail_prefix:
-            detail_prefix = re.sub(r"\s{2,}", " ", detail_prefix).strip(" :;-")
-    if not detail_prefix:
-        if show_expression:
-            detail_prefix = (
-                f"{aggregate_mode} value from {expression}: {_format_value(aggregate_value)} "
-                f"(samples={len(values)})"
-            )
-        else:
-            detail_prefix = f"{aggregate_mode} value: {_format_value(aggregate_value)} (samples={len(values)})"
-
-    default_limit = 5 if (status == CHECK_STATUS_PASSED and not critical_matches and not warn_matches) else 20
+    default_limit = 3 if status == CHECK_STATUS_PASSED else 20
 
     max_rows_raw = (
         config.get("result_limit")
@@ -472,35 +444,32 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> T
             max_rows = default_limit
     except (TypeError, ValueError):
         max_rows = default_limit
+    if status == CHECK_STATUS_PASSED:
+        max_rows = min(max_rows, 3)
 
     matches_to_show: List[Dict[str, object]]
-    headline: str
-    if critical_matches:
+    label: str
+    if status == CHECK_STATUS_CRITICAL:
         matches_to_show = critical_matches
-        headline = (
-            f"检测到 {len(critical_matches)} 条满足严重阈值（{comparison} {_threshold_label(critical_threshold_value, critical_threshold_raw)}）的样本，"
-            f"展示前 {min(len(critical_matches), max_rows)} 条："
-        )
-    elif warn_matches:
+        label = "严重"
+    elif status == CHECK_STATUS_WARNING:
         matches_to_show = warn_matches
-        headline = (
-            f"检测到 {len(warn_matches)} 条满足预警阈值（{comparison} {_threshold_label(warn_threshold_value, warn_threshold_raw)}）的样本，"
-            f"展示前 {min(len(warn_matches), max_rows)} 条："
-        )
+        label = "告警"
     else:
         matches_to_show = sorted_samples
-        if matches_to_show:
-            headline = (
-                f"共收到 {len(sorted_samples)} 条样本，展示前 {min(len(sorted_samples), max_rows)} 条："
-            )
-        else:
-            headline = "未获得可展示的样本。"
+        label = "正常"
 
-    lines = [detail_prefix.strip()]
-    for entry in matches_to_show[:max_rows]:
-        metric = entry.get("metric") if isinstance(entry, dict) else {}
-        value = entry.get("value", 0.0) if isinstance(entry, dict) else 0.0
-        lines.append(f"- {_format_metric_identity(metric)}: {_format_value(float(value))}")
+    limit = min(len(matches_to_show), max_rows)
+    if limit == 0:
+        lines = [f"{label}，无可展示记录。"]
+    else:
+        lines = []
+        if status == CHECK_STATUS_PASSED:
+            lines.append(f"正常，只显示前{limit}条记录：")
+        for entry in matches_to_show[:max_rows]:
+            metric = entry.get("metric") if isinstance(entry, dict) else {}
+            value = entry.get("value", 0.0) if isinstance(entry, dict) else 0.0
+            lines.append(f"{_format_metric_identity(metric)}：{_format_value(float(value))}")
 
     detail = "\n".join(line for line in lines if line)
 

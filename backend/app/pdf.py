@@ -282,17 +282,24 @@ def generate_pdf_report(
         raw = str(text)
         if not raw.strip():
             return "-"
-        parts: list[str] = []
-        last = 0
-        for match in re.finditer(r"[A-Za-z0-9][A-Za-z0-9 .:/_%+=,-]*", raw):
-            start, end = match.span()
-            if start > last:
-                parts.append(escape(raw[last:start]))
-            parts.append(f'<font face="{latin_font}">{escape(match.group(0))}</font>')
-            last = end
-        if last < len(raw):
-            parts.append(escape(raw[last:]))
-        return "".join(parts)
+        normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
+
+        def _wrap_line(line: str) -> str:
+            if line == "":
+                return ""
+            parts: list[str] = []
+            last = 0
+            for match in re.finditer(r"[A-Za-z0-9][A-Za-z0-9 .:/_%+=,-]*", line):
+                start, end = match.span()
+                if start > last:
+                    parts.append(escape(line[last:start]))
+                parts.append(f'<font face="{latin_font}">{escape(match.group(0))}</font>')
+                last = end
+            if last < len(line):
+                parts.append(escape(line[last:]))
+            return "".join(parts)
+
+        return "<br/>".join(_wrap_line(line) for line in normalized.split("\n"))
 
     def _split_text_for_table(
         text: str | None, max_lines: int = 18, max_chars_per_line: int = 120
