@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import shlex
@@ -387,20 +388,30 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> T
 
     detail_template = config.get("detail_template")
     detail_prefix = ""
+    show_expression = bool(config.get("show_expression", False))
+    expression_for_detail = expression if show_expression else ""
     if isinstance(detail_template, str) and detail_template.strip():
+        template = detail_template.strip()
+        if not show_expression and "{expression}" in template:
+            template = template.replace("{expression}", "").strip()
         try:
-            detail_prefix = detail_template.format(
+            detail_prefix = template.format(
                 value=aggregate_value,
                 values=values,
-                expression=expression,
+                expression=expression_for_detail,
             )
         except Exception:
             detail_prefix = ""
+        if detail_prefix:
+            detail_prefix = re.sub(r"\s{2,}", " ", detail_prefix).strip(" :;-")
     if not detail_prefix:
-        detail_prefix = (
-            f"{aggregate_mode} value from {expression}: {_format_value(aggregate_value)} "
-            f"(samples={len(values)})"
-        )
+        if show_expression:
+            detail_prefix = (
+                f"{aggregate_mode} value from {expression}: {_format_value(aggregate_value)} "
+                f"(samples={len(values)})"
+            )
+        else:
+            detail_prefix = f"{aggregate_mode} value: {_format_value(aggregate_value)} (samples={len(values)})"
 
     default_limit = 5 if (status == CHECK_STATUS_PASSED and not fail_matches and not warn_matches) else 20
 
