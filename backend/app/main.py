@@ -1289,7 +1289,14 @@ def agent_submit_results(
         refreshed = crud.get_inspection_run(ctx.db, run.id) or run
         return _serialize_run(refreshed)
 
-    run = _attach_run_report(ctx.db, run)
+    try:
+        run = _attach_run_report(ctx.db, run)
+    except Exception as exc:  # pragma: no cover - avoid failing agent uploads
+        logger.exception("生成巡检报告失败(run_id=%s): %s", run.id, exc)
+        run.report_path = None
+        ctx.db.add(run)
+        ctx.db.commit()
+        ctx.db.refresh(run)
     return _serialize_run(run)
 
 app.include_router(agent_router)
