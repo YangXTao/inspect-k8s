@@ -166,12 +166,7 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
-        suggestion = (
-            config.get("suggestion_on_timeout")
-            or config.get("suggestion_on_failed")
-            or config.get("suggestion_on_fail")
-            or "Check command runtime or increase timeout."
-        )
+        suggestion = config.get("suggestion_on_fail") or "请检查此命令或promql"
         return (
             CHECK_STATUS_FAILED,
             f"Command timed out after {timeout}s.",
@@ -181,17 +176,13 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
         return (
             CHECK_STATUS_FAILED,
             "Command executable not found.",
-            config.get("suggestion_on_failed")
-            or config.get("suggestion_on_fail")
-            or "Ensure the binary is installed on the server.",
+            config.get("suggestion_on_fail") or "请检查此命令或promql",
         )
     except Exception as exc:  # pragma: no cover - defensive path
         return (
             CHECK_STATUS_FAILED,
             f"Command execution error: {exc}",
-            config.get("suggestion_on_failed")
-            or config.get("suggestion_on_fail")
-            or "Review command definition.",
+            config.get("suggestion_on_fail") or "请检查此命令或promql",
         )
 
     stdout = result.stdout or ""
@@ -219,6 +210,18 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
         else:
             detail = "命令执行成功（无输出）"
         suggestion = config.get("suggestion_on_success") or ""
+        if force_critical:
+            return (
+                CHECK_STATUS_CRITICAL,
+                detail,
+                config.get("suggestion_on_critical") or suggestion,
+            )
+        if force_warning:
+            return (
+                CHECK_STATUS_WARNING,
+                detail,
+                config.get("suggestion_on_warn") or suggestion,
+            )
         return CHECK_STATUS_PASSED, detail, suggestion
 
     detail = config.get("failure_message") or _truncate_output(stderr or stdout or "Command returned non-zero exit code.")
@@ -341,11 +344,7 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> T
     prom = context.prom
     ok, results, message = prom.query(str(expression))
     if not ok:
-        suggestion = (
-            config.get("suggestion_on_failed")
-            or config.get("suggestion_on_error")
-            or "Check Prometheus endpoint availability."
-        )
+        suggestion = config.get("suggestion_on_fail") or "请检查此命令或promql"
         return CHECK_STATUS_FAILED, message, suggestion
 
     samples: List[Dict[str, object]] = []
