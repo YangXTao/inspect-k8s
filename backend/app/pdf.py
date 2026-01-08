@@ -449,7 +449,7 @@ def generate_pdf_report(
     failed_count = sum(1 for item in results_list if item.status.lower() == "failed")
 
     story: list[object] = []
-    story.append(Paragraph(f"{cluster_name} 巡检报告", styles["Title"]))
+    story.append(Paragraph(_wrap_latin(f"{cluster_name} 巡检报告"), styles["Title"]))
     story.append(Spacer(1, 10))
 
     meta_rows = [
