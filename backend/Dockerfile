@@ -5,6 +5,19 @@ WORKDIR /app
 ARG HTTP_PROXY=""
 ARG HTTPS_PROXY=""
 ARG NO_PROXY="localhost,127.0.0.1"
+# install fonts for PDF rendering
+RUN if command -v apt-get >/dev/null 2>&1; then \
+      apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk && rm -rf /var/lib/apt/lists/*; \
+    elif command -v dnf >/dev/null 2>&1; then \
+      dnf install -y google-noto-sans-cjk-fonts && dnf clean all; \
+    elif command -v yum >/dev/null 2>&1; then \
+      yum install -y google-noto-sans-cjk-fonts && yum clean all; \
+    elif command -v apk >/dev/null 2>&1; then \
+      apk add --no-cache font-noto-cjk; \
+    else \
+      echo "No known package manager; skip font install."; \
+    fi
+
 
 # 安装依赖
 COPY requirements.txt .

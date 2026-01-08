@@ -291,6 +291,33 @@ def generate_pdf_report(
             parts.append(escape(raw[last:]))
         return "".join(parts)
 
+    def _split_text_for_table(
+        text: str | None, max_lines: int = 18, max_chars_per_line: int = 120
+    ) -> list[str]:
+        if text is None:
+            return ["-"]
+        raw = str(text)
+        if not raw.strip():
+            return ["-"]
+        normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
+        lines = normalized.split("\n")
+        wrapped: list[str] = []
+        for line in lines:
+            if line == "":
+                wrapped.append("")
+                continue
+            while len(line) > max_chars_per_line:
+                wrapped.append(line[:max_chars_per_line])
+                line = line[max_chars_per_line:]
+            wrapped.append(line)
+        if not wrapped:
+            return ["-"]
+        chunks: list[str] = []
+        for idx in range(0, len(wrapped), max_lines):
+            chunk = "\n".join(wrapped[idx : idx + max_lines]).strip()
+            chunks.append(chunk if chunk else "-")
+        return chunks or ["-"]
+
     results_list = list(results)
     cluster_name, version_label, node_count_label = _get_cluster_meta(run)
 
@@ -517,21 +544,33 @@ def generate_pdf_report(
             "warning": "警告",
             "failed": "失败",
         }.get(status, result.status)
-        data.append(
-            [
-                Paragraph(
-                    _wrap_latin(
-                        result.item.name
-                        if result.item
-                        else (result.item_name_cached or "巡检项已删除")
-                    ),
-                    styles["BodyText"],
-                ),
-                Paragraph(status_label, styles["TableStatus"]),
-                Paragraph(_wrap_latin(result.detail), detail_style),
-                Paragraph(_wrap_latin(result.suggestion), suggestion_style),
-            ]
-        )
+        detail_chunks = _split_text_for_table(result.detail)
+        suggestion_chunks = _split_text_for_table(result.suggestion)
+        chunk_count = max(len(detail_chunks), len(suggestion_chunks))
+        for chunk_index in range(chunk_count):
+            name_cell = ""
+            status_cell = ""
+            if chunk_index == 0:
+                name_cell = (
+                    result.item.name
+                    if result.item
+                    else (result.item_name_cached or "巡检项已删除")
+                )
+                status_cell = status_label
+            detail_text = detail_chunks[chunk_index] if chunk_index < len(detail_chunks) else ""
+            suggestion_text = (
+                suggestion_chunks[chunk_index] if chunk_index < len(suggestion_chunks) else ""
+            )
+            data.append(
+                [
+                    Paragraph(_wrap_latin(name_cell), styles["BodyText"]) if name_cell else "",
+                    Paragraph(status_cell, styles["TableStatus"]) if status_cell else "",
+                    Paragraph(_wrap_latin(detail_text), detail_style) if detail_text else "",
+                    Paragraph(_wrap_latin(suggestion_text), suggestion_style)
+                    if suggestion_text
+                    else "",
+                ]
+            )
     table = LongTable(data, colWidths=[130, 70, 210, 160], repeatRows=1)
 
     commands = [
