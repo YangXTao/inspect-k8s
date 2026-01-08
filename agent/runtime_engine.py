@@ -366,6 +366,22 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext):
         status = CHECK_STATUS_WARNING
         suggestion = config.get("suggestion_on_warn") or ""
 
+    def classify(value: float) -> str | None:
+        if critical_value is not None and _compare(value, critical_value, comparison):
+            return "critical"
+        if warn_value is not None and _compare(value, warn_value, comparison):
+            return "warn"
+        return None
+
+    critical_matches: List[Dict[str, object]] = []
+    warn_matches: List[Dict[str, object]] = []
+    for entry in samples:
+        category = classify(entry["value"])  # type: ignore[index]
+        if category == "critical":
+            critical_matches.append(entry)
+        elif category == "warn":
+            warn_matches.append(entry)
+
     def fmt(value: float) -> str:
         fmt_tpl = config.get("value_format")
         if isinstance(fmt_tpl, str) and fmt_tpl:
@@ -375,37 +391,41 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext):
                 pass
         return f"{value:.4f}".rstrip("0").rstrip(".") or "0"
 
-    prefix = config.get("detail_template")
-    detail_prefix = ""
-    if isinstance(prefix, str) and prefix.strip():
-        try:
-            detail_prefix = prefix.format(
-                expression=expression, value=aggregate_value, values=values
-            )
-        except Exception:
-            detail_prefix = ""
-    if not detail_prefix:
-        detail_prefix = (
-            f"{aggregate_mode} value from {expression}: {fmt(aggregate_value)} "
-            f"(samples={len(values)})"
-        )
-    max_rows = config.get("result_limit") or config.get("top_n") or 5
+    max_rows = config.get("result_limit") or config.get("top_n")
     try:
         max_rows = int(max_rows)
         if max_rows <= 0:
-            max_rows = 5
+            max_rows = 3 if status == CHECK_STATUS_PASSED else 20
     except (TypeError, ValueError):
-        max_rows = 5
+        max_rows = 3 if status == CHECK_STATUS_PASSED else 20
+    if status == CHECK_STATUS_PASSED:
+        max_rows = min(max_rows, 3)
     reverse = comparison not in {"<", "<="}
     sorted_samples = sorted(
         samples, key=lambda item: item["value"], reverse=reverse  # type: ignore[index]
     )
-    lines = [detail_prefix.strip()]
-    for entry in sorted_samples[:max_rows]:
-        metric = entry.get("metric") if isinstance(entry, dict) else {}
-        value = entry.get("value", 0.0)
-        metric_name = _format_metric(metric)
-        lines.append(f"- {metric_name}: {fmt(float(value))}")
+    if status == CHECK_STATUS_CRITICAL:
+        matches_to_show = critical_matches
+        label = "严重"
+    elif status == CHECK_STATUS_WARNING:
+        matches_to_show = warn_matches
+        label = "告警"
+    else:
+        matches_to_show = sorted_samples
+        label = "正常"
+
+    limit = min(len(matches_to_show), max_rows)
+    if limit == 0:
+        lines = [f"{label}，无可展示记录。"]
+    else:
+        lines = []
+        if status == CHECK_STATUS_PASSED:
+            lines.append(f"正常，只显示前{limit}条记录：")
+        for entry in matches_to_show[:max_rows]:
+            metric = entry.get("metric") if isinstance(entry, dict) else {}
+            value = entry.get("value", 0.0)
+            metric_name = _format_metric(metric)
+            lines.append(f"{metric_name}：{fmt(float(value))}")
     return status, "\n".join(lines), suggestion
 
 

@@ -4743,14 +4743,8 @@ const RunDetailView = ({
       .filter(Boolean) ?? [];
 
   const formatResultDetail = (result: InspectionResult) => {
-    const lines = extractResultLines(result.detail);
-    if (lines.length === 0) {
-      return "未提供详情";
-    }
-    if (result.status === "passed" && lines.length > 10) {
-      return lines.slice(0, 10).join(" · ");
-    }
-    return lines.join(" · ");
+    const detail = (result.detail ?? "").trim();
+    return detail || "未提供详情";
   };
 
   const formatResultSuggestion = (result: InspectionResult) => {
