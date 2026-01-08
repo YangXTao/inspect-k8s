@@ -188,21 +188,17 @@ def _execute_command_check(
         )
     except subprocess.TimeoutExpired:
         return CHECK_STATUS_FAILED, f"Command timed out after {timeout}s.", config.get(
-            "suggestion_on_timeout"
-        ) or config.get("suggestion_on_failed") or config.get("suggestion_on_fail") or "调整超时或优化命令。"
+            "suggestion_on_fail"
+        ) or "请检查此命令或promql"
     except FileNotFoundError:
         return CHECK_STATUS_FAILED, "Command executable not found.", config.get(
-            "suggestion_on_failed"
-        ) or config.get(
             "suggestion_on_fail"
-        ) or "确认 Agent 环境已安装对应二进制。"
+        ) or "请检查此命令或promql"
     except Exception as exc:
         return (
             CHECK_STATUS_FAILED,
             f"Command execution error: {exc}",
-            config.get("suggestion_on_failed")
-            or config.get("suggestion_on_fail")
-            or "检查命令定义。",
+            config.get("suggestion_on_fail") or "请检查此命令或promql",
         )
 
     stdout = result.stdout or ""
@@ -223,11 +219,23 @@ def _execute_command_check(
             or _truncate(stderr)
             or str(config.get("success_message") or "命令执行成功。")
         )
-        status = CHECK_STATUS_WARNING if force_warning else CHECK_STATUS_PASSED
+        suggestion = config.get("suggestion_on_success") or ""
+        if force_critical:
+            return (
+                CHECK_STATUS_CRITICAL,
+                detail,
+                config.get("suggestion_on_critical") or suggestion,
+            )
+        if force_warning:
+            return (
+                CHECK_STATUS_WARNING,
+                detail,
+                config.get("suggestion_on_warn") or suggestion,
+            )
         return (
-            status,
+            CHECK_STATUS_PASSED,
             detail,
-            config.get("suggestion_on_success") or "",
+            suggestion,
         )
     detail = config.get("failure_message") or _truncate(
         stderr or stdout or "Command returned non-zero exit code."
@@ -318,9 +326,7 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext):
         return (
             CHECK_STATUS_FAILED,
             message,
-            config.get("suggestion_on_failed")
-            or config.get("suggestion_on_error")
-            or "检查 Prometheus 可访问性。",
+            config.get("suggestion_on_fail") or "请检查此命令或promql",
         )
     values: List[float] = []
     samples: List[Dict[str, object]] = []
