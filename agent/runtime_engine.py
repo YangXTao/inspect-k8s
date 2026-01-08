@@ -187,18 +187,22 @@ def _execute_command_check(
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
-        return CHECK_STATUS_WARNING, f"Command timed out after {timeout}s.", config.get(
+        return CHECK_STATUS_FAILED, f"Command timed out after {timeout}s.", config.get(
             "suggestion_on_timeout"
-        ) or config.get("suggestion_on_fail") or "调整超时或优化命令。"
+        ) or config.get("suggestion_on_failed") or config.get("suggestion_on_fail") or "调整超时或优化命令。"
     except FileNotFoundError:
         return CHECK_STATUS_FAILED, "Command executable not found.", config.get(
+            "suggestion_on_failed"
+        ) or config.get(
             "suggestion_on_fail"
         ) or "确认 Agent 环境已安装对应二进制。"
     except Exception as exc:
         return (
             CHECK_STATUS_FAILED,
             f"Command execution error: {exc}",
-            config.get("suggestion_on_fail") or "检查命令定义。",
+            config.get("suggestion_on_failed")
+            or config.get("suggestion_on_fail")
+            or "检查命令定义。",
         )
 
     stdout = result.stdout or ""
@@ -228,7 +232,11 @@ def _execute_command_check(
     detail = config.get("failure_message") or _truncate(
         stderr or stdout or "Command returned non-zero exit code."
     )
-    suggestion = config.get("suggestion_on_fail") or "检查命令输出。"
+    suggestion = (
+        config.get("suggestion_on_critical")
+        or config.get("suggestion_on_fail")
+        or "检查命令输出。"
+    )
     if result.returncode in critical_codes:
         return (
             CHECK_STATUS_CRITICAL,
@@ -308,9 +316,11 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext):
     ok, results, message = prom.query(expression)
     if not ok:
         return (
-            CHECK_STATUS_WARNING,
+            CHECK_STATUS_FAILED,
             message,
-            config.get("suggestion_on_error") or "检查 Prometheus 可访问性。",
+            config.get("suggestion_on_failed")
+            or config.get("suggestion_on_error")
+            or "检查 Prometheus 可访问性。",
         )
     values: List[float] = []
     samples: List[Dict[str, object]] = []
@@ -330,7 +340,7 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext):
     aggregate_mode = str(config.get("aggregate", "max"))
     aggregate_value = _aggregate(values, aggregate_mode)
     comparison = str(config.get("comparison", ">=")).strip()
-    fail_threshold = config.get("fail_threshold")
+    critical_threshold = config.get("critical_threshold")
     warn_threshold = config.get("warn_threshold")
 
     def to_float(raw):
@@ -339,16 +349,16 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext):
         except (TypeError, ValueError):
             return None
 
-    fail_value = to_float(fail_threshold)
+    critical_value = to_float(critical_threshold)
     warn_value = to_float(warn_threshold)
     status = CHECK_STATUS_PASSED
     suggestion = config.get("suggestion_on_success") or ""
-    if fail_value is not None and _compare(aggregate_value, fail_value, comparison):
+    if critical_value is not None and _compare(aggregate_value, critical_value, comparison):
         status = CHECK_STATUS_CRITICAL
-        suggestion = config.get("suggestion_on_fail") or suggestion
+        suggestion = config.get("suggestion_on_critical") or ""
     elif warn_value is not None and _compare(aggregate_value, warn_value, comparison):
         status = CHECK_STATUS_WARNING
-        suggestion = config.get("suggestion_on_warn") or suggestion
+        suggestion = config.get("suggestion_on_warn") or ""
 
     def fmt(value: float) -> str:
         fmt_tpl = config.get("value_format")
