@@ -3446,11 +3446,16 @@ const InspectionSettingsPanel = ({
   >("other");
   const [customCheckType, setCustomCheckType] = useState("custom");
   const [commandText, setCommandText] = useState("");
-  const [commandSuggestion, setCommandSuggestion] = useState("");
   const [promqlExpression, setPromqlExpression] = useState("");
   const [promqlComparison, setPromqlComparison] = useState(">=");
-  const [promqlThreshold, setPromqlThreshold] = useState("");
-  const [promqlDescribe, setPromqlDescribe] = useState("");
+  const [promqlWarnThreshold, setPromqlWarnThreshold] = useState("");
+  const [promqlCriticalThreshold, setPromqlCriticalThreshold] = useState("");
+  const [promqlWarnSuggestion, setPromqlWarnSuggestion] = useState("");
+  const [promqlCriticalSuggestion, setPromqlCriticalSuggestion] = useState("");
+  
+  const [promqlSeverityMode, setPromqlSeverityMode] = useState<
+    "warning" | "critical"
+  >("warning");
   const [configText, setConfigText] = useState("{}");
   const [formError, setFormError] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -3470,8 +3475,11 @@ const InspectionSettingsPanel = ({
       setCommandText("");
       setPromqlExpression("");
       setPromqlComparison(">=");
-      setPromqlThreshold("");
-      setPromqlDescribe("");
+      setPromqlWarnThreshold("");
+      setPromqlCriticalThreshold("");
+      setPromqlWarnSuggestion("");
+      setPromqlCriticalSuggestion("");
+      setPromqlSeverityMode("warning");
       setConfigText("{}");
       setFormError(null);
     }
@@ -3496,28 +3504,32 @@ const InspectionSettingsPanel = ({
       } else {
         setCommandText("");
       }
-      setCommandSuggestion(
-        String(
-          config.suggestion_on_fail ?? config.suggestion_on_success ?? ""
-        )
-      );
     } else if (rawType === "promql") {
       setFormTypeMode("promql");
       setCustomCheckType("custom");
       setPromqlExpression(String(config.expression ?? ""));
       const comparisonRaw = String(config.comparison ?? ">=");
       setPromqlComparison(comparisonRaw === "=" ? "==" : comparisonRaw);
-      setPromqlDescribe(
-        String(
-          config.suggestion_on_warn ??
-            config.suggestion_on_fail ??
-            ""
-        )
+      const warnSuggestion = String(config.suggestion_on_warn ?? "");
+      const legacyCriticalSuggestion =
+        config.suggestion_on_critical ?? config.suggestion_on_fail ?? "";
+      setPromqlWarnSuggestion(warnSuggestion);
+      setPromqlCriticalSuggestion(String(legacyCriticalSuggestion));
+      setPromqlSeverityMode(
+        legacyCriticalSuggestion && !warnSuggestion ? "critical" : "warning"
       );
-      const threshold =
-        config.warn_threshold ?? config.fail_threshold ?? "";
-      setPromqlThreshold(
-        threshold === null || threshold === undefined ? "" : String(threshold)
+      const warnThreshold = config.warn_threshold ?? "";
+      const criticalThreshold =
+        config.critical_threshold ?? config.fail_threshold ?? "";
+      setPromqlWarnThreshold(
+        warnThreshold === null || warnThreshold === undefined
+          ? ""
+          : String(warnThreshold)
+      );
+      setPromqlCriticalThreshold(
+        criticalThreshold === null || criticalThreshold === undefined
+          ? ""
+          : String(criticalThreshold)
       );
     } else {
       setFormTypeMode("other");
@@ -3525,8 +3537,11 @@ const InspectionSettingsPanel = ({
       setCommandText("");
       setPromqlExpression("");
       setPromqlComparison(">=");
-      setPromqlThreshold("");
-      setPromqlDescribe("");
+      setPromqlWarnThreshold("");
+      setPromqlCriticalThreshold("");
+      setPromqlWarnSuggestion("");
+      setPromqlCriticalSuggestion("");
+      setPromqlSeverityMode("warning");
     }
     setFormError(null);
   };
@@ -3538,11 +3553,13 @@ const InspectionSettingsPanel = ({
     setFormTypeMode("other");
     setCustomCheckType("custom");
     setCommandText("");
-    setCommandSuggestion("");
     setPromqlExpression("");
     setPromqlComparison(">=");
-    setPromqlThreshold("");
-    setPromqlDescribe("");
+    setPromqlWarnThreshold("");
+    setPromqlCriticalThreshold("");
+    setPromqlWarnSuggestion("");
+    setPromqlCriticalSuggestion("");
+    setPromqlSeverityMode("warning");
     setConfigText("{}");
     setFormError(null);
   };
@@ -3580,26 +3597,30 @@ const InspectionSettingsPanel = ({
         ...baseConfig,
         command: commandText.trim(),
       };
-      delete parsedConfig.suggestion_on_fail;
-      delete parsedConfig.suggestion_on_success;
-      if (commandSuggestion.trim()) {
-        parsedConfig.suggestion_on_fail = commandSuggestion.trim();
-        parsedConfig.suggestion_on_success = commandSuggestion.trim();
-      }
     } else if (formTypeMode === "promql") {
       if (!promqlExpression.trim()) {
         setFormError("PromQL 表达式不能为空");
         return;
       }
-      const thresholdText = promqlThreshold.trim();
-      let thresholdValue: number | undefined;
-      if (thresholdText) {
-        const parsedValue = Number(thresholdText);
-        if (Number.isNaN(parsedValue)) {
-          setFormError("告警阈值必须为数字");
-          return;
+      const parseThreshold = (value: string, label: string) => {
+        const trimmed = value.trim();
+        if (!trimmed) {
+          return undefined;
         }
-        thresholdValue = parsedValue;
+        const parsedValue = Number(trimmed);
+        if (Number.isNaN(parsedValue)) {
+          setFormError(`${label}必须为数字`);
+          return null;
+        }
+        return parsedValue;
+      };
+      const warnValue = parseThreshold(promqlWarnThreshold, "告警阈值");
+      if (warnValue === null) {
+        return;
+      }
+      const criticalValue = parseThreshold(promqlCriticalThreshold, "严重阈值");
+      if (criticalValue === null) {
+        return;
       }
       parsedConfig = {
         ...baseConfig,
@@ -3607,14 +3628,21 @@ const InspectionSettingsPanel = ({
         comparison: promqlComparison || ">=",
       };
       delete parsedConfig.warn_threshold;
+      delete parsedConfig.critical_threshold;
       delete parsedConfig.fail_threshold;
       delete parsedConfig.suggestion_on_warn;
-      delete parsedConfig.suggestion_on_fail;
-      if (thresholdValue !== undefined) {
-        parsedConfig.warn_threshold = thresholdValue;
+      delete parsedConfig.suggestion_on_critical;
+      if (warnValue !== undefined) {
+        parsedConfig.warn_threshold = warnValue;
       }
-      if (promqlDescribe.trim()) {
-        parsedConfig.suggestion_on_warn = promqlDescribe.trim();
+      if (criticalValue !== undefined) {
+        parsedConfig.critical_threshold = criticalValue;
+      }
+      if (promqlWarnSuggestion.trim()) {
+        parsedConfig.suggestion_on_warn = promqlWarnSuggestion.trim();
+      }
+      if (promqlCriticalSuggestion.trim()) {
+        parsedConfig.suggestion_on_critical = promqlCriticalSuggestion.trim();
       }
     } else {
       if (configText.trim()) {
@@ -4044,18 +4072,6 @@ const InspectionSettingsPanel = ({
                 />
               </label>
             )}
-            {formTypeMode === "command" && (
-              <label>
-                告警建议
-                <textarea
-                  value={commandSuggestion}
-                  onChange={(event) => setCommandSuggestion(event.target.value)}
-                  disabled={submitting}
-                  rows={3}
-                  placeholder="例如：检查证书是否临近过期"
-                />
-              </label>
-            )}
             {formTypeMode === "promql" && (
               <>
                 <label>
@@ -4096,23 +4112,69 @@ const InspectionSettingsPanel = ({
                     告警阈值
                     <input
                       type="number"
-                      value={promqlThreshold}
-                      onChange={(event) => setPromqlThreshold(event.target.value)}
+                      value={promqlWarnThreshold}
+                      onChange={(event) =>
+                        setPromqlWarnThreshold(event.target.value)
+                      }
                       disabled={submitting}
                       placeholder="例如：0.8"
                     />
                   </label>
+                  <label>
+                    严重阈值
+                    <input
+                      type="number"
+                      value={promqlCriticalThreshold}
+                      onChange={(event) =>
+                        setPromqlCriticalThreshold(event.target.value)
+                      }
+                      disabled={submitting}
+                      placeholder="例如：0.9"
+                    />
+                  </label>
                 </div>
-                <label>
-                  告警建议
-                  <textarea
-                    value={promqlDescribe}
-                    onChange={(event) => setPromqlDescribe(event.target.value)}
-                    disabled={submitting}
-                    rows={3}
-                    placeholder="达到阈值时写入巡检建议，例如：检查集群负载或扩容"
-                  />
-                </label>
+                <div className="field-row">
+                  <label>
+                    严重程度
+                    <select
+                      value={promqlSeverityMode}
+                      onChange={(event) =>
+                        setPromqlSeverityMode(
+                          event.target.value as "warning" | "critical"
+                        )
+                      }
+                      disabled={submitting}
+                    >
+                      <option value="warning">告警</option>
+                      <option value="critical">严重</option>
+                    </select>
+                  </label>
+                  <label>
+                    {promqlSeverityMode === "warning" ? "告警建议" : "严重建议"}
+                    <textarea
+                      value={
+                        promqlSeverityMode === "warning"
+                          ? promqlWarnSuggestion
+                          : promqlCriticalSuggestion
+                      }
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        if (promqlSeverityMode === "warning") {
+                          setPromqlWarnSuggestion(value);
+                        } else {
+                          setPromqlCriticalSuggestion(value);
+                        }
+                      }}
+                      disabled={submitting}
+                      rows={3}
+                      placeholder={
+                        promqlSeverityMode === "warning"
+                          ? "达到告警阈值时写入巡检建议"
+                          : "达到严重阈值时写入巡检建议"
+                      }
+                    />
+                  </label>
+                </div>
               </>
             )}
           {formTypeMode === "other" && (

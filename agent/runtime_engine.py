@@ -14,6 +14,8 @@ CHECK_STATUS_WARNING = "warning"
 CHECK_STATUS_CRITICAL = "critical"
 CHECK_STATUS_FAILED = "failed"
 
+DEFAULT_EXECUTION_FAILURE_SUGGESTION = "请检查此命令或promql"
+
 
 class PrometheusClient:
     """轻量 Prometheus HTTP API 客户端（本地备份实现）。"""
@@ -169,16 +171,16 @@ def _execute_command_check(
     except subprocess.TimeoutExpired:
         return CHECK_STATUS_WARNING, f"Command timed out after {timeout}s.", config.get(
             "suggestion_on_timeout"
-        ) or config.get("suggestion_on_fail") or "调整超时或优化命令。"
+        ) or config.get("suggestion_on_fail") or DEFAULT_EXECUTION_FAILURE_SUGGESTION
     except FileNotFoundError:
         return CHECK_STATUS_FAILED, "Command executable not found.", config.get(
             "suggestion_on_fail"
-        ) or "确认 Agent 环境已安装对应二进制。"
+        ) or DEFAULT_EXECUTION_FAILURE_SUGGESTION
     except Exception as exc:
         return (
             CHECK_STATUS_FAILED,
             f"Command execution error: {exc}",
-            config.get("suggestion_on_fail") or "检查命令定义。",
+            config.get("suggestion_on_fail") or DEFAULT_EXECUTION_FAILURE_SUGGESTION,
         )
 
     stdout = result.stdout or ""
@@ -192,7 +194,7 @@ def _execute_command_check(
             return (
                 CHECK_STATUS_WARNING,
                 "Output missing expected text: " + ", ".join(missing),
-                config.get("suggestion_on_fail") or "核对命令输出内容。",
+                config.get("suggestion_on_fail") or DEFAULT_EXECUTION_FAILURE_SUGGESTION,
             )
         detail = (
             _truncate(stdout)
@@ -208,7 +210,7 @@ def _execute_command_check(
     detail = config.get("failure_message") or _truncate(
         stderr or stdout or "Command returned non-zero exit code."
     )
-    return CHECK_STATUS_FAILED, detail, config.get("suggestion_on_fail") or "检查命令输出。"
+    return CHECK_STATUS_FAILED, detail, config.get("suggestion_on_fail") or DEFAULT_EXECUTION_FAILURE_SUGGESTION
 
 
 def _require_prom(context: CheckContext) -> Optional[Tuple[str, str, str]]:
@@ -265,7 +267,9 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext):
         return (
             CHECK_STATUS_WARNING,
             message,
-            config.get("suggestion_on_error") or "检查 Prometheus 可访问性。",
+            config.get("suggestion_on_error")
+            or config.get("suggestion_on_fail")
+            or DEFAULT_EXECUTION_FAILURE_SUGGESTION,
         )
     values: List[float] = []
     samples: List[Dict[str, object]] = []
@@ -285,6 +289,7 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext):
     aggregate_mode = str(config.get("aggregate", "max"))
     aggregate_value = _aggregate(values, aggregate_mode)
     comparison = str(config.get("comparison", ">=")).strip()
+    critical_threshold = config.get("critical_threshold")
     fail_threshold = config.get("fail_threshold")
     warn_threshold = config.get("warn_threshold")
 
@@ -294,13 +299,15 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext):
         except (TypeError, ValueError):
             return None
 
-    fail_value = to_float(fail_threshold)
+    critical_value = to_float(critical_threshold)
+    if critical_value is None and critical_threshold is None:
+        critical_value = to_float(fail_threshold)
     warn_value = to_float(warn_threshold)
     status = CHECK_STATUS_PASSED
     suggestion = config.get("suggestion_on_success") or ""
-    if fail_value is not None and _compare(aggregate_value, fail_value, comparison):
+    if critical_value is not None and _compare(aggregate_value, critical_value, comparison):
         status = CHECK_STATUS_CRITICAL
-        suggestion = config.get("suggestion_on_fail") or suggestion
+        suggestion = config.get("suggestion_on_critical") or suggestion
     elif warn_value is not None and _compare(aggregate_value, warn_value, comparison):
         status = CHECK_STATUS_WARNING
         suggestion = config.get("suggestion_on_warn") or suggestion

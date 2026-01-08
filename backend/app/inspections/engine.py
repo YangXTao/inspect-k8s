@@ -15,6 +15,8 @@ CHECK_STATUS_WARNING = "warning"
 CHECK_STATUS_CRITICAL = "critical"
 CHECK_STATUS_FAILED = "failed"
 
+DEFAULT_EXECUTION_FAILURE_SUGGESTION = "请检查此命令或promql"
+
 
 @dataclass
 class CheckContext:
@@ -146,7 +148,11 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
-        suggestion = config.get("suggestion_on_timeout") or config.get("suggestion_on_fail") or "Check command runtime or increase timeout."
+        suggestion = (
+            config.get("suggestion_on_timeout")
+            or config.get("suggestion_on_fail")
+            or DEFAULT_EXECUTION_FAILURE_SUGGESTION
+        )
         return (
             CHECK_STATUS_WARNING,
             f"Command timed out after {timeout}s.",
@@ -156,13 +162,13 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
         return (
             CHECK_STATUS_FAILED,
             "Command executable not found.",
-            config.get("suggestion_on_fail") or "Ensure the binary is installed on the server.",
+            config.get("suggestion_on_fail") or DEFAULT_EXECUTION_FAILURE_SUGGESTION,
         )
     except Exception as exc:  # pragma: no cover - defensive path
         return (
             CHECK_STATUS_FAILED,
             f"Command execution error: {exc}",
-            config.get("suggestion_on_fail") or "Review command definition.",
+            config.get("suggestion_on_fail") or DEFAULT_EXECUTION_FAILURE_SUGGESTION,
         )
 
     stdout = result.stdout or ""
@@ -178,7 +184,7 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
             detail = (
                 "Output missing expected text: " + ", ".join(missing)
             )
-            suggestion = config.get("suggestion_on_fail") or "Verify the command output."
+            suggestion = config.get("suggestion_on_fail") or DEFAULT_EXECUTION_FAILURE_SUGGESTION
             return CHECK_STATUS_WARNING, detail, suggestion
 
         success_override = config.get("success_message")
@@ -193,7 +199,7 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
         return CHECK_STATUS_PASSED, detail, suggestion
 
     detail = config.get("failure_message") or _truncate_output(stderr or stdout or "Command returned non-zero exit code.")
-    suggestion = config.get("suggestion_on_fail") or "Inspect command output for details."
+    suggestion = config.get("suggestion_on_fail") or DEFAULT_EXECUTION_FAILURE_SUGGESTION
     return CHECK_STATUS_CRITICAL, detail, suggestion
 
 
@@ -300,7 +306,11 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> T
     prom = context.prom
     ok, results, message = prom.query(str(expression))
     if not ok:
-        suggestion = config.get("suggestion_on_error") or "Check Prometheus endpoint availability."
+        suggestion = (
+            config.get("suggestion_on_error")
+            or config.get("suggestion_on_fail")
+            or DEFAULT_EXECUTION_FAILURE_SUGGESTION
+        )
         return CHECK_STATUS_WARNING, message, suggestion
 
     samples: List[Dict[str, object]] = []
@@ -328,6 +338,7 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> T
     aggregate_value = _aggregate_values(values, aggregate_mode)
 
     comparison = str(config.get("comparison", ">=")).strip()
+    critical_threshold_raw = config.get("critical_threshold")
     fail_threshold_raw = config.get("fail_threshold")
     warn_threshold_raw = config.get("warn_threshold")
 
@@ -337,37 +348,39 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> T
         except (TypeError, ValueError):
             return None
 
-    fail_threshold_value = _to_float(fail_threshold_raw)
+    critical_threshold_value = _to_float(critical_threshold_raw)
+    if critical_threshold_value is None and critical_threshold_raw is None:
+        critical_threshold_value = _to_float(fail_threshold_raw)
     warn_threshold_value = _to_float(warn_threshold_raw)
 
     status = CHECK_STATUS_PASSED
     suggestion = config.get("suggestion_on_success") or ""
 
-    if fail_threshold_value is not None and _compare(float(aggregate_value), fail_threshold_value, comparison):
+    if critical_threshold_value is not None and _compare(float(aggregate_value), critical_threshold_value, comparison):
         status = CHECK_STATUS_CRITICAL
-        suggestion = config.get("suggestion_on_fail") or suggestion
+        suggestion = config.get("suggestion_on_critical") or suggestion
     elif warn_threshold_value is not None and _compare(float(aggregate_value), warn_threshold_value, comparison):
         status = CHECK_STATUS_WARNING
         suggestion = config.get("suggestion_on_warn") or suggestion
 
     def _classify(value: float) -> str | None:
-        if fail_threshold_value is not None and _compare(value, fail_threshold_value, comparison):
-            return "fail"
+        if critical_threshold_value is not None and _compare(value, critical_threshold_value, comparison):
+            return "critical"
         if warn_threshold_value is not None and _compare(value, warn_threshold_value, comparison):
             return "warn"
         return None
 
-    fail_matches: List[Dict[str, object]] = []
+    critical_matches: List[Dict[str, object]] = []
     warn_matches: List[Dict[str, object]] = []
     for entry in samples:
         category = _classify(entry["value"])  # type: ignore[index]
-        if category == "fail":
-            fail_matches.append(entry)
+        if category == "critical":
+            critical_matches.append(entry)
         elif category == "warn":
             warn_matches.append(entry)
 
     reverse_sort = comparison not in {"<", "<="}
-    fail_matches.sort(key=lambda item: item["value"], reverse=reverse_sort)  # type: ignore[index]
+    critical_matches.sort(key=lambda item: item["value"], reverse=reverse_sort)  # type: ignore[index]
     warn_matches.sort(key=lambda item: item["value"], reverse=reverse_sort)  # type: ignore[index]
     sorted_samples = sorted(samples, key=lambda item: item["value"], reverse=reverse_sort)  # type: ignore[index]
 
@@ -414,7 +427,7 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> T
         else:
             detail_prefix = f"{aggregate_mode} value: {_format_value(aggregate_value)} (samples={len(values)})"
 
-    default_limit = 5 if (status == CHECK_STATUS_PASSED and not fail_matches and not warn_matches) else 20
+    default_limit = 5 if (status == CHECK_STATUS_PASSED and not critical_matches and not warn_matches) else 20
 
     max_rows_raw = (
         config.get("result_limit")
@@ -431,27 +444,32 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> T
 
     matches_to_show: List[Dict[str, object]]
     headline: str
-    if fail_matches:
-        matches_to_show = fail_matches
+    critical_threshold_label_raw = (
+        critical_threshold_raw if critical_threshold_raw is not None else fail_threshold_raw
+    )
+    if critical_matches:
+        matches_to_show = critical_matches
         headline = (
-            f"检测到 {len(fail_matches)} 条满足告警阈值（{comparison} {_threshold_label(fail_threshold_value, fail_threshold_raw)}）的样本，"
-            f"展示前 {min(len(fail_matches), max_rows)} 条："
+            f"Detected {len(critical_matches)} samples meeting critical threshold ("
+            f"{comparison} {_threshold_label(critical_threshold_value, critical_threshold_label_raw)}), "
+            f"showing top {min(len(critical_matches), max_rows)}."
         )
     elif warn_matches:
         matches_to_show = warn_matches
         headline = (
-            f"检测到 {len(warn_matches)} 条满足预警阈值（{comparison} {_threshold_label(warn_threshold_value, warn_threshold_raw)}）的样本，"
-            f"展示前 {min(len(warn_matches), max_rows)} 条："
+            f"Detected {len(warn_matches)} samples meeting warning threshold ("
+            f"{comparison} {_threshold_label(warn_threshold_value, warn_threshold_raw)}), "
+            f"showing top {min(len(warn_matches), max_rows)}."
         )
     else:
         matches_to_show = sorted_samples
         if matches_to_show:
             headline = (
-                f"共收到 {len(sorted_samples)} 条样本，展示前 {min(len(sorted_samples), max_rows)} 条："
+                f"Collected {len(sorted_samples)} samples, showing top "
+                f"{min(len(sorted_samples), max_rows)}."
             )
         else:
-            headline = "未获得可展示的样本。"
-
+            headline = "No samples to display."
     lines = [detail_prefix.strip()]
     for entry in matches_to_show[:max_rows]:
         metric = entry.get("metric") if isinstance(entry, dict) else {}
