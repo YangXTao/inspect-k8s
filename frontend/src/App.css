@@ -1206,6 +1206,11 @@ th {
   color: #854d0e;
 }
 
+.status-pill.critical {
+  background: #fecdd3;
+  color: #be123c;
+}
+
 .status-pill.danger {
   background: #fecaca;
   color: #b91c1c;

@@ -605,6 +605,7 @@ const decodeRunKeyToId = (
 const inspectionResultStatusMeta = {
   passed: { label: "通过", className: "success" },
   warning: { label: "警告", className: "warning" },
+  critical: { label: "严重", className: "critical" },
   failed: { label: "失败", className: "danger" },
 } as const;
 
@@ -4527,6 +4528,7 @@ const RunDetailView = ({
     const stats = {
       passed: 0,
       warning: 0,
+      critical: 0,
       failed: 0,
     };
     (run?.results ?? []).forEach((result) => {
@@ -4534,6 +4536,8 @@ const RunDetailView = ({
         stats.passed += 1;
       } else if (result.status === "warning") {
         stats.warning += 1;
+      } else if (result.status === "critical") {
+        stats.critical += 1;
       } else if (result.status === "failed") {
         stats.failed += 1;
       }
@@ -4862,6 +4866,7 @@ const RunDetailView = ({
                   <option value="all">全部</option>
                   <option value="passed">通过</option>
                   <option value="warning">警告</option>
+                  <option value="critical">严重</option>
                   <option value="failed">失败</option>
                 </select>
               </label>
@@ -4883,6 +4888,9 @@ const RunDetailView = ({
           </span>
           <span className="status-pill warning">
             警告 {resultStats.warning}
+          </span>
+          <span className="status-pill critical">
+            严重 {resultStats.critical}
           </span>
           <span className="status-pill danger">失败 {resultStats.failed}</span>
         </div>

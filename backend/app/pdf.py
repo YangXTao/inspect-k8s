@@ -150,6 +150,7 @@ def generate_markdown_report(
     total_checks = len(results_list)
     passed_count = sum(1 for item in results_list if item.status.lower() == "passed")
     warning_count = sum(1 for item in results_list if item.status.lower() == "warning")
+    critical_count = sum(1 for item in results_list if item.status.lower() == "critical")
     failed_count = sum(1 for item in results_list if item.status.lower() == "failed")
 
     def _sanitize(text: str | None) -> str:
@@ -170,7 +171,7 @@ def generate_markdown_report(
     lines.append("| 项目 | 内容 |")
     lines.append("| --- | --- |")
     lines.append(f"| 巡检编号 | {display_label} |")
-    lines.append(f"| 巡检人 | {_sanitize(run.operator) if run.operator else '未填写'} |")
+    lines.append(f"| 巡检人 | {run.operator or '未填写'} |")
     lines.append(f"| 目标集群 | {cluster_name} |")
     lines.append(f"| 集群版本 | {version_label} |")
     lines.append(f"| 节点数量 | {node_count_label} |")
@@ -183,12 +184,13 @@ def generate_markdown_report(
     lines.append("| 项目 | 数量 |")
     lines.append("| --- | --- |")
     lines.append(f"| 检查项总数 | {total_checks} |")
-    lines.append(f"| 通过项 | {passed_count} |")
-    lines.append(f"| 告警项 | {warning_count} |")
-    lines.append(f"| 失败项 | {failed_count} |")
+    lines.append(f"| 通过 | {passed_count} |")
+    lines.append(f"| 告警 | {warning_count} |")
+    lines.append(f"| 严重 | {critical_count} |")
+    lines.append(f"| 失败 | {failed_count} |")
     lines.append("")
 
-    summary_text = (run.summary or "").strip() or "暂无巡检摘要。"
+    summary_text = (run.summary or "").strip() or "暂无摘要"
     lines.append("## 巡检摘要")
     lines.append("")
     lines.append(summary_text.replace("\r\n", "\n"))
@@ -196,11 +198,12 @@ def generate_markdown_report(
 
     lines.append("## 巡检明细")
     lines.append("")
-    lines.append("| 巡检项 | 状态 | 详情 | 建议 |")
+    lines.append("| 检查项 | 状态 | 详情 | 建议 |")
     lines.append("| --- | --- | --- | --- |")
     status_labels = {
         "passed": "通过",
         "warning": "告警",
+        "critical": "严重",
         "failed": "失败",
     }
     for item in results_list:
@@ -435,6 +438,7 @@ def generate_pdf_report(
     total_checks = len(results_list)
     passed_count = sum(1 for item in results_list if item.status.lower() == "passed")
     warning_count = sum(1 for item in results_list if item.status.lower() == "warning")
+    critical_count = sum(1 for item in results_list if item.status.lower() == "critical")
     failed_count = sum(1 for item in results_list if item.status.lower() == "failed")
 
     story: list[object] = []
@@ -481,9 +485,10 @@ def generate_pdf_report(
     story.append(Paragraph("巡检概览", styles["SectionHeading"]))
     card_config = [
         ("检查项总数", total_checks, "#dbeafe"),
-        ("通过项", passed_count, "#dcfce7"),
-        ("警告项", warning_count, "#fef3c7"),
-        ("失败项", failed_count, "#fee2e2"),
+        ("通过", passed_count, "#dcfce7"),
+        ("告警", warning_count, "#fef3c7"),
+        ("严重", critical_count, "#fecdd3"),
+        ("失败", failed_count, "#fee2e2"),
     ]
     card_cells: list[Paragraph] = []
     for label, value, bg_color in card_config:
@@ -514,7 +519,7 @@ def generate_pdf_report(
         story.append(Spacer(1, 16))
 
     story.append(Paragraph("巡检摘要", styles["SectionHeading"]))
-    summary_text = (run.summary or "").strip() or "暂无巡检摘要。"
+    summary_text = (run.summary or "").strip() or "暂无摘要"
     story.append(Paragraph(_wrap_latin(summary_text), styles["Muted"]))
     story.append(Spacer(1, 14))
 
@@ -526,11 +531,13 @@ def generate_pdf_report(
     status_colors = {
         "passed": colors.HexColor("#16a34a"),
         "warning": colors.HexColor("#f59e0b"),
+        "critical": colors.HexColor("#be123c"),
         "failed": colors.HexColor("#dc2626"),
     }
     status_backgrounds = {
         "passed": colors.HexColor("#dcfce7"),
         "warning": colors.HexColor("#fef3c7"),
+        "critical": colors.HexColor("#fecdd3"),
         "failed": colors.HexColor("#fee2e2"),
     }
 
@@ -541,7 +548,8 @@ def generate_pdf_report(
         status = result.status.lower()
         status_label = {
             "passed": "通过",
-            "warning": "警告",
+            "warning": "告警",
+            "critical": "严重",
             "failed": "失败",
         }.get(status, result.status)
         detail_chunks = _split_text_for_table(result.detail)

@@ -143,12 +143,22 @@ def _summarize_run_outcome(
     else:
         passed = status_counter.get("passed", 0)
         warnings = status_counter.get("warning", 0)
+        critical = status_counter.get("critical", 0)
         failed = status_counter.get("failed", 0)
         if failed > 0:
             overall_status = "finished"
             summary = (
                 f"巡检完成，但存在失败：通过 {passed} 项，"
                 f"告警 {warnings} 项，"
+                f"严重 {critical} 项，"
+                f"失败 {failed} 项。"
+            )
+        elif critical > 0:
+            overall_status = "finished"
+            summary = (
+                f"巡检完成，但存在严重：通过 {passed} 项，"
+                f"告警 {warnings} 项，"
+                f"严重 {critical} 项，"
                 f"失败 {failed} 项。"
             )
         elif warnings > 0:
@@ -156,6 +166,7 @@ def _summarize_run_outcome(
             summary = (
                 f"巡检完成，但存在告警：通过 {passed} 项，"
                 f"告警 {warnings} 项，"
+                f"严重 {critical} 项，"
                 f"失败 {failed} 项。"
             )
         else:
@@ -163,6 +174,7 @@ def _summarize_run_outcome(
             summary = (
                 f"巡检完成：通过 {passed} 项，"
                 f"告警 {warnings} 项，"
+                f"严重 {critical} 项，"
                 f"失败 {failed} 项。"
             )
 
@@ -1184,7 +1196,7 @@ def _apply_connection_test_result(
         else:
             continue
         break
-    status_map = {"passed": "connected", "warning": "warning", "failed": "failed"}
+    status_map = {"passed": "connected", "warning": "warning", "critical": "failed", "failed": "failed"}
     connection_status = "failed"
     message = ""
     if result_payload:
@@ -1225,7 +1237,7 @@ def agent_submit_results(
     is_partial = bool(payload.partial)
     for result in payload.results:
         normalized_status = (result.status or "").strip().lower()
-        if normalized_status not in {"passed", "warning", "failed"}:
+        if normalized_status not in {"passed", "warning", "critical", "failed"}:
             normalized_status = "warning"
         detail = _sanitize_optional_text(result.detail)
         suggestion = _sanitize_optional_text(result.suggestion)

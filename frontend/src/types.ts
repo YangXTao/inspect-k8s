@@ -45,7 +45,7 @@ export type InspectionRunStatus =
   | "failed"
   | "cancelled";
 
-export type InspectionResultStatus = "passed" | "warning" | "failed";
+export type InspectionResultStatus = "passed" | "warning" | "critical" | "failed";
 
 export type InspectionResult = {
   id: number;

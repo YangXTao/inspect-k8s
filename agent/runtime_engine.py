@@ -11,6 +11,7 @@ import requests
 
 CHECK_STATUS_PASSED = "passed"
 CHECK_STATUS_WARNING = "warning"
+CHECK_STATUS_CRITICAL = "critical"
 CHECK_STATUS_FAILED = "failed"
 
 
@@ -298,7 +299,7 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext):
     status = CHECK_STATUS_PASSED
     suggestion = config.get("suggestion_on_success") or ""
     if fail_value is not None and _compare(aggregate_value, fail_value, comparison):
-        status = CHECK_STATUS_WARNING
+        status = CHECK_STATUS_CRITICAL
         suggestion = config.get("suggestion_on_fail") or suggestion
     elif warn_value is not None and _compare(aggregate_value, warn_value, comparison):
         status = CHECK_STATUS_WARNING
@@ -445,7 +446,7 @@ def check_nodes_status(context: CheckContext):
     if not not_ready:
         return CHECK_STATUS_PASSED, f"{len(parsed.get('items', []))} nodes ready.", ""
     return (
-        CHECK_STATUS_FAILED,
+        CHECK_STATUS_CRITICAL,
         "Nodes not ready: " + ", ".join(filter(None, not_ready)),
         "使用 kubectl describe node <name> 进一步排查。",
     )
@@ -502,7 +503,7 @@ def check_node_cpu_hotspots(context: CheckContext):
     status = CHECK_STATUS_PASSED
     suggestion = ""
     if worst >= 90:
-        status = CHECK_STATUS_FAILED
+        status = CHECK_STATUS_CRITICAL
         suggestion = "节点 CPU 持续高负载，请排查热点工作负载或扩容。"
     elif worst >= 80:
         status = CHECK_STATUS_WARNING
@@ -537,7 +538,7 @@ def check_node_memory_pressure(context: CheckContext):
     status = CHECK_STATUS_PASSED
     suggestion = ""
     if worst >= 95:
-        status = CHECK_STATUS_FAILED
+        status = CHECK_STATUS_CRITICAL
         suggestion = "节点内存几乎耗尽，建议扩容或排查内存泄漏。"
     elif worst >= 85:
         status = CHECK_STATUS_WARNING
@@ -564,7 +565,7 @@ def check_cluster_cpu_usage(context: CheckContext):
     status = CHECK_STATUS_PASSED
     suggestion = ""
     if value >= 90:
-        status = CHECK_STATUS_FAILED
+        status = CHECK_STATUS_CRITICAL
         suggestion = "CPU 接近满载，需扩容或降载。"
     elif value >= 75:
         status = CHECK_STATUS_WARNING
@@ -591,7 +592,7 @@ def check_cluster_memory_usage(context: CheckContext):
     status = CHECK_STATUS_PASSED
     suggestion = ""
     if value >= 90:
-        status = CHECK_STATUS_FAILED
+        status = CHECK_STATUS_CRITICAL
         suggestion = "内存使用率极高，需扩容或排查。"
     elif value >= 80:
         status = CHECK_STATUS_WARNING
@@ -623,7 +624,7 @@ def check_cluster_disk_io(context: CheckContext):
     status = CHECK_STATUS_PASSED
     suggestion = ""
     if worst >= 0.8:
-        status = CHECK_STATUS_FAILED
+        status = CHECK_STATUS_CRITICAL
         suggestion = "磁盘 IO 时间占比过高，可能存在瓶颈。"
     elif worst >= 0.4:
         status = CHECK_STATUS_WARNING

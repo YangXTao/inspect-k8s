@@ -12,6 +12,7 @@ from ..prometheus import PrometheusClient
 
 CHECK_STATUS_PASSED = "passed"
 CHECK_STATUS_WARNING = "warning"
+CHECK_STATUS_CRITICAL = "critical"
 CHECK_STATUS_FAILED = "failed"
 
 
@@ -193,7 +194,7 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
 
     detail = config.get("failure_message") or _truncate_output(stderr or stdout or "Command returned non-zero exit code.")
     suggestion = config.get("suggestion_on_fail") or "Inspect command output for details."
-    return CHECK_STATUS_FAILED, detail, suggestion
+    return CHECK_STATUS_CRITICAL, detail, suggestion
 
 
 def _compare(value: float, threshold: float, operator: str) -> bool:
@@ -343,7 +344,7 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> T
     suggestion = config.get("suggestion_on_success") or ""
 
     if fail_threshold_value is not None and _compare(float(aggregate_value), fail_threshold_value, comparison):
-        status = CHECK_STATUS_WARNING
+        status = CHECK_STATUS_CRITICAL
         suggestion = config.get("suggestion_on_fail") or suggestion
     elif warn_threshold_value is not None and _compare(float(aggregate_value), warn_threshold_value, comparison):
         status = CHECK_STATUS_WARNING
@@ -545,7 +546,7 @@ def check_nodes_status(context: CheckContext) -> Tuple[str, str, str]:
         return CHECK_STATUS_PASSED, f"{len(parsed.get('items', []))} nodes ready.", ""
     detail = "Nodes not ready: " + ", ".join(not_ready)
     suggestion = "Investigate node conditions via 'kubectl describe node <name>'."
-    return CHECK_STATUS_FAILED, detail, suggestion
+    return CHECK_STATUS_CRITICAL, detail, suggestion
 
 
 def check_pods_status(context: CheckContext) -> Tuple[str, str, str]:
@@ -620,7 +621,7 @@ def check_cluster_cpu_usage(context: CheckContext) -> Tuple[str, str, str]:
     status = CHECK_STATUS_PASSED
     suggestion = ""
     if value >= 90:
-        status = CHECK_STATUS_FAILED
+        status = CHECK_STATUS_CRITICAL
         suggestion = "CPU 接近满载，请检查集群负载并考虑扩容。"
     elif value >= 75:
         status = CHECK_STATUS_WARNING
@@ -650,7 +651,7 @@ def check_cluster_memory_usage(context: CheckContext) -> Tuple[str, str, str]:
     status = CHECK_STATUS_PASSED
     suggestion = ""
     if value >= 90:
-        status = CHECK_STATUS_FAILED
+        status = CHECK_STATUS_CRITICAL
         suggestion = "内存使用率已非常高，建议扩容或排查内存泄漏。"
     elif value >= 80:
         status = CHECK_STATUS_WARNING
@@ -692,7 +693,7 @@ def check_node_cpu_hotspots(context: CheckContext) -> Tuple[str, str, str]:
     )
     worst = readings[0][1]
     if worst >= 90:
-        status = CHECK_STATUS_FAILED
+        status = CHECK_STATUS_CRITICAL
         suggestion = "部分节点 CPU 使用率极高，请排查热点工作负载或考虑调度优化。"
     elif worst >= 80:
         status = CHECK_STATUS_WARNING
@@ -736,7 +737,7 @@ def check_node_memory_pressure(context: CheckContext) -> Tuple[str, str, str]:
     )
     worst = readings[0][1]
     if worst >= 95:
-        status = CHECK_STATUS_FAILED
+        status = CHECK_STATUS_CRITICAL
         suggestion = "节点内存几乎耗尽，建议排查内存泄漏或扩容。"
     elif worst >= 85:
         status = CHECK_STATUS_WARNING
@@ -779,7 +780,7 @@ def check_cluster_disk_io(context: CheckContext) -> Tuple[str, str, str]:
     status = CHECK_STATUS_PASSED
     suggestion = ""
     if worst >= 0.8:
-        status = CHECK_STATUS_FAILED
+        status = CHECK_STATUS_CRITICAL
         suggestion = "磁盘 IO 时间占比过高，可能存在 IO 瓶颈。"
     elif worst >= 0.4:
         status = CHECK_STATUS_WARNING
