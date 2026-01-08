@@ -136,6 +136,26 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
         success_codes = [success_codes]
     success_codes = {int(code) for code in success_codes}
 
+    def _normalize_exit_codes(raw: object) -> set[int]:
+        if raw is None:
+            return set()
+        if isinstance(raw, (list, tuple, set)):
+            items = raw
+        else:
+            items = [raw]
+        codes: set[int] = set()
+        for item in items:
+            try:
+                codes.add(int(item))
+            except (TypeError, ValueError):
+                continue
+        return codes
+
+    warn_codes = _normalize_exit_codes(config.get("warn_exit_codes"))
+    critical_codes = _normalize_exit_codes(config.get("critical_exit_codes"))
+    force_warning = bool(config.get("force_warning", False))
+    force_critical = bool(config.get("force_critical", False))
+
     try:
         result = subprocess.run(
             cmd,
@@ -194,6 +214,14 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
 
     detail = config.get("failure_message") or _truncate_output(stderr or stdout or "Command returned non-zero exit code.")
     suggestion = config.get("suggestion_on_fail") or "Inspect command output for details."
+    if exit_code in critical_codes:
+        return CHECK_STATUS_CRITICAL, detail, config.get("suggestion_on_critical") or suggestion
+    if exit_code in warn_codes:
+        return CHECK_STATUS_WARNING, detail, config.get("suggestion_on_warn") or suggestion
+    if force_critical:
+        return CHECK_STATUS_CRITICAL, detail, config.get("suggestion_on_critical") or suggestion
+    if force_warning:
+        return CHECK_STATUS_WARNING, detail, config.get("suggestion_on_warn") or suggestion
     return CHECK_STATUS_CRITICAL, detail, suggestion
 
 

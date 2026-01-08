@@ -157,6 +157,26 @@ def _execute_command_check(
         success_codes = [success_codes]
     success_codes = {int(code) for code in success_codes}
 
+    def _normalize_exit_codes(raw: object) -> set[int]:
+        if raw is None:
+            return set()
+        if isinstance(raw, (list, tuple, set)):
+            items = raw
+        else:
+            items = [raw]
+        codes: set[int] = set()
+        for item in items:
+            try:
+                codes.add(int(item))
+            except (TypeError, ValueError):
+                continue
+        return codes
+
+    warn_codes = _normalize_exit_codes(config.get("warn_exit_codes"))
+    critical_codes = _normalize_exit_codes(config.get("critical_exit_codes"))
+    force_warning = bool(config.get("force_warning", False))
+    force_critical = bool(config.get("force_critical", False))
+
     try:
         result = subprocess.run(
             cmd,
@@ -199,7 +219,7 @@ def _execute_command_check(
             or _truncate(stderr)
             or str(config.get("success_message") or "命令执行成功。")
         )
-        status = CHECK_STATUS_WARNING if config.get("force_warning") else CHECK_STATUS_PASSED
+        status = CHECK_STATUS_WARNING if force_warning else CHECK_STATUS_PASSED
         return (
             status,
             detail,
@@ -208,7 +228,32 @@ def _execute_command_check(
     detail = config.get("failure_message") or _truncate(
         stderr or stdout or "Command returned non-zero exit code."
     )
-    return CHECK_STATUS_FAILED, detail, config.get("suggestion_on_fail") or "检查命令输出。"
+    suggestion = config.get("suggestion_on_fail") or "检查命令输出。"
+    if result.returncode in critical_codes:
+        return (
+            CHECK_STATUS_CRITICAL,
+            detail,
+            config.get("suggestion_on_critical") or suggestion,
+        )
+    if result.returncode in warn_codes:
+        return (
+            CHECK_STATUS_WARNING,
+            detail,
+            config.get("suggestion_on_warn") or suggestion,
+        )
+    if force_critical:
+        return (
+            CHECK_STATUS_CRITICAL,
+            detail,
+            config.get("suggestion_on_critical") or suggestion,
+        )
+    if force_warning:
+        return (
+            CHECK_STATUS_WARNING,
+            detail,
+            config.get("suggestion_on_warn") or suggestion,
+        )
+    return CHECK_STATUS_CRITICAL, detail, suggestion
 
 
 def _require_prom(context: CheckContext) -> Optional[Tuple[str, str, str]]:
