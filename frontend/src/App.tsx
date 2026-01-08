@@ -3446,6 +3446,9 @@ const InspectionSettingsPanel = ({
   >("other");
   const [customCheckType, setCustomCheckType] = useState("custom");
   const [commandText, setCommandText] = useState("");
+  const [commandWarnSuggestion, setCommandWarnSuggestion] = useState("");
+  const [commandCriticalSuggestion, setCommandCriticalSuggestion] =
+    useState("");
   const [promqlExpression, setPromqlExpression] = useState("");
   const [promqlComparison, setPromqlComparison] = useState(">=");
   const [promqlWarnThreshold, setPromqlWarnThreshold] = useState("");
@@ -3473,6 +3476,8 @@ const InspectionSettingsPanel = ({
       setFormTypeMode("other");
       setCustomCheckType("custom");
       setCommandText("");
+      setCommandWarnSuggestion("");
+      setCommandCriticalSuggestion("");
       setPromqlExpression("");
       setPromqlComparison(">=");
       setPromqlWarnThreshold("");
@@ -3504,6 +3509,8 @@ const InspectionSettingsPanel = ({
       } else {
         setCommandText("");
       }
+      setCommandWarnSuggestion(String(config.suggestion_on_warn ?? ""));
+      setCommandCriticalSuggestion(String(config.suggestion_on_critical ?? ""));
     } else if (rawType === "promql") {
       setFormTypeMode("promql");
       setCustomCheckType("custom");
@@ -3553,6 +3560,8 @@ const InspectionSettingsPanel = ({
     setFormTypeMode("other");
     setCustomCheckType("custom");
     setCommandText("");
+    setCommandWarnSuggestion("");
+    setCommandCriticalSuggestion("");
     setPromqlExpression("");
     setPromqlComparison(">=");
     setPromqlWarnThreshold("");
@@ -3597,6 +3606,15 @@ const InspectionSettingsPanel = ({
         ...baseConfig,
         command: commandText.trim(),
       };
+      delete parsedConfig.suggestion_on_warn;
+      delete parsedConfig.suggestion_on_critical;
+      if (commandWarnSuggestion.trim()) {
+        parsedConfig.suggestion_on_warn = commandWarnSuggestion.trim();
+      }
+      if (commandCriticalSuggestion.trim()) {
+        parsedConfig.suggestion_on_critical =
+          commandCriticalSuggestion.trim();
+      }
     } else if (formTypeMode === "promql") {
       if (!promqlExpression.trim()) {
         setFormError("PromQL 表达式不能为空");
@@ -4061,16 +4079,42 @@ const InspectionSettingsPanel = ({
               />
             </label>
             {formTypeMode === "command" && (
-              <label>
-                命令
-                <input
-                  type="text"
-                  value={commandText}
-                  onChange={(event) => setCommandText(event.target.value)}
-                  disabled={submitting}
-                  placeholder="例如：kubectl get nodes"
-                />
-              </label>
+              <>
+                <label>
+                  命令
+                  <input
+                    type="text"
+                    value={commandText}
+                    onChange={(event) => setCommandText(event.target.value)}
+                    disabled={submitting}
+                    placeholder="例如：kubectl get nodes"
+                  />
+                </label>
+                <label>
+                  告警建议
+                  <input
+                    type="text"
+                    value={commandWarnSuggestion}
+                    onChange={(event) =>
+                      setCommandWarnSuggestion(event.target.value)
+                    }
+                    disabled={submitting}
+                    placeholder="可选"
+                  />
+                </label>
+                <label>
+                  严重建议
+                  <input
+                    type="text"
+                    value={commandCriticalSuggestion}
+                    onChange={(event) =>
+                      setCommandCriticalSuggestion(event.target.value)
+                    }
+                    disabled={submitting}
+                    placeholder="可选"
+                  />
+                </label>
+              </>
             )}
             {formTypeMode === "promql" && (
               <>
@@ -4755,29 +4799,23 @@ const RunDetailView = ({
     setResultPageInput("");
   };
 
-  const extractResultLines = (value?: string | null) =>
-    value
-      ?.split(/\r?\n+/)
-      .map((line) => line.replace(/\s+/g, " ").trim())
-      .filter(Boolean) ?? [];
-
   const formatResultDetail = (result: InspectionResult) => {
-    const lines = extractResultLines(result.detail);
-    if (lines.length === 0) {
-      return "未提供详情";
-    }
-    if (result.status === "passed" && lines.length > 10) {
-      return lines.slice(0, 10).join(" · ");
-    }
-    return lines.join(" · ");
+    const detail = String(result.detail ?? "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .trim();
+    return detail || "未提供详情";
   };
 
   const formatResultSuggestion = (result: InspectionResult) => {
     if (result.status === "passed") {
       return "-";
     }
-    const lines = extractResultLines(result.suggestion);
-    return lines.length > 0 ? lines.join(" · ") : "未提供建议";
+    const suggestion = String(result.suggestion ?? "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .trim();
+    return suggestion || "未提供建议";
   };
 
   return (

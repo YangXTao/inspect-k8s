@@ -1,7 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
-import re
 import shutil
 import subprocess
 import shlex
@@ -15,7 +14,7 @@ CHECK_STATUS_WARNING = "warning"
 CHECK_STATUS_CRITICAL = "critical"
 CHECK_STATUS_FAILED = "failed"
 
-DEFAULT_EXECUTION_FAILURE_SUGGESTION = "请检查此命令或promql"
+DEFAULT_EXECUTION_FAILURE_SUGGESTION = "璇锋鏌ユ鍛戒护鎴杙romql"
 
 
 @dataclass
@@ -81,6 +80,24 @@ def _truncate_output(value: str) -> str:
     return value[: MAX_OUTPUT_LENGTH - 3] + "..."
 
 
+
+
+def _normalize_exit_codes(value: object) -> set[int]:
+    if value is None:
+        return set()
+    if isinstance(value, (list, tuple, set)):
+        items = value
+    else:
+        items = [value]
+    codes: set[int] = set()
+    for item in items:
+        try:
+            codes.add(int(item))
+        except (TypeError, ValueError):
+            continue
+    return codes
+
+
 def _execute_command_check(config: Dict[str, object], context: CheckContext) -> Tuple[str, str, str]:
     if not isinstance(config, dict):
         return (
@@ -137,6 +154,10 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
     if not isinstance(success_codes, (list, tuple)):
         success_codes = [success_codes]
     success_codes = {int(code) for code in success_codes}
+    warn_exit_codes = _normalize_exit_codes(config.get("warn_exit_codes"))
+    critical_exit_codes = _normalize_exit_codes(config.get("critical_exit_codes"))
+    force_warning = bool(config.get("force_warning"))
+    force_critical = bool(config.get("force_critical"))
 
     try:
         result = subprocess.run(
@@ -181,10 +202,8 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
             expected = [expected]
         missing = [pattern for pattern in expected if pattern not in stdout]
         if missing:
-            detail = (
-                "Output missing expected text: " + ", ".join(missing)
-            )
-            suggestion = config.get("suggestion_on_fail") or DEFAULT_EXECUTION_FAILURE_SUGGESTION
+            detail = "Output missing expected text: " + ", ".join(missing)
+            suggestion = config.get("suggestion_on_warn") or ""
             return CHECK_STATUS_WARNING, detail, suggestion
 
         success_override = config.get("success_message")
@@ -194,12 +213,26 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
         elif success_override:
             detail = _truncate_output(str(success_override))
         else:
-            detail = "命令执行成功（无输出）"
+            detail = "命令执行成功（无输出）。"
+        if force_warning:
+            suggestion = config.get("suggestion_on_warn") or config.get("suggestion_on_success") or ""
+            return CHECK_STATUS_WARNING, detail, suggestion
         suggestion = config.get("suggestion_on_success") or ""
         return CHECK_STATUS_PASSED, detail, suggestion
 
-    detail = config.get("failure_message") or _truncate_output(stderr or stdout or "Command returned non-zero exit code.")
-    suggestion = config.get("suggestion_on_fail") or DEFAULT_EXECUTION_FAILURE_SUGGESTION
+    detail = config.get("failure_message") or _truncate_output(
+        stderr or stdout or "Command returned non-zero exit code."
+    )
+    if force_warning:
+        suggestion = config.get("suggestion_on_warn") or ""
+        return CHECK_STATUS_WARNING, detail, suggestion
+    if force_critical or exit_code in critical_exit_codes:
+        suggestion = config.get("suggestion_on_critical") or ""
+        return CHECK_STATUS_CRITICAL, detail, suggestion
+    if exit_code in warn_exit_codes:
+        suggestion = config.get("suggestion_on_warn") or ""
+        return CHECK_STATUS_WARNING, detail, suggestion
+    suggestion = config.get("suggestion_on_critical") or ""
     return CHECK_STATUS_CRITICAL, detail, suggestion
 
 
@@ -393,42 +426,6 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> T
                 pass
         return _format_numeric_value(value)
 
-    def _threshold_label(parsed: float | None, raw: object) -> str:
-        if parsed is not None:
-            return _format_value(parsed)
-        if raw is None:
-            return "-"
-        return str(raw)
-
-    detail_template = config.get("detail_template")
-    detail_prefix = ""
-    show_expression = bool(config.get("show_expression", False))
-    expression_for_detail = expression if show_expression else ""
-    if isinstance(detail_template, str) and detail_template.strip():
-        template = detail_template.strip()
-        if not show_expression and "{expression}" in template:
-            template = template.replace("{expression}", "").strip()
-        try:
-            detail_prefix = template.format(
-                value=aggregate_value,
-                values=values,
-                expression=expression_for_detail,
-            )
-        except Exception:
-            detail_prefix = ""
-        if detail_prefix:
-            detail_prefix = re.sub(r"\s{2,}", " ", detail_prefix).strip(" :;-")
-    if not detail_prefix:
-        if show_expression:
-            detail_prefix = (
-                f"{aggregate_mode} value from {expression}: {_format_value(aggregate_value)} "
-                f"(samples={len(values)})"
-            )
-        else:
-            detail_prefix = f"{aggregate_mode} value: {_format_value(aggregate_value)} (samples={len(values)})"
-
-    default_limit = 5 if (status == CHECK_STATUS_PASSED and not critical_matches and not warn_matches) else 20
-
     max_rows_raw = (
         config.get("result_limit")
         or config.get("max_results")
@@ -438,46 +435,32 @@ def _execute_promql_check(config: Dict[str, object], context: CheckContext) -> T
     try:
         max_rows = int(max_rows_raw)  # type: ignore[arg-type]
         if max_rows <= 0:
-            max_rows = default_limit
+            max_rows = 20
     except (TypeError, ValueError):
-        max_rows = default_limit
+        max_rows = 20
 
-    matches_to_show: List[Dict[str, object]]
-    headline: str
-    critical_threshold_label_raw = (
-        critical_threshold_raw if critical_threshold_raw is not None else fail_threshold_raw
-    )
-    if critical_matches:
-        matches_to_show = critical_matches
-        headline = (
-            f"Detected {len(critical_matches)} samples meeting critical threshold ("
-            f"{comparison} {_threshold_label(critical_threshold_value, critical_threshold_label_raw)}), "
-            f"showing top {min(len(critical_matches), max_rows)}."
-        )
-    elif warn_matches:
-        matches_to_show = warn_matches
-        headline = (
-            f"Detected {len(warn_matches)} samples meeting warning threshold ("
-            f"{comparison} {_threshold_label(warn_threshold_value, warn_threshold_raw)}), "
-            f"showing top {min(len(warn_matches), max_rows)}."
-        )
-    else:
-        matches_to_show = sorted_samples
-        if matches_to_show:
-            headline = (
-                f"Collected {len(sorted_samples)} samples, showing top "
-                f"{min(len(sorted_samples), max_rows)}."
-            )
-        else:
-            headline = "No samples to display."
-    lines = [detail_prefix.strip()]
-    for entry in matches_to_show[:max_rows]:
+    def _format_entry(entry: Dict[str, object]) -> str:
         metric = entry.get("metric") if isinstance(entry, dict) else {}
         value = entry.get("value", 0.0) if isinstance(entry, dict) else 0.0
-        lines.append(f"- {_format_metric_identity(metric)}: {_format_value(float(value))}")
+        return f"{_format_metric_identity(metric)}：{_format_value(float(value))}"
 
-    detail = "\n".join(line for line in lines if line)
+    if status == CHECK_STATUS_PASSED:
+        pass_limit = min(3, max_rows) if max_rows else 3
+        lines = ["正常"]
+        for entry in sorted_samples[:pass_limit]:
+            lines.append(_format_entry(entry))
+        detail = "\n".join(line for line in lines if line)
+        return status, detail, suggestion
 
+    if status == CHECK_STATUS_CRITICAL:
+        matches_to_show = critical_matches or sorted_samples
+    elif status == CHECK_STATUS_WARNING:
+        matches_to_show = warn_matches or sorted_samples
+    else:
+        matches_to_show = sorted_samples
+
+    lines = [_format_entry(entry) for entry in matches_to_show[:max_rows]]
+    detail = "\n".join(line for line in lines if line) or "未提供详情"
     return status, detail, suggestion
 
 
@@ -486,7 +469,7 @@ def _require_prom(context: CheckContext) -> Tuple[str, str, str] | None:
         return (
             CHECK_STATUS_WARNING,
             "Prometheus endpoint is not configured for this cluster.",
-            "Edit the cluster and填写 Prometheus 地址以启用该巡检项。",
+            "Edit the cluster and濉啓 Prometheus 鍦板潃浠ュ惎鐢ㄨ宸℃椤广€?,
         )
     return None
 
@@ -504,7 +487,7 @@ def check_cluster_version(context: CheckContext) -> Tuple[str, str, str]:
         "",
     )
     if not server_line:
-        return CHECK_STATUS_WARNING, payload, "未能从输出中解析到 Server Version。"
+        return CHECK_STATUS_WARNING, payload, "鏈兘浠庤緭鍑轰腑瑙ｆ瀽鍒?Server Version銆?
     return CHECK_STATUS_PASSED, server_line.strip(), ""
 
 
@@ -516,9 +499,9 @@ def check_connection_probe(context: CheckContext) -> Tuple[str, str, str]:
         return (
             CHECK_STATUS_FAILED,
             _truncate_output(version_output),
-            "��� kubeconfig������� API Server ״̬��",
+            "锟斤拷锟?kubeconfig锟斤拷锟斤拷锟斤拷锟?API Server 状态锟斤拷",
         )
-    server_line = version_output.strip() or "Server Version δ�л�ȡ"
+    server_line = version_output.strip() or "Server Version 未锟叫伙拷取"
     nodes_ok, nodes_output = _run_kubectl(["get", "nodes", "-o", "json"], context)
     detail_suffix = ""
     suggestion = ""
@@ -526,14 +509,14 @@ def check_connection_probe(context: CheckContext) -> Tuple[str, str, str]:
         try:
             parsed = json.loads(nodes_output)
             node_count = len(parsed.get("items", []))
-            detail_suffix = f" · 节点数 {node_count}"
+            detail_suffix = f" 路 鑺傜偣鏁?{node_count}"
         except json.JSONDecodeError:
             nodes_ok = False
-            detail_suffix = " · 无法解析节点信息"
-            suggestion = "确认 kubectl 输出格式或节点接口响应。"
+            detail_suffix = " 路 鏃犳硶瑙ｆ瀽鑺傜偣淇℃伅"
+            suggestion = "纭 kubectl 杈撳嚭鏍煎紡鎴栬妭鐐规帴鍙ｅ搷搴斻€?
     else:
-        detail_suffix = f" · {_truncate_output(nodes_output)}"
-        suggestion = "检查集群节点可达性或确认 kubeconfig 权限。"
+        detail_suffix = f" 路 {_truncate_output(nodes_output)}"
+        suggestion = "妫€鏌ラ泦缇よ妭鐐瑰彲杈炬€ф垨纭 kubeconfig 鏉冮檺銆?
     if nodes_ok:
         return CHECK_STATUS_PASSED, f"{server_line}{detail_suffix}", ""
     return CHECK_STATUS_WARNING, f"{server_line}{detail_suffix}", suggestion
@@ -629,22 +612,22 @@ def check_cluster_cpu_usage(context: CheckContext) -> Tuple[str, str, str]:
     )
     ok, results, message = prom.query(expression)
     if not ok:
-        return CHECK_STATUS_WARNING, message, "确认 Prometheus 服务可访问，且节点指标已采集。"
+        return CHECK_STATUS_WARNING, message, "纭 Prometheus 鏈嶅姟鍙闂紝涓旇妭鐐规寚鏍囧凡閲囬泦銆?
     if not results:
-        return CHECK_STATUS_WARNING, "Prometheus 未返回 CPU 数据。", "检查 Prometheus 抓取的节点 CPU 指标。"
+        return CHECK_STATUS_WARNING, "Prometheus 鏈繑鍥?CPU 鏁版嵁銆?, "妫€鏌?Prometheus 鎶撳彇鐨勮妭鐐?CPU 鎸囨爣銆?
     value = PrometheusClient.extract_value(results[0])
     if value is None:
-        return CHECK_STATUS_WARNING, "Prometheus 数据无法解析。", "检查指标格式。"
+        return CHECK_STATUS_WARNING, "Prometheus 鏁版嵁鏃犳硶瑙ｆ瀽銆?, "妫€鏌ユ寚鏍囨牸寮忋€?
 
     status = CHECK_STATUS_PASSED
     suggestion = ""
     if value >= 90:
         status = CHECK_STATUS_CRITICAL
-        suggestion = "CPU 接近满载，请检查集群负载并考虑扩容。"
+        suggestion = "CPU 鎺ヨ繎婊¤浇锛岃妫€鏌ラ泦缇よ礋杞藉苟鑰冭檻鎵╁銆?
     elif value >= 75:
         status = CHECK_STATUS_WARNING
-        suggestion = "CPU 使用率偏高，关注关键工作负载或扩容。"
-    detail = f"Cluster CPU usage ≈ {_format_percentage(value)}."
+        suggestion = "CPU 浣跨敤鐜囧亸楂橈紝鍏虫敞鍏抽敭宸ヤ綔璐熻浇鎴栨墿瀹广€?
+    detail = f"Cluster CPU usage 鈮?{_format_percentage(value)}."
     return status, detail, suggestion
 
 
@@ -659,22 +642,22 @@ def check_cluster_memory_usage(context: CheckContext) -> Tuple[str, str, str]:
     )
     ok, results, message = prom.query(expression)
     if not ok:
-        return CHECK_STATUS_WARNING, message, "确认 Prometheus 正在采集 node_exporter 内存指标。"
+        return CHECK_STATUS_WARNING, message, "纭 Prometheus 姝ｅ湪閲囬泦 node_exporter 鍐呭瓨鎸囨爣銆?
     if not results:
-        return CHECK_STATUS_WARNING, "Prometheus 未返回内存数据。", "检查 node_memory_* 指标是否存在。"
+        return CHECK_STATUS_WARNING, "Prometheus 鏈繑鍥炲唴瀛樻暟鎹€?, "妫€鏌?node_memory_* 鎸囨爣鏄惁瀛樺湪銆?
     value = PrometheusClient.extract_value(results[0])
     if value is None:
-        return CHECK_STATUS_WARNING, "Prometheus 内存数据无法解析。", "检查指标格式。"
+        return CHECK_STATUS_WARNING, "Prometheus 鍐呭瓨鏁版嵁鏃犳硶瑙ｆ瀽銆?, "妫€鏌ユ寚鏍囨牸寮忋€?
 
     status = CHECK_STATUS_PASSED
     suggestion = ""
     if value >= 90:
         status = CHECK_STATUS_CRITICAL
-        suggestion = "内存使用率已非常高，建议扩容或排查内存泄漏。"
+        suggestion = "鍐呭瓨浣跨敤鐜囧凡闈炲父楂橈紝寤鸿鎵╁鎴栨帓鏌ュ唴瀛樻硠婕忋€?
     elif value >= 80:
         status = CHECK_STATUS_WARNING
-        suggestion = "内存使用率偏高，请关注关键节点和工作负载。"
-    detail = f"Cluster memory usage ≈ {_format_percentage(value)}."
+        suggestion = "鍐呭瓨浣跨敤鐜囧亸楂橈紝璇峰叧娉ㄥ叧閿妭鐐瑰拰宸ヤ綔璐熻浇銆?
+    detail = f"Cluster memory usage 鈮?{_format_percentage(value)}."
     return status, detail, suggestion
 
 
@@ -690,9 +673,9 @@ def check_node_cpu_hotspots(context: CheckContext) -> Tuple[str, str, str]:
     )
     ok, results, message = prom.query(expression)
     if not ok:
-        return CHECK_STATUS_WARNING, message, "检查 Prometheus 节点 CPU 指标抓取是否正常。"
+        return CHECK_STATUS_WARNING, message, "妫€鏌?Prometheus 鑺傜偣 CPU 鎸囨爣鎶撳彇鏄惁姝ｅ父銆?
     if not results:
-        return CHECK_STATUS_PASSED, "所有节点 CPU 使用率较低。", ""
+        return CHECK_STATUS_PASSED, "鎵€鏈夎妭鐐?CPU 浣跨敤鐜囪緝浣庛€?, ""
 
     readings = []
     for sample in results:
@@ -703,7 +686,7 @@ def check_node_cpu_hotspots(context: CheckContext) -> Tuple[str, str, str]:
             continue
         readings.append((node_name, value))
     if not readings:
-        return CHECK_STATUS_WARNING, "无法解析节点 CPU 指标。", "确认节点标签（instance/node）是否存在。"
+        return CHECK_STATUS_WARNING, "鏃犳硶瑙ｆ瀽鑺傜偣 CPU 鎸囨爣銆?, "纭鑺傜偣鏍囩锛坕nstance/node锛夋槸鍚﹀瓨鍦ㄣ€?
 
     readings.sort(key=lambda item: item[1], reverse=True)
     summary = ", ".join(
@@ -712,10 +695,10 @@ def check_node_cpu_hotspots(context: CheckContext) -> Tuple[str, str, str]:
     worst = readings[0][1]
     if worst >= 90:
         status = CHECK_STATUS_CRITICAL
-        suggestion = "部分节点 CPU 使用率极高，请排查热点工作负载或考虑调度优化。"
+        suggestion = "閮ㄥ垎鑺傜偣 CPU 浣跨敤鐜囨瀬楂橈紝璇锋帓鏌ョ儹鐐瑰伐浣滆礋杞芥垨鑰冭檻璋冨害浼樺寲銆?
     elif worst >= 80:
         status = CHECK_STATUS_WARNING
-        suggestion = "部分节点 CPU 使用率偏高，可结合调度策略或扩容处理。"
+        suggestion = "閮ㄥ垎鑺傜偣 CPU 浣跨敤鐜囧亸楂橈紝鍙粨鍚堣皟搴︾瓥鐣ユ垨鎵╁澶勭悊銆?
     else:
         status = CHECK_STATUS_PASSED
         suggestion = ""
@@ -734,9 +717,9 @@ def check_node_memory_pressure(context: CheckContext) -> Tuple[str, str, str]:
     )
     ok, results, message = prom.query(expression)
     if not ok:
-        return CHECK_STATUS_WARNING, message, "确保 node_exporter 正在采集内存指标。"
+        return CHECK_STATUS_WARNING, message, "纭繚 node_exporter 姝ｅ湪閲囬泦鍐呭瓨鎸囨爣銆?
     if not results:
-        return CHECK_STATUS_PASSED, "所有节点内存使用率正常。", ""
+        return CHECK_STATUS_PASSED, "鎵€鏈夎妭鐐瑰唴瀛樹娇鐢ㄧ巼姝ｅ父銆?, ""
 
     readings = []
     for sample in results:
@@ -747,7 +730,7 @@ def check_node_memory_pressure(context: CheckContext) -> Tuple[str, str, str]:
             continue
         readings.append((node_name, value))
     if not readings:
-        return CHECK_STATUS_WARNING, "Prometheus 返回的内存数据无法解析。", "检查指标标签。"
+        return CHECK_STATUS_WARNING, "Prometheus 杩斿洖鐨勫唴瀛樻暟鎹棤娉曡В鏋愩€?, "妫€鏌ユ寚鏍囨爣绛俱€?
 
     readings.sort(key=lambda item: item[1], reverse=True)
     summary = ", ".join(
@@ -756,10 +739,10 @@ def check_node_memory_pressure(context: CheckContext) -> Tuple[str, str, str]:
     worst = readings[0][1]
     if worst >= 95:
         status = CHECK_STATUS_CRITICAL
-        suggestion = "节点内存几乎耗尽，建议排查内存泄漏或扩容。"
+        suggestion = "鑺傜偣鍐呭瓨鍑犱箮鑰楀敖锛屽缓璁帓鏌ュ唴瀛樻硠婕忔垨鎵╁銆?
     elif worst >= 85:
         status = CHECK_STATUS_WARNING
-        suggestion = "部分节点内存压力较大，关注关键工作负载。"
+        suggestion = "閮ㄥ垎鑺傜偣鍐呭瓨鍘嬪姏杈冨ぇ锛屽叧娉ㄥ叧閿伐浣滆礋杞姐€?
     else:
         status = CHECK_STATUS_PASSED
         suggestion = ""
@@ -774,9 +757,9 @@ def check_cluster_disk_io(context: CheckContext) -> Tuple[str, str, str]:
     expression = "topk(5, sum by (instance)(rate(node_disk_io_time_seconds_total[5m])))"
     ok, results, message = prom.query(expression)
     if not ok:
-        return CHECK_STATUS_WARNING, message, "确保 Prometheus 抓取到 node_disk_io_time_seconds_total 指标。"
+        return CHECK_STATUS_WARNING, message, "纭繚 Prometheus 鎶撳彇鍒?node_disk_io_time_seconds_total 鎸囨爣銆?
     if not results:
-        return CHECK_STATUS_PASSED, "Prometheus 未检测到显著的磁盘 IO。", ""
+        return CHECK_STATUS_PASSED, "Prometheus 鏈娴嬪埌鏄捐憲鐨勭鐩?IO銆?, ""
 
     readings = []
     for sample in results:
@@ -788,7 +771,7 @@ def check_cluster_disk_io(context: CheckContext) -> Tuple[str, str, str]:
         readings.append((node_name, value))
 
     if not readings:
-        return CHECK_STATUS_WARNING, "磁盘 IO 指标无法解析。", "确认节点导出器是否暴露磁盘 IO 指标。"
+        return CHECK_STATUS_WARNING, "纾佺洏 IO 鎸囨爣鏃犳硶瑙ｆ瀽銆?, "纭鑺傜偣瀵煎嚭鍣ㄦ槸鍚︽毚闇茬鐩?IO 鎸囨爣銆?
 
     readings.sort(key=lambda item: item[1], reverse=True)
     summary = ", ".join(
@@ -799,10 +782,10 @@ def check_cluster_disk_io(context: CheckContext) -> Tuple[str, str, str]:
     suggestion = ""
     if worst >= 0.8:
         status = CHECK_STATUS_CRITICAL
-        suggestion = "磁盘 IO 时间占比过高，可能存在 IO 瓶颈。"
+        suggestion = "纾佺洏 IO 鏃堕棿鍗犳瘮杩囬珮锛屽彲鑳藉瓨鍦?IO 鐡堕銆?
     elif worst >= 0.4:
         status = CHECK_STATUS_WARNING
-        suggestion = "磁盘 IO 占比偏高，关注热点节点或磁盘健康状态。"
+        suggestion = "纾佺洏 IO 鍗犳瘮鍋忛珮锛屽叧娉ㄧ儹鐐硅妭鐐规垨纾佺洏鍋ュ悍鐘舵€併€?
     return status, f"Top node disk IO (s/s): {summary}", suggestion
 
 
@@ -874,7 +857,7 @@ DEFAULT_CHECKS = [
             "timeout": 20,
             "success_message": "kubectl cluster-info succeeded.",
             "failure_message": "kubectl cluster-info reported an error.",
-            "suggestion_on_fail": "检查 kubeconfig 是否有效且 apiserver 可访问。"
+            "suggestion_on_fail": "妫€鏌?kubeconfig 鏄惁鏈夋晥涓?apiserver 鍙闂€?
         },
     },
     {
@@ -885,9 +868,9 @@ DEFAULT_CHECKS = [
             "expression": "max(up{job='apiserver'})",
             "comparison": "<=",
             "fail_threshold": 0,
-            "empty_message": "Prometheus 未返回 apiserver up 指标。",
-            "suggestion_on_fail": "确认 Prometheus 中 apiserver target 状态正常。",
-            "suggestion_if_empty": "检查 Prometheus 抓取配置是否包含 apiserver target。"
+            "empty_message": "Prometheus 鏈繑鍥?apiserver up 鎸囨爣銆?,
+            "suggestion_on_fail": "纭 Prometheus 涓?apiserver target 鐘舵€佹甯搞€?,
+            "suggestion_if_empty": "妫€鏌?Prometheus 鎶撳彇閰嶇疆鏄惁鍖呭惈 apiserver target銆?
         },
     },
 ]
@@ -910,3 +893,5 @@ def dispatch_checks(
             "Create a handler in inspections.engine.HANDLERS or use a command/promql definition.",
         )
     return handler(context)
+
+
