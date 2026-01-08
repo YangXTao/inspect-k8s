@@ -3449,6 +3449,9 @@ const InspectionSettingsPanel = ({
   const [commandSuggestion, setCommandSuggestion] = useState("");
   const [promqlExpression, setPromqlExpression] = useState("");
   const [promqlComparison, setPromqlComparison] = useState(">=");
+  const [promqlSeverity, setPromqlSeverity] = useState<
+    "warning" | "critical"
+  >("warning");
   const [promqlThreshold, setPromqlThreshold] = useState("");
   const [promqlDescribe, setPromqlDescribe] = useState("");
   const [configText, setConfigText] = useState("{}");
@@ -3470,6 +3473,7 @@ const InspectionSettingsPanel = ({
       setCommandText("");
       setPromqlExpression("");
       setPromqlComparison(">=");
+      setPromqlSeverity("warning");
       setPromqlThreshold("");
       setPromqlDescribe("");
       setConfigText("{}");
@@ -3507,15 +3511,26 @@ const InspectionSettingsPanel = ({
       setPromqlExpression(String(config.expression ?? ""));
       const comparisonRaw = String(config.comparison ?? ">=");
       setPromqlComparison(comparisonRaw === "=" ? "==" : comparisonRaw);
+      const hasCriticalThreshold =
+        config.critical_threshold !== null &&
+        config.critical_threshold !== undefined;
+      const hasCriticalSuggestion = Boolean(
+        String(config.suggestion_on_critical ?? "").trim()
+      );
+      const resolvedSeverity =
+        hasCriticalThreshold || hasCriticalSuggestion ? "critical" : "warning";
+      setPromqlSeverity(resolvedSeverity);
       setPromqlDescribe(
         String(
-          config.suggestion_on_warn ??
-            config.suggestion_on_fail ??
-            ""
+          resolvedSeverity === "critical"
+            ? config.suggestion_on_critical ?? config.suggestion_on_warn ?? ""
+            : config.suggestion_on_warn ?? ""
         )
       );
       const threshold =
-        config.warn_threshold ?? config.fail_threshold ?? "";
+        resolvedSeverity === "critical"
+          ? config.critical_threshold ?? config.fail_threshold ?? ""
+          : config.warn_threshold ?? "";
       setPromqlThreshold(
         threshold === null || threshold === undefined ? "" : String(threshold)
       );
@@ -3525,6 +3540,7 @@ const InspectionSettingsPanel = ({
       setCommandText("");
       setPromqlExpression("");
       setPromqlComparison(">=");
+      setPromqlSeverity("warning");
       setPromqlThreshold("");
       setPromqlDescribe("");
     }
@@ -3541,6 +3557,7 @@ const InspectionSettingsPanel = ({
     setCommandSuggestion("");
     setPromqlExpression("");
     setPromqlComparison(">=");
+    setPromqlSeverity("warning");
     setPromqlThreshold("");
     setPromqlDescribe("");
     setConfigText("{}");
@@ -3591,12 +3608,13 @@ const InspectionSettingsPanel = ({
         setFormError("PromQL 表达式不能为空");
         return;
       }
+      const severityLabel = promqlSeverity === "critical" ? "严重" : "告警";
       const thresholdText = promqlThreshold.trim();
       let thresholdValue: number | undefined;
       if (thresholdText) {
         const parsedValue = Number(thresholdText);
         if (Number.isNaN(parsedValue)) {
-          setFormError("告警阈值必须为数字");
+          setFormError(`${severityLabel}阈值必须为数字`);
           return;
         }
         thresholdValue = parsedValue;
@@ -3607,14 +3625,23 @@ const InspectionSettingsPanel = ({
         comparison: promqlComparison || ">=",
       };
       delete parsedConfig.warn_threshold;
+      delete parsedConfig.critical_threshold;
       delete parsedConfig.fail_threshold;
       delete parsedConfig.suggestion_on_warn;
-      delete parsedConfig.suggestion_on_fail;
+      delete parsedConfig.suggestion_on_critical;
       if (thresholdValue !== undefined) {
-        parsedConfig.warn_threshold = thresholdValue;
+        if (promqlSeverity === "critical") {
+          parsedConfig.critical_threshold = thresholdValue;
+        } else {
+          parsedConfig.warn_threshold = thresholdValue;
+        }
       }
       if (promqlDescribe.trim()) {
-        parsedConfig.suggestion_on_warn = promqlDescribe.trim();
+        if (promqlSeverity === "critical") {
+          parsedConfig.suggestion_on_critical = promqlDescribe.trim();
+        } else {
+          parsedConfig.suggestion_on_warn = promqlDescribe.trim();
+        }
       }
     } else {
       if (configText.trim()) {
@@ -3756,6 +3783,7 @@ const InspectionSettingsPanel = ({
   const currentSummary = editingItem
     ? `正在编辑：${editingItem.name}`
     : "新增巡检项";
+  const promqlSeverityLabel = promqlSeverity === "critical" ? "严重" : "告警";
 
   return (
     <div className="inspection-settings-panel">
@@ -4070,6 +4098,21 @@ const InspectionSettingsPanel = ({
                 </label>
                 <div className="field-row">
                   <label>
+                    严重程度
+                    <select
+                      value={promqlSeverity}
+                      onChange={(event) =>
+                        setPromqlSeverity(
+                          event.target.value as "warning" | "critical"
+                        )
+                      }
+                      disabled={submitting}
+                    >
+                      <option value="warning">告警</option>
+                      <option value="critical">Critical（严重）</option>
+                    </select>
+                  </label>
+                  <label>
                     比较符
                     <select
                       value={promqlComparison}
@@ -4093,7 +4136,7 @@ const InspectionSettingsPanel = ({
                     </select>
                   </label>
                   <label>
-                    告警阈值
+                    {promqlSeverityLabel}阈值
                     <input
                       type="number"
                       value={promqlThreshold}
@@ -4104,7 +4147,7 @@ const InspectionSettingsPanel = ({
                   </label>
                 </div>
                 <label>
-                  告警建议
+                  {promqlSeverityLabel}建议
                   <textarea
                     value={promqlDescribe}
                     onChange={(event) => setPromqlDescribe(event.target.value)}
