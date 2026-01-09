@@ -156,6 +156,8 @@ const BEIJING_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
 const STATUS_CIRCLE_RADIUS = 18;
 const STATUS_CIRCLE_CIRCUMFERENCE = 2 * Math.PI * STATUS_CIRCLE_RADIUS;
 const CLUSTER_HEARTBEAT_REFRESH_INTERVAL = 30000;
+const RUN_STATUS_POLL_INTERVAL = 800;
+const RUN_STATUS_POLL_RETRY_INTERVAL = 1200;
 
 const clampProgress = (value?: number) => {
   if (typeof value !== "number" || Number.isNaN(value)) {
@@ -6136,42 +6138,50 @@ const backgroundLocation =
       runs.some(
         (run) =>
           run.status === "running" ||
-            run.status === "queued" ||
+          run.status === "queued" ||
           (!run.report_path && run.progress >= 100)
       ),
     [runs]
   );
 
   useEffect(() => {
-    if (!hasRunningRuns) {
+    if (!hasRunningRuns || typeof window === "undefined") {
       return;
     }
     let cancelled = false;
+    let timerId: number | null = null;
 
     const poll = async () => {
       const data = await refreshRuns();
       if (cancelled) {
         return;
       }
-      const shouldContinue =
-        data?.some(
-          (run) =>
-            run.status === "running" ||
-            run.status === "queued" ||
-            (!run.report_path && run.progress >= 100)
-        ) ?? false;
+      const shouldContinue = data
+        ? data.some(
+            (run) =>
+              run.status === "running" ||
+              run.status === "queued" ||
+              (!run.report_path && run.progress >= 100)
+          )
+        : true;
       if (shouldContinue && !cancelled) {
-        window.setTimeout(() => {
+        const delay = data
+          ? RUN_STATUS_POLL_INTERVAL
+          : RUN_STATUS_POLL_RETRY_INTERVAL;
+        timerId = window.setTimeout(() => {
           if (!cancelled) {
             void poll();
           }
-        }, 400);
+        }, delay);
       }
     };
 
     void poll();
     return () => {
       cancelled = true;
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+      }
     };
   }, [hasRunningRuns, refreshRuns]);
 
@@ -6226,17 +6236,22 @@ const backgroundLocation =
 
   const handleCloseSettings = useCallback(() => {
     const background = backgroundLocationRef.current;
-    const target =
-      (background
-        ? `${background.pathname}${background.search}${background.hash}`
-        : previousSettingsPathRef.current) || "/";
     setSettingsOpen(false);
     setConfirmState((prev) =>
       prev && prev.scope === "settings" ? null : prev
     );
+    if (location.pathname.startsWith(SETTINGS_BASE_PATH) && background) {
+      backgroundLocationRef.current = null;
+      navigate(-1);
+      return;
+    }
+    const target =
+      (background
+        ? `${background.pathname}${background.search}${background.hash}`
+        : previousSettingsPathRef.current) || "/";
     backgroundLocationRef.current = null;
     navigate(target, { replace: true });
-  }, [navigate]);
+  }, [location.pathname, navigate]);
 
   useEffect(() => {
     void refreshClusters();
