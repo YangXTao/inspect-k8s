@@ -1815,7 +1815,7 @@ th {
 
 .agent-inline-form-body {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(2, minmax(170px, 1fr));
   gap: 8px;
 }
 
@@ -1833,6 +1833,7 @@ th {
   border-radius: 8px;
   border: none;
   font-weight: 600;
+  grid-column: 1 / -1;
 }
 
 .agent-token-box {
