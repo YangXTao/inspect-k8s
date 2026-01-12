@@ -729,7 +729,7 @@ def _build_system_agent_install_script() -> str:
         "",
         "echo \"Agent resources applied.\"",
     ]
-    return \"\\n\".join(lines) + \"\\n\"
+    return "\n".join(lines) + "\n"
 
 
 app = FastAPI(title="K8s Inspection Service", version="0.3.0")
