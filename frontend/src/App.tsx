@@ -143,6 +143,9 @@ const normalizePrometheusVersion = (value?: string | null) => {
     : DEFAULT_PROMETHEUS_VERSION;
 };
 
+const isPromqlType = (value?: string | null) =>
+  (value ?? "").trim() === "promql";
+
 const HISTORY_STATUS_OPTIONS: {
   value: InspectionRunStatus | "all";
   label: string;
@@ -2408,7 +2411,10 @@ const ClusterDetailView = ({
     const keyword = itemKeyword.trim().toLowerCase();
     const selectedVersion = normalizePrometheusVersion(prometheusVersion);
     return items.filter((item) => {
-      if (normalizePrometheusVersion(item.prometheus_version) !== selectedVersion) {
+      if (
+        isPromqlType(item.check_type) &&
+        normalizePrometheusVersion(item.prometheus_version) !== selectedVersion
+      ) {
         return false;
       }
       if (!keyword) {
@@ -3535,7 +3541,7 @@ interface InspectionSettingsPanelProps {
     name: string;
     description?: string;
     check_type: string;
-    prometheus_version: string;
+    prometheus_version?: string;
     config: Record<string, unknown>;
   }) => Promise<void>;
   onDelete: (item: InspectionItem) => void;
@@ -3609,8 +3615,12 @@ const InspectionSettingsPanel = ({
     setEditingItem(item);
     setFormName(item.name ?? "");
     setFormDescription(item.description ?? "");
-    setPrometheusVersion(normalizePrometheusVersion(item.prometheus_version));
     const rawType = (item.check_type ?? "custom").trim();
+    if (isPromqlType(rawType)) {
+      setPrometheusVersion(normalizePrometheusVersion(item.prometheus_version));
+    } else {
+      setPrometheusVersion(DEFAULT_PROMETHEUS_VERSION);
+    }
     const config =
       item.config && typeof item.config === "object" ? item.config : {};
     setConfigText(JSON.stringify(config, null, 2));
@@ -3702,6 +3712,10 @@ const InspectionSettingsPanel = ({
         : formTypeMode === "promql"
           ? "promql"
           : customCheckType.trim() || "custom";
+    const resolvedPrometheusVersion =
+      resolvedCheckType === "promql"
+        ? normalizePrometheusVersion(prometheusVersion)
+        : undefined;
     if (formTypeMode === "other" && !customCheckType.trim()) {
       setFormError("请输入自定义类型名称");
       return;
@@ -3785,7 +3799,7 @@ const InspectionSettingsPanel = ({
       name: formName.trim(),
       description: formDescription.trim() || undefined,
       check_type: resolvedCheckType,
-      prometheus_version: normalizePrometheusVersion(prometheusVersion),
+      prometheus_version: resolvedPrometheusVersion,
       config: parsedConfig,
     });
     resetForm();
@@ -3802,14 +3816,16 @@ const InspectionSettingsPanel = ({
     [items]
   );
   const filteredItems = useMemo(() => {
-    const versionFilter =
-      itemFilterVersion === "all"
-        ? null
-        : normalizePrometheusVersion(itemFilterVersion);
+    const shouldFilterByVersion =
+      itemFilterType === "promql" && itemFilterVersion !== "all";
+    const versionFilter = shouldFilterByVersion
+      ? normalizePrometheusVersion(itemFilterVersion)
+      : null;
     let nextItems = sortedItems;
     if (versionFilter) {
       nextItems = nextItems.filter(
         (item) =>
+          isPromqlType(item.check_type) &&
           normalizePrometheusVersion(item.prometheus_version) === versionFilter
       );
     }
@@ -3900,6 +3916,12 @@ const InspectionSettingsPanel = ({
   useEffect(() => {
     setPage(1);
     setPageInput("");
+  }, [itemFilterType, itemFilterVersion]);
+
+  useEffect(() => {
+    if (itemFilterType !== "promql" && itemFilterVersion !== "all") {
+      setItemFilterVersion("all");
+    }
   }, [itemFilterType, itemFilterVersion]);
 
   useEffect(() => {
@@ -4001,20 +4023,24 @@ const InspectionSettingsPanel = ({
                 >
                   批量删除
                 </button>
-                <label className="settings-filter">
-                  Prometheus 版本
-                  <select
-                    value={itemFilterVersion}
-                    onChange={(event) => setItemFilterVersion(event.target.value)}
-                  >
-                    <option value="all">全部</option>
-                    {PROMETHEUS_VERSION_OPTIONS.map((version) => (
-                      <option key={version} value={version}>
-                        {version}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {itemFilterType === "promql" && (
+                  <label className="settings-filter">
+                    Prometheus 版本
+                    <select
+                      value={itemFilterVersion}
+                      onChange={(event) =>
+                        setItemFilterVersion(event.target.value)
+                      }
+                    >
+                      <option value="all">全部</option>
+                      {PROMETHEUS_VERSION_OPTIONS.map((version) => (
+                        <option key={version} value={version}>
+                          {version}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <label className="settings-filter">
                   类型
                   <select
@@ -4067,7 +4093,9 @@ const InspectionSettingsPanel = ({
                           </label>
                         </td>
                         <td>
-                          {normalizePrometheusVersion(item.prometheus_version)}
+                          {isPromqlType(item.check_type)
+                            ? normalizePrometheusVersion(item.prometheus_version)
+                            : "-"}
                         </td>
                         <td>{item.check_type}</td>
                         <td>{formatDate(item.updated_at)}</td>
@@ -4178,20 +4206,22 @@ const InspectionSettingsPanel = ({
                 placeholder="例如：etcd-health"
               />
             </label>
-            <label>
-              Prometheus 版本
-              <select
-                value={prometheusVersion}
-                onChange={(event) => setPrometheusVersion(event.target.value)}
-                disabled={submitting}
-              >
-                {PROMETHEUS_VERSION_OPTIONS.map((version) => (
-                  <option key={version} value={version}>
-                    {version}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {formTypeMode === "promql" && (
+              <label>
+                Prometheus 版本
+                <select
+                  value={prometheusVersion}
+                  onChange={(event) => setPrometheusVersion(event.target.value)}
+                  disabled={submitting}
+                >
+                  {PROMETHEUS_VERSION_OPTIONS.map((version) => (
+                    <option key={version} value={version}>
+                      {version}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label>
               类型
               <select
@@ -7272,7 +7302,7 @@ const hasManualKubeconfig = useMemo(
       name: string;
       description?: string;
       check_type: string;
-      prometheus_version: string;
+      prometheus_version?: string;
       config: Record<string, unknown>;
     }) => {
       setSettingsSubmitting(true);
