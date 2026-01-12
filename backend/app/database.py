@@ -190,6 +190,18 @@ def _ensure_inspection_schema() -> None:
             f"ALTER TABLE inspection_items ADD COLUMN config_json {column_type} NULL"
         )
 
+    if "prometheus_version" not in existing_columns:
+        if dialect == "sqlite":
+            statements.append(
+                "ALTER TABLE inspection_items "
+                "ADD COLUMN prometheus_version TEXT NOT NULL DEFAULT '3.0'"
+            )
+        else:
+            statements.append(
+                "ALTER TABLE inspection_items "
+                "ADD COLUMN prometheus_version VARCHAR(20) NOT NULL DEFAULT '3.0'"
+            )
+
     if "is_archived" not in existing_columns:
         if dialect == "sqlite":
             statements.append(
@@ -207,6 +219,7 @@ def _ensure_inspection_schema() -> None:
                 "ALTER TABLE inspection_items MODIFY name VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
                 "ALTER TABLE inspection_items MODIFY description TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
                 "ALTER TABLE inspection_items MODIFY check_type VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+                "ALTER TABLE inspection_items MODIFY prometheus_version VARCHAR(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '3.0'",
             ]
         )
         if "config_json" in existing_columns:

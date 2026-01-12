@@ -144,6 +144,7 @@ class InspectionItemBase(BaseModel):
     name: str = Field(..., max_length=100)
     description: Optional[str] = None
     check_type: str = Field(..., max_length=50)
+    prometheus_version: str = Field("3.0", max_length=20)
     config: Optional[Dict[str, Any]] = None
 
 
@@ -155,6 +156,7 @@ class InspectionItemUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
     description: Optional[str] = None
     check_type: Optional[str] = Field(None, max_length=50)
+    prometheus_version: Optional[str] = Field(None, max_length=20)
     config: Optional[Dict[str, Any]] = None
 
 

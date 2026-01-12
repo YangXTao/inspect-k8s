@@ -3,6 +3,7 @@
   name: string;
   description?: string;
   check_type: string;
+  prometheus_version?: string | null;
   config?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
