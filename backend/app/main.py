@@ -422,9 +422,9 @@ def _build_system_agent_install_script() -> str:
         PROM_URL_ESC=$(json_escape "$PROM_URL")
 
         if [ -n "$PROM_URL" ]; then
-          payload="{\"registration_token\":\"${TOKEN_ESC}\",\"prometheus_url\":\"${PROM_URL_ESC}\",\"cluster\":{\"name\":\"${CLUSTER_NAME_ESC}\",\"kubeconfig_b64\":\"${KUBE_B64}\",\"kubeconfig_name\":\"kubeconfig\"}}"
+          payload=$(printf '{"registration_token":"%s","prometheus_url":"%s","cluster":{"name":"%s","kubeconfig_b64":"%s","kubeconfig_name":"kubeconfig"}}' "$TOKEN_ESC" "$PROM_URL_ESC" "$CLUSTER_NAME_ESC" "$KUBE_B64")
         else
-          payload="{\"registration_token\":\"${TOKEN_ESC}\",\"cluster\":{\"name\":\"${CLUSTER_NAME_ESC}\",\"kubeconfig_b64\":\"${KUBE_B64}\",\"kubeconfig_name\":\"kubeconfig\"}}"
+          payload=$(printf '{"registration_token":"%s","cluster":{"name":"%s","kubeconfig_b64":"%s","kubeconfig_name":"kubeconfig"}}' "$TOKEN_ESC" "$CLUSTER_NAME_ESC" "$KUBE_B64")
         fi
 
         curl_flags="-fsSL"
