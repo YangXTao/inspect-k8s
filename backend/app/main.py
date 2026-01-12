@@ -400,7 +400,7 @@ def _build_system_agent_install_script() -> str:
         fi
 
         if command -v base64 >/dev/null 2>&1; then
-          KUBE_B64=$(printf "%s" "$KUBE_DATA" | base64 | tr -d '\\n')
+          KUBE_B64=$(printf "%s" "$KUBE_DATA" | base64 | tr -d '\\r\\n')
         else
           echo "base64 not found." >&2
           exit 1
