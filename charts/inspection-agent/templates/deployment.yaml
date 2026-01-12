@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "inspection-agent.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "inspection-agent.name" . }}
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.deployment.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "inspection-agent.name" . }}
+      app.kubernetes.io/component: agent
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "inspection-agent.name" . }}
+        app.kubernetes.io/component: agent
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ include "inspection-agent.serviceAccountName" . }}
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range .Values.imagePullSecrets }}
+        - name: {{ . }}
+        {{- end }}
+      {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "inspection-agent.configMapName" . }}
+        - name: state
+          emptyDir: {}
+      containers:
+        - name: inspect-agent
+          image: "{{ .Values.deployment.image.repository }}:{{ .Values.deployment.image.tag }}"
+          imagePullPolicy: {{ .Values.deployment.image.pullPolicy }}
+          env:
+            - name: INSPECT_AGENT_CONFIG
+              value: /app/config/config.yaml
+            - name: INSPECT_AGENT_REGISTRATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "inspection-agent.secretName" . }}
+                  key: registration_token
+                  optional: true
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+            - name: state
+              mountPath: /var/lib/inspect-agent
+          resources:
+            {{- toYaml .Values.deployment.resources | nindent 12 }}
+      nodeSelector:
+        {{- toYaml .Values.deployment.nodeSelector | nindent 8 }}
+      tolerations:
+        {{- toYaml .Values.deployment.tolerations | nindent 8 }}
+      affinity:
+        {{- toYaml .Values.deployment.affinity | nindent 8 }}
