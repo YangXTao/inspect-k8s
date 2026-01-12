@@ -921,7 +921,9 @@ const AgentQuickCreate = ({
         prometheus_url: trimmedPrometheusUrl || undefined,
       });
       setName("");
+      setBackendUrl("");
       setDescription("");
+      setPrometheusUrl("");
     } catch (err) {
       const message = err instanceof Error ? err.message : "创建 Agent 失败";
       setFormError(message);
