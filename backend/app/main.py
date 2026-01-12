@@ -452,7 +452,7 @@ def _build_system_agent_install_script() -> str:
         "  fi",
         "  backend_image=$(printf \"%s\\\\n\" \"$images\" | awk '$2==\"backend\"{print $3; exit}')",
         "  if [ -z \"$backend_image\" ]; then",
-        "    backend_image=$(printf \"%s\\\\n\" \"$images\" | awk '($3 ~ /(^|\\\\/)backend([:@]|$)/){print $3; exit}')",
+        "    backend_image=$(printf \"%s\\\\n\" \"$images\" | awk 'index($3, \"/backend\") || index($3, \"backend:\") || index($3, \"backend@\"){print $3; exit}')",
         "  fi",
         "  if [ -z \"$backend_image\" ]; then",
         "    backend_image=$(printf \"%s\\\\n\" \"$images\" | awk 'NR==1{print $3}')",
