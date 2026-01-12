@@ -216,6 +216,7 @@ export function createInspectionItem(payload: {
   name: string;
   description?: string;
   check_type: string;
+  prometheus_version?: string;
   config?: Record<string, unknown>;
 }): Promise<InspectionItem> {
   return request<InspectionItem>("/inspection-items", {
@@ -230,6 +231,7 @@ export function updateInspectionItem(
     name?: string;
     description?: string;
     check_type?: string;
+    prometheus_version?: string;
     config?: Record<string, unknown> | null;
   }
 ): Promise<InspectionItem> {

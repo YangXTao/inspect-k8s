@@ -2603,6 +2603,15 @@ th {
   font-size: 13px;
 }
 
+.operator-inline select {
+  flex: 1 1 220px;
+  border-radius: 8px;
+  border: 1px solid #cbd5f5;
+  padding: 7px 10px;
+  font-size: 13px;
+  background: #fff;
+}
+
 .detail-empty {
   background: #fff;
   border-radius: 14px;
