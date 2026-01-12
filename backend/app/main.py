@@ -5,6 +5,7 @@ import logging
 import re
 import secrets
 import shutil
+import textwrap
 from dataclasses import dataclass
 import base64
 import binascii
@@ -340,6 +341,106 @@ def _agent_request_dependency(
         db.close()
 
 
+def _build_system_agent_install_script() -> str:
+    return textwrap.dedent(
+        """\
+        #!/bin/sh
+        set -eu
+
+        usage() {
+          cat <<'USAGE'
+        Usage:
+          system-agent-install.sh --server <url> --token <token> [options]
+
+        Options:
+          --cluster-name <name>     Cluster name (default: kubectl context or hostname)
+          --prometheus-url <url>    Prometheus URL (optional)
+          --kubeconfig <path>       Kubeconfig path (default: current kubectl context)
+          --insecure                Skip TLS verification
+          -h, --help                Show help
+        USAGE
+        }
+
+        SERVER=""
+        TOKEN=""
+        CLUSTER_NAME=""
+        PROM_URL=""
+        KUBECONFIG_PATH=""
+        INSECURE="false"
+
+        while [ "$#" -gt 0 ]; do
+          case "$1" in
+            --server) SERVER="$2"; shift 2 ;;
+            --token) TOKEN="$2"; shift 2 ;;
+            --cluster-name) CLUSTER_NAME="$2"; shift 2 ;;
+            --prometheus-url) PROM_URL="$2"; shift 2 ;;
+            --kubeconfig) KUBECONFIG_PATH="$2"; shift 2 ;;
+            --insecure) INSECURE="true"; shift ;;
+            -h|--help) usage; exit 0 ;;
+            --) shift; break ;;
+            *) echo "Unknown arg: $1" >&2; usage; exit 1 ;;
+          esac
+        done
+
+        if [ -z "$SERVER" ] || [ -z "$TOKEN" ]; then
+          echo "Missing --server or --token." >&2
+          usage
+          exit 1
+        fi
+
+        if [ -n "$KUBECONFIG_PATH" ]; then
+          KUBE_DATA=$(cat "$KUBECONFIG_PATH")
+        else
+          if command -v kubectl >/dev/null 2>&1; then
+            KUBE_DATA=$(kubectl config view --raw --minify)
+          else
+            echo "kubectl not found and --kubeconfig not provided." >&2
+            exit 1
+          fi
+        fi
+
+        if command -v base64 >/dev/null 2>&1; then
+          KUBE_B64=$(printf "%s" "$KUBE_DATA" | base64 | tr -d '\\n')
+        else
+          echo "base64 not found." >&2
+          exit 1
+        fi
+
+        if [ -z "$CLUSTER_NAME" ] && command -v kubectl >/dev/null 2>&1; then
+          CLUSTER_NAME=$(kubectl config current-context 2>/dev/null || true)
+        fi
+        if [ -z "$CLUSTER_NAME" ]; then
+          CLUSTER_NAME=$(hostname)
+        fi
+
+        json_escape() {
+          printf "%s" "$1" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g'
+        }
+
+        TOKEN_ESC=$(json_escape "$TOKEN")
+        CLUSTER_NAME_ESC=$(json_escape "$CLUSTER_NAME")
+        PROM_URL_ESC=$(json_escape "$PROM_URL")
+
+        if [ -n "$PROM_URL" ]; then
+          payload="{\"registration_token\":\"${TOKEN_ESC}\",\"prometheus_url\":\"${PROM_URL_ESC}\",\"cluster\":{\"name\":\"${CLUSTER_NAME_ESC}\",\"kubeconfig_b64\":\"${KUBE_B64}\",\"kubeconfig_name\":\"kubeconfig\"}}"
+        else
+          payload="{\"registration_token\":\"${TOKEN_ESC}\",\"cluster\":{\"name\":\"${CLUSTER_NAME_ESC}\",\"kubeconfig_b64\":\"${KUBE_B64}\",\"kubeconfig_name\":\"kubeconfig\"}}"
+        fi
+
+        curl_flags="-fsSL"
+        if [ "$INSECURE" = "true" ]; then
+          curl_flags="${curl_flags} -k"
+        fi
+
+        curl $curl_flags "${SERVER}/agent/bootstrap" \
+          -H "Content-Type: application/json" \
+          -d "$payload"
+        echo ""
+        echo "Agent bootstrap finished."
+        """
+    )
+
+
 app = FastAPI(title="K8s Inspection Service", version="0.3.0")
 agent_router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -546,6 +647,11 @@ def on_startup() -> None:
 @app.get("/health")
 def health_check() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/system-agent-install.sh", response_class=PlainTextResponse)
+def system_agent_install_script() -> str:
+    return _build_system_agent_install_script()
 
 
 @app.get("/license/status", response_model=schemas.LicenseStatusOut)
