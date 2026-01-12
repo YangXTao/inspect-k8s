@@ -799,6 +799,37 @@ const TopNavigation = ({ onOpenSettings }: { onOpenSettings: () => void }) => {
   );
 };
 
+const normalizeBackendUrl = (value: string) => value.trim().replace(/\/+$/, "");
+
+const buildAgentRegisterCommand = ({
+  backendUrl,
+  token,
+  clusterName,
+  prometheusUrl,
+}: {
+  backendUrl: string;
+  token: string;
+  clusterName: string;
+  prometheusUrl?: string | null;
+}) => {
+  const baseUrl = normalizeBackendUrl(backendUrl);
+  const commandLines = [
+    `curl -fL ${baseUrl}/system-agent-install.sh | sh -s -`,
+    `  --server ${baseUrl}`,
+    `  --token ${token}`,
+    `  --cluster-name ${clusterName}`,
+  ];
+  const trimmedPrometheus = prometheusUrl?.trim();
+  if (trimmedPrometheus) {
+    commandLines.push(`  --prometheus-url ${trimmedPrometheus}`);
+  }
+  return commandLines
+    .map((line, index) =>
+      index === commandLines.length - 1 ? line : `${line} \\`
+    )
+    .join("\n");
+};
+
 interface AgentQuickCreateProps {
   clusters: ClusterConfig[];
   agents: InspectionAgent[];
@@ -806,13 +837,14 @@ interface AgentQuickCreateProps {
   submitting: boolean;
   notice: string | null;
   error: string | null;
-  generatedToken: string | null;
+  generatedCommand: string | null;
   onCreate: (payload: {
     name: string;
+    backend_url: string;
     description?: string;
     prometheus_url?: string | null;
   }) => Promise<void>;
-  onClearToken: () => void;
+  onClearCommand: () => void;
 }
 
 const AgentQuickCreate = ({
@@ -822,16 +854,24 @@ const AgentQuickCreate = ({
   submitting,
   notice,
   error,
-  generatedToken,
+  generatedCommand,
   onCreate,
-  onClearToken,
+  onClearCommand,
 }: AgentQuickCreateProps) => {
   const [name, setName] = useState("");
+  const [backendUrl, setBackendUrl] = useState("");
   const [description, setDescription] = useState("");
   const [prometheusUrl, setPrometheusUrl] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
   const trimmedName = name.trim();
+  const trimmedBackendUrl = backendUrl.trim();
+  const trimmedPrometheusUrl = prometheusUrl.trim();
+  const invalidBackendUrl =
+    trimmedBackendUrl.length > 0 && !/^https?:\/\//i.test(trimmedBackendUrl);
+  const invalidPrometheusUrl =
+    trimmedPrometheusUrl.length > 0 &&
+    !/^https?:\/\//i.test(trimmedPrometheusUrl);
   const duplicateAgent = useMemo(
     () =>
       trimmedName.length > 0 &&
@@ -852,6 +892,18 @@ const AgentQuickCreate = ({
       setFormError("Agent 名称不能为空");
       return;
     }
+    if (!trimmedBackendUrl) {
+      setFormError("Backend 地址不能为空");
+      return;
+    }
+    if (invalidBackendUrl) {
+      setFormError("Backend 地址需以 http:// 或 https:// 开头");
+      return;
+    }
+    if (invalidPrometheusUrl) {
+      setFormError("Prometheus 地址需以 http:// 或 https:// 开头");
+      return;
+    }
     if (duplicateAgent) {
       setFormError("Agent 名称已存在，请更换其他名称");
       return;
@@ -864,12 +916,12 @@ const AgentQuickCreate = ({
     try {
       await onCreate({
         name: normalizedName,
+        backend_url: trimmedBackendUrl,
         description: description.trim() || undefined,
-        prometheus_url: prometheusUrl.trim() || undefined,
+        prometheus_url: trimmedPrometheusUrl || undefined,
       });
       setName("");
       setDescription("");
-      setPrometheusUrl("");
     } catch (err) {
       const message = err instanceof Error ? err.message : "创建 Agent 失败";
       setFormError(message);
@@ -885,7 +937,7 @@ const AgentQuickCreate = ({
         )}
       </div>
       <p className="agent-inline-copy">
-        Agent 名称必须与计划接入的集群名称保持一致，注册后不可修改。
+        Agent 名称必须与计划接入的集群名称保持一致，注册后不可修改。Backend 地址用于生成注册命令，请填写 Agent 节点可访问的地址。
       </p>
       <form className="agent-inline-form-body" onSubmit={handleSubmit}>
         <input
@@ -900,6 +952,13 @@ const AgentQuickCreate = ({
           value={description}
           onChange={(event) => setDescription(event.target.value)}
           placeholder="描述（可选）"
+          disabled={submitting || !canManageAgents}
+        />
+        <input
+          type="text"
+          value={backendUrl}
+          onChange={(event) => setBackendUrl(event.target.value)}
+          placeholder="Backend 地址（必填）"
           disabled={submitting || !canManageAgents}
         />
         <input
@@ -920,12 +979,12 @@ const AgentQuickCreate = ({
       {formError && <div className="feedback error">{formError}</div>}
       {error && !formError && <div className="feedback error">{error}</div>}
       {notice && <div className="feedback success">{notice}</div>}
-      {generatedToken && (
+      {generatedCommand && (
         <div className="agent-token-box">
-          <p>创建成功，请妥善保存 Token，页面关闭后无法再次查看。</p>
-          <code>{generatedToken}</code>
-          <button type="button" className="secondary" onClick={onClearToken}>
-            我已保存 Token
+          <p>创建成功，请在目标节点执行以下命令完成注册。</p>
+          <code>{generatedCommand}</code>
+          <button type="button" className="secondary" onClick={onClearCommand}>
+            我已保存命令
           </button>
         </div>
       )}
@@ -961,13 +1020,14 @@ interface OverviewProps {
   agentSubmitting: boolean;
   agentNotice: string | null;
   agentError: string | null;
-  generatedAgentToken: string | null;
+  generatedAgentCommand: string | null;
   onCreateAgent: (payload: {
     name: string;
+    backend_url: string;
     description?: string;
     prometheus_url?: string | null;
   }) => Promise<void>;
-  onClearAgentToken: () => void;
+  onClearAgentCommand: () => void;
 }
 
 const OverviewView = ({
@@ -995,9 +1055,9 @@ const OverviewView = ({
   agentSubmitting,
   agentNotice,
   agentError,
-  generatedAgentToken,
+  generatedAgentCommand,
   onCreateAgent,
-  onClearAgentToken,
+  onClearAgentCommand,
 }: OverviewProps) => {
   const enableServerClusterUpload = false;
   const enableServerConnectionTest = true;
@@ -1330,9 +1390,9 @@ const OverviewView = ({
               submitting={agentSubmitting}
               notice={agentNotice}
               error={agentError}
-              generatedToken={generatedAgentToken}
+              generatedCommand={generatedAgentCommand}
               onCreate={onCreateAgent}
-              onClearToken={onClearAgentToken}
+              onClearCommand={onClearAgentCommand}
             />
           )}
         </div>
@@ -5654,7 +5714,7 @@ const [clusterUploading, setClusterUploading] = useState(false);
   const [agentNotice, setAgentNotice] = useState<string | null>(null);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [agentSubmitting, setAgentSubmitting] = useState(false);
-const [generatedAgentToken, setGeneratedAgentToken] = useState<string | null>(
+const [generatedAgentCommand, setGeneratedAgentCommand] = useState<string | null>(
   null
 );
 const [pendingRefreshTargets, setPendingRefreshTargets] = useState<
@@ -6086,6 +6146,7 @@ const backgroundLocation =
   const handleCreateAgent = useCallback(
     async (payload: {
       name: string;
+      backend_url: string;
       description?: string;
       prometheus_url?: string | null;
     }) => {
@@ -6104,17 +6165,30 @@ const backgroundLocation =
         setAgentError(`Agent 名称 ${normalizedName} 已存在，请更换其他名称。`);
         return;
       }
+      const { backend_url, ...requestPayload } = payload;
+      const normalizedBackendUrl = normalizeBackendUrl(backend_url);
+      const normalizedPrometheusUrl =
+        requestPayload.prometheus_url?.trim() || undefined;
       setAgentSubmitting(true);
       setAgentNotice(null);
       setAgentError(null);
+      setGeneratedAgentCommand(null);
       try {
         const response = await apiCreateAgent({
-          ...payload,
+          ...requestPayload,
           name: normalizedName,
+          prometheus_url: normalizedPrometheusUrl,
         });
-        setGeneratedAgentToken(response.token);
+        setGeneratedAgentCommand(
+          buildAgentRegisterCommand({
+            backendUrl: normalizedBackendUrl,
+            token: response.token,
+            clusterName: normalizedName,
+            prometheusUrl: normalizedPrometheusUrl,
+          })
+        );
         setAgentNotice(
-          `Agent ${response.name} 创建成功，请妥善保存 Token。`
+          `Agent ${response.name} 创建成功，请在目标节点执行注册命令。`
         );
         await Promise.all([refreshAgents(), refreshClusters()]);
       } catch (err) {
@@ -6129,8 +6203,8 @@ const backgroundLocation =
     [licenseCapabilities, agents, refreshAgents, refreshClusters]
   );
 
-  const handleClearAgentToken = useCallback(() => {
-    setGeneratedAgentToken(null);
+  const handleClearAgentCommand = useCallback(() => {
+    setGeneratedAgentCommand(null);
   }, []);
 
   const hasRunningRuns = useMemo(
@@ -7510,9 +7584,9 @@ const hasManualKubeconfig = useMemo(
       agentSubmitting={agentSubmitting}
       agentNotice={agentNotice}
       agentError={agentError}
-      generatedAgentToken={generatedAgentToken}
+      generatedAgentCommand={generatedAgentCommand}
       onCreateAgent={handleCreateAgent}
-      onClearAgentToken={handleClearAgentToken}
+      onClearAgentCommand={handleClearAgentCommand}
     />
   );
 
