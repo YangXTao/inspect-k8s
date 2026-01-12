@@ -71,6 +71,7 @@ export type InspectionRun = {
   progress: number;
   created_at: string;
   completed_at?: string;
+  prometheus_version?: string | null;
   executor: ExecutionMode;
   agent_status?: InspectionAgentStatus | null;
   agent_status_label?: string | null;
@@ -93,6 +94,7 @@ export type InspectionRunListItem = {
   progress: number;
   created_at: string;
   completed_at?: string;
+  prometheus_version?: string | null;
   executor: ExecutionMode;
   agent_status?: InspectionAgentStatus | null;
   agent_status_label?: string | null;

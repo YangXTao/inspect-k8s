@@ -116,6 +116,7 @@ class InspectionRun(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     completed_at = Column(DateTime, nullable=True)
     plan_json = Column(Text, nullable=True)
+    prometheus_version = Column(String(20), nullable=False, default="3.0")
     executor = Column(String(20), nullable=False, default="server")
     agent_status = Column(String(20), nullable=True)
     agent_id = Column(

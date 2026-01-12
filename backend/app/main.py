@@ -270,6 +270,7 @@ def _enqueue_connection_test_run(
         total_items=1,
         processed_items=0,
         plan_json=plan_json,
+        prometheus_version="3.0",
         executor="agent",
         agent_status="queued",
         agent_id=agent.id,
@@ -2000,6 +2001,7 @@ def _serialize_run(run: models.InspectionRun) -> schemas.InspectionRunOut:
         progress=progress,
         created_at=run.created_at,
         completed_at=run.completed_at,
+        prometheus_version=run.prometheus_version,
         executor=run.executor,
         agent_status=run.agent_status,
         agent_id=run.agent_id,
@@ -2025,6 +2027,7 @@ def _serialize_run_list(run: models.InspectionRun) -> schemas.InspectionRunListO
         progress=progress,
         created_at=run.created_at,
         completed_at=run.completed_at,
+        prometheus_version=run.prometheus_version,
         executor=run.executor,
         agent_status=run.agent_status,
         agent_id=run.agent_id,
@@ -2070,6 +2073,7 @@ def trigger_inspection(
     agent_id = agent.id
     agent_status: Optional[str] = "queued"
 
+    prometheus_version = run_in.prometheus_version or "3.0"
     run = crud.create_inspection_run(
         db,
         operator=run_in.operator,
@@ -2078,6 +2082,7 @@ def trigger_inspection(
         total_items=len(items),
         processed_items=0,
         plan_json=plan_json,
+        prometheus_version=prometheus_version,
         executor=executor,
         agent_status=agent_status,
         agent_id=agent_id,
