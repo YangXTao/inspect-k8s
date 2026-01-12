@@ -5,7 +5,6 @@ import logging
 import re
 import secrets
 import shutil
-import textwrap
 from dataclasses import dataclass
 import base64
 import binascii
@@ -342,396 +341,395 @@ def _agent_request_dependency(
 
 
 def _build_system_agent_install_script() -> str:
-    return textwrap.dedent(
-        """\
-        #!/bin/sh
-        set -eu
-
-        usage() {
-          cat <<'USAGE'
-        Usage:
-          system-agent-install.sh --server <url> --token <token> [options]
-
-        Options:
-          --cluster-name <name>     Cluster name (default: kubectl context or hostname)
-          --prometheus-url <url>    Prometheus URL (optional)
-          --kubeconfig <path>       Kubeconfig path (default: current kubectl context)
-          --namespace <name>        Namespace for agent resources (default: inspect)
-          --agent-image <image>     Agent image (default: derive from backend image)
-          --image-pull-secret <name> Image pull secret name (optional)
-          --insecure                Skip TLS verification
-          -h, --help                Show help
-        USAGE
-        }
-
-        SERVER=""
-        TOKEN=""
-        CLUSTER_NAME=""
-        PROM_URL=""
-        KUBECONFIG_PATH=""
-        INSECURE="false"
-        NAMESPACE="inspect"
-        AGENT_IMAGE=""
-        IMAGE_PULL_SECRET=""
-        VERIFY_SSL="true"
-
-        while [ "$#" -gt 0 ]; do
-          case "$1" in
-            --server) SERVER="$2"; shift 2 ;;
-            --token) TOKEN="$2"; shift 2 ;;
-            --cluster-name) CLUSTER_NAME="$2"; shift 2 ;;
-            --prometheus-url) PROM_URL="$2"; shift 2 ;;
-            --kubeconfig) KUBECONFIG_PATH="$2"; shift 2 ;;
-            --namespace) NAMESPACE="$2"; shift 2 ;;
-            --agent-image) AGENT_IMAGE="$2"; shift 2 ;;
-            --image-pull-secret) IMAGE_PULL_SECRET="$2"; shift 2 ;;
-            --insecure) INSECURE="true"; shift ;;
-            -h|--help) usage; exit 0 ;;
-            --) shift; break ;;
-            *) echo "Unknown arg: $1" >&2; usage; exit 1 ;;
-          esac
-        done
-
-        if [ -z "$SERVER" ] || [ -z "$TOKEN" ]; then
-          echo "Missing --server or --token." >&2
-          usage
-          exit 1
-        fi
-
-        if ! command -v kubectl >/dev/null 2>&1; then
-          echo "kubectl not found." >&2
-          exit 1
-        fi
-
-        KUBECTL_ARGS=""
-        if [ -n "$KUBECONFIG_PATH" ]; then
-          KUBECTL_ARGS="--kubeconfig $KUBECONFIG_PATH"
-        fi
-
-        if [ -n "$KUBECONFIG_PATH" ]; then
-          KUBE_DATA=$(cat "$KUBECONFIG_PATH")
-        else
-          KUBE_DATA=$(kubectl $KUBECTL_ARGS config view --raw --minify)
-        fi
-
-        if command -v base64 >/dev/null 2>&1; then
-          KUBE_B64=$(printf "%s" "$KUBE_DATA" | base64 | tr -d '\\r\\n')
-        else
-          echo "base64 not found." >&2
-          exit 1
-        fi
-
-        if [ -z "$CLUSTER_NAME" ]; then
-          CLUSTER_NAME=$(kubectl $KUBECTL_ARGS config current-context 2>/dev/null || true)
-        fi
-        if [ -z "$CLUSTER_NAME" ]; then
-          CLUSTER_NAME=$(hostname)
-        fi
-
-        json_escape() {
-          printf "%s" "$1" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g'
-        }
-
-        detect_backend_image() {
-          selector="app.kubernetes.io/component=backend"
-          images=$(kubectl $KUBECTL_ARGS get deploy -A -l "$selector" -o jsonpath='{range .items[*]}{.metadata.namespace}{"\\t"}{.metadata.name}{"\\t"}{.spec.template.spec.containers[0].image}{"\\n"}{end}' 2>/dev/null || true)
-          if [ -z "$images" ]; then
-            images=$(kubectl $KUBECTL_ARGS get deploy -n "$NAMESPACE" -l "$selector" -o jsonpath='{range .items[*]}{.metadata.namespace}{"\\t"}{.metadata.name}{"\\t"}{.spec.template.spec.containers[0].image}{"\\n"}{end}' 2>/dev/null || true)
-          fi
-          if [ -z "$images" ]; then
-            return 0
-          fi
-          backend_image=$(printf "%s\\n" "$images" | awk '($3 ~ /(^|\\/)backend([:@]|$)/){print $3; exit}')
-          if [ -z "$backend_image" ]; then
-            backend_image=$(printf "%s\\n" "$images" | awk 'NR==1{print $3}')
-          fi
-          printf "%s" "$backend_image"
-        }
-
-        derive_agent_image() {
-          image="$1"
-          if [ -z "$image" ]; then
-            return 0
-          fi
-          name="$image"
-          digest=""
-          tag=""
-          case "$name" in
-            *@*) digest="${name#*@}"; name="${name%@*}" ;;
-          esac
-          base="${name##*/}"
-          if [ "${base#*:}" != "$base" ]; then
-            tag="${base#*:}"
-            name="${name%:*}"
-          fi
-          repo="${name%/*}"
-          if [ "$repo" = "$name" ]; then
-            repo=""
-          fi
-          if [ -n "$repo" ]; then
-            new_name="${repo}/agent"
-          else
-            new_name="agent"
-          fi
-          if [ -n "$digest" ]; then
-            printf "%s@%s" "$new_name" "$digest"
-          elif [ -n "$tag" ]; then
-            printf "%s:%s" "$new_name" "$tag"
-          else
-            printf "%s" "$new_name"
-          fi
-        }
-
-        TOKEN_ESC=$(json_escape "$TOKEN")
-        CLUSTER_NAME_ESC=$(json_escape "$CLUSTER_NAME")
-        PROM_URL_ESC=$(json_escape "$PROM_URL")
-
-        if [ -z "$AGENT_IMAGE" ]; then
-          BACKEND_IMAGE=$(detect_backend_image || true)
-          if [ -n "$BACKEND_IMAGE" ]; then
-            AGENT_IMAGE=$(derive_agent_image "$BACKEND_IMAGE")
-            echo "Detected backend image: $BACKEND_IMAGE"
-            echo "Using agent image: $AGENT_IMAGE"
-          else
-            AGENT_IMAGE="inspect-agent:dev"
-            echo "Backend image not found, fallback to $AGENT_IMAGE"
-          fi
-        fi
-
-        if [ -n "$PROM_URL" ]; then
-          payload=$(printf '{"registration_token":"%s","prometheus_url":"%s","cluster":{"name":"%s","kubeconfig_b64":"%s","kubeconfig_name":"kubeconfig"}}' "$TOKEN_ESC" "$PROM_URL_ESC" "$CLUSTER_NAME_ESC" "$KUBE_B64")
-        else
-          payload=$(printf '{"registration_token":"%s","cluster":{"name":"%s","kubeconfig_b64":"%s","kubeconfig_name":"kubeconfig"}}' "$TOKEN_ESC" "$CLUSTER_NAME_ESC" "$KUBE_B64")
-        fi
-
-        curl_flags="-fsSL"
-        if [ "$INSECURE" = "true" ]; then
-          curl_flags="${curl_flags} -k"
-          VERIFY_SSL="false"
-        fi
-
-        curl $curl_flags "${SERVER}/agent/bootstrap" \
-          -H "Content-Type: application/json" \
-          -d "$payload"
-        echo ""
-        echo "Agent bootstrap finished."
-
-        kubectl $KUBECTL_ARGS get namespace "$NAMESPACE" >/dev/null 2>&1 || \
-          kubectl $KUBECTL_ARGS create namespace "$NAMESPACE"
-
-        NAME="inspect-agent"
-        CONFIG_NAME="${NAME}-config"
-        SECRET_NAME="${NAME}-secret"
-        CLUSTER_ROLE_NAME="${NAME}-readonly-${NAMESPACE}"
-        CLUSTER_ROLE_BINDING_NAME="${NAME}-readonly-${NAMESPACE}"
-
-        if [ -n "$IMAGE_PULL_SECRET" ]; then
-          cat <<EOF | kubectl $KUBECTL_ARGS apply -f -
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: ${NAME}
-  namespace: ${NAMESPACE}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: ${CLUSTER_ROLE_NAME}
-rules:
-  - apiGroups: ["*"]
-    resources: ["*"]
-    verbs: ["get", "list", "watch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: ${CLUSTER_ROLE_BINDING_NAME}
-subjects:
-  - kind: ServiceAccount
-    name: ${NAME}
-    namespace: ${NAMESPACE}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: ${CLUSTER_ROLE_NAME}
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: ${CONFIG_NAME}
-  namespace: ${NAMESPACE}
-data:
-  config.yaml: |
-    server:
-      base_url: ${SERVER}
-      token_file: /var/lib/inspect-agent/agent.token
-    agent:
-      poll_interval: 10
-      batch_size: 1
-      verify_ssl: ${VERIFY_SSL}
-      request_timeout: 15
-    cluster:
-      name: ${CLUSTER_NAME}
-    prometheus:
-      base_url: ${PROM_URL}
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: ${SECRET_NAME}
-  namespace: ${NAMESPACE}
-type: Opaque
-stringData:
-  registration_token: ${TOKEN}
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: ${NAME}
-  namespace: ${NAMESPACE}
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: ${NAME}
-  template:
-    metadata:
-      labels:
-        app: ${NAME}
-    spec:
-      serviceAccountName: ${NAME}
-      imagePullSecrets:
-        - name: ${IMAGE_PULL_SECRET}
-      volumes:
-        - name: config
-          configMap:
-            name: ${CONFIG_NAME}
-        - name: state
-          emptyDir: {}
-      containers:
-        - name: ${NAME}
-          image: ${AGENT_IMAGE}
-          imagePullPolicy: IfNotPresent
-          env:
-            - name: INSPECT_AGENT_CONFIG
-              value: /app/config/config.yaml
-            - name: INSPECT_AGENT_REGISTRATION_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: ${SECRET_NAME}
-                  key: registration_token
-                  optional: true
-          volumeMounts:
-            - name: config
-              mountPath: /app/config
-            - name: state
-              mountPath: /var/lib/inspect-agent
-EOF
-        else
-          cat <<EOF | kubectl $KUBECTL_ARGS apply -f -
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: ${NAME}
-  namespace: ${NAMESPACE}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: ${CLUSTER_ROLE_NAME}
-rules:
-  - apiGroups: ["*"]
-    resources: ["*"]
-    verbs: ["get", "list", "watch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: ${CLUSTER_ROLE_BINDING_NAME}
-subjects:
-  - kind: ServiceAccount
-    name: ${NAME}
-    namespace: ${NAMESPACE}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: ${CLUSTER_ROLE_NAME}
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: ${CONFIG_NAME}
-  namespace: ${NAMESPACE}
-data:
-  config.yaml: |
-    server:
-      base_url: ${SERVER}
-      token_file: /var/lib/inspect-agent/agent.token
-    agent:
-      poll_interval: 10
-      batch_size: 1
-      verify_ssl: ${VERIFY_SSL}
-      request_timeout: 15
-    cluster:
-      name: ${CLUSTER_NAME}
-    prometheus:
-      base_url: ${PROM_URL}
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: ${SECRET_NAME}
-  namespace: ${NAMESPACE}
-type: Opaque
-stringData:
-  registration_token: ${TOKEN}
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: ${NAME}
-  namespace: ${NAMESPACE}
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: ${NAME}
-  template:
-    metadata:
-      labels:
-        app: ${NAME}
-    spec:
-      serviceAccountName: ${NAME}
-      volumes:
-        - name: config
-          configMap:
-            name: ${CONFIG_NAME}
-        - name: state
-          emptyDir: {}
-      containers:
-        - name: ${NAME}
-          image: ${AGENT_IMAGE}
-          imagePullPolicy: IfNotPresent
-          env:
-            - name: INSPECT_AGENT_CONFIG
-              value: /app/config/config.yaml
-            - name: INSPECT_AGENT_REGISTRATION_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: ${SECRET_NAME}
-                  key: registration_token
-                  optional: true
-          volumeMounts:
-            - name: config
-              mountPath: /app/config
-            - name: state
-              mountPath: /var/lib/inspect-agent
-EOF
-        fi
-
-        echo "Agent resources applied."
-        """
-    )
+    lines = [
+        "#!/bin/sh",
+        "set -eu",
+        "",
+        "usage() {",
+        "  cat <<'USAGE'",
+        "Usage:",
+        "  system-agent-install.sh --server <url> --token <token> [options]",
+        "",
+        "Options:",
+        "  --cluster-name <name>     Cluster name (default: kubectl context or hostname)",
+        "  --prometheus-url <url>    Prometheus URL (optional)",
+        "  --kubeconfig <path>       Kubeconfig path (default: current kubectl context)",
+        "  --namespace <name>        Namespace for agent resources (default: inspect)",
+        "  --agent-image <image>     Agent image (default: derive from backend image)",
+        "  --image-pull-secret <name> Image pull secret name (optional)",
+        "  --insecure                Skip TLS verification",
+        "  -h, --help                Show help",
+        "USAGE",
+        "}",
+        "",
+        "SERVER=\"\"",
+        "TOKEN=\"\"",
+        "CLUSTER_NAME=\"\"",
+        "PROM_URL=\"\"",
+        "KUBECONFIG_PATH=\"\"",
+        "INSECURE=\"false\"",
+        "NAMESPACE=\"inspect\"",
+        "AGENT_IMAGE=\"\"",
+        "IMAGE_PULL_SECRET=\"\"",
+        "VERIFY_SSL=\"true\"",
+        "",
+        "while [ \"$#\" -gt 0 ]; do",
+        "  case \"$1\" in",
+        "    --server) SERVER=\"$2\"; shift 2 ;;",
+        "    --token) TOKEN=\"$2\"; shift 2 ;;",
+        "    --cluster-name) CLUSTER_NAME=\"$2\"; shift 2 ;;",
+        "    --prometheus-url) PROM_URL=\"$2\"; shift 2 ;;",
+        "    --kubeconfig) KUBECONFIG_PATH=\"$2\"; shift 2 ;;",
+        "    --namespace) NAMESPACE=\"$2\"; shift 2 ;;",
+        "    --agent-image) AGENT_IMAGE=\"$2\"; shift 2 ;;",
+        "    --image-pull-secret) IMAGE_PULL_SECRET=\"$2\"; shift 2 ;;",
+        "    --insecure) INSECURE=\"true\"; shift ;;",
+        "    -h|--help) usage; exit 0 ;;",
+        "    --) shift; break ;;",
+        "    *) echo \"Unknown arg: $1\" >&2; usage; exit 1 ;;",
+        "  esac",
+        "done",
+        "",
+        "if [ -z \"$SERVER\" ] || [ -z \"$TOKEN\" ]; then",
+        "  echo \"Missing --server or --token.\" >&2",
+        "  usage",
+        "  exit 1",
+        "fi",
+        "",
+        "if ! command -v kubectl >/dev/null 2>&1; then",
+        "  echo \"kubectl not found.\" >&2",
+        "  exit 1",
+        "fi",
+        "",
+        "KUBECTL_ARGS=\"\"",
+        "if [ -n \"$KUBECONFIG_PATH\" ]; then",
+        "  KUBECTL_ARGS=\"--kubeconfig $KUBECONFIG_PATH\"",
+        "fi",
+        "",
+        "if [ -n \"$KUBECONFIG_PATH\" ]; then",
+        "  KUBE_DATA=$(cat \"$KUBECONFIG_PATH\")",
+        "else",
+        "  KUBE_DATA=$(kubectl $KUBECTL_ARGS config view --raw --minify)",
+        "fi",
+        "",
+        "if command -v base64 >/dev/null 2>&1; then",
+        "  KUBE_B64=$(printf \"%s\" \"$KUBE_DATA\" | base64 | tr -d '\\\\r\\\\n')",
+        "else",
+        "  echo \"base64 not found.\" >&2",
+        "  exit 1",
+        "fi",
+        "",
+        "if [ -z \"$CLUSTER_NAME\" ]; then",
+        "  CLUSTER_NAME=$(kubectl $KUBECTL_ARGS config current-context 2>/dev/null || true)",
+        "fi",
+        "if [ -z \"$CLUSTER_NAME\" ]; then",
+        "  CLUSTER_NAME=$(hostname)",
+        "fi",
+        "",
+        "json_escape() {",
+        "  printf \"%s\" \"$1\" | sed 's/\\\\/\\\\\\\\/g; s/\\\"/\\\\\\\"/g'",
+        "}",
+        "",
+        "detect_backend_image() {",
+        "  selector=\"app.kubernetes.io/component=backend\"",
+        "  images=$(kubectl $KUBECTL_ARGS get deploy -A -l \"$selector\" -o jsonpath='{range .items[*]}{.metadata.namespace}{\"\\\\t\"}{.metadata.name}{\"\\\\t\"}{.spec.template.spec.containers[0].image}{\"\\\\n\"}{end}' 2>/dev/null || true)",
+        "  if [ -z \"$images\" ]; then",
+        "    images=$(kubectl $KUBECTL_ARGS get deploy -n \"$NAMESPACE\" -l \"$selector\" -o jsonpath='{range .items[*]}{.metadata.namespace}{\"\\\\t\"}{.metadata.name}{\"\\\\t\"}{.spec.template.spec.containers[0].image}{\"\\\\n\"}{end}' 2>/dev/null || true)",
+        "  fi",
+        "  if [ -z \"$images\" ]; then",
+        "    return 0",
+        "  fi",
+        "  backend_image=$(printf \"%s\\\\n\" \"$images\" | awk '($3 ~ /(^|\\\\/)backend([:@]|$)/){print $3; exit}')",
+        "  if [ -z \"$backend_image\" ]; then",
+        "    backend_image=$(printf \"%s\\\\n\" \"$images\" | awk 'NR==1{print $3}')",
+        "  fi",
+        "  printf \"%s\" \"$backend_image\"",
+        "}",
+        "",
+        "derive_agent_image() {",
+        "  image=\"$1\"",
+        "  if [ -z \"$image\" ]; then",
+        "    return 0",
+        "  fi",
+        "  name=\"$image\"",
+        "  digest=\"\"",
+        "  tag=\"\"",
+        "  case \"$name\" in",
+        "    *@*) digest=\"${name#*@}\"; name=\"${name%@*}\" ;;",
+        "  esac",
+        "  base=\"${name##*/}\"",
+        "  if [ \"${base#*:}\" != \"$base\" ]; then",
+        "    tag=\"${base#*:}\"",
+        "    name=\"${name%:*}\"",
+        "  fi",
+        "  repo=\"${name%/*}\"",
+        "  if [ \"$repo\" = \"$name\" ]; then",
+        "    repo=\"\"",
+        "  fi",
+        "  if [ -n \"$repo\" ]; then",
+        "    new_name=\"${repo}/agent\"",
+        "  else",
+        "    new_name=\"agent\"",
+        "  fi",
+        "  if [ -n \"$digest\" ]; then",
+        "    printf \"%s@%s\" \"$new_name\" \"$digest\"",
+        "  elif [ -n \"$tag\" ]; then",
+        "    printf \"%s:%s\" \"$new_name\" \"$tag\"",
+        "  else",
+        "    printf \"%s\" \"$new_name\"",
+        "  fi",
+        "}",
+        "",
+        "TOKEN_ESC=$(json_escape \"$TOKEN\")",
+        "CLUSTER_NAME_ESC=$(json_escape \"$CLUSTER_NAME\")",
+        "PROM_URL_ESC=$(json_escape \"$PROM_URL\")",
+        "",
+        "if [ -z \"$AGENT_IMAGE\" ]; then",
+        "  BACKEND_IMAGE=$(detect_backend_image || true)",
+        "  if [ -n \"$BACKEND_IMAGE\" ]; then",
+        "    AGENT_IMAGE=$(derive_agent_image \"$BACKEND_IMAGE\")",
+        "    echo \"Detected backend image: $BACKEND_IMAGE\"",
+        "    echo \"Using agent image: $AGENT_IMAGE\"",
+        "  else",
+        "    AGENT_IMAGE=\"inspect-agent:dev\"",
+        "    echo \"Backend image not found, fallback to $AGENT_IMAGE\"",
+        "  fi",
+        "fi",
+        "",
+        "if [ -n \"$PROM_URL\" ]; then",
+        "  payload=$(printf '{\"registration_token\":\"%s\",\"prometheus_url\":\"%s\",\"cluster\":{\"name\":\"%s\",\"kubeconfig_b64\":\"%s\",\"kubeconfig_name\":\"kubeconfig\"}}' \"$TOKEN_ESC\" \"$PROM_URL_ESC\" \"$CLUSTER_NAME_ESC\" \"$KUBE_B64\")",
+        "else",
+        "  payload=$(printf '{\"registration_token\":\"%s\",\"cluster\":{\"name\":\"%s\",\"kubeconfig_b64\":\"%s\",\"kubeconfig_name\":\"kubeconfig\"}}' \"$TOKEN_ESC\" \"$CLUSTER_NAME_ESC\" \"$KUBE_B64\")",
+        "fi",
+        "",
+        "curl_flags=\"-fsSL\"",
+        "if [ \"$INSECURE\" = \"true\" ]; then",
+        "  curl_flags=\"${curl_flags} -k\"",
+        "  VERIFY_SSL=\"false\"",
+        "fi",
+        "",
+        "curl $curl_flags \"${SERVER}/agent/bootstrap\" \\",
+        "  -H \"Content-Type: application/json\" \\",
+        "  -d \"$payload\"",
+        "echo \"\"",
+        "echo \"Agent bootstrap finished.\"",
+        "",
+        "kubectl $KUBECTL_ARGS get namespace \"$NAMESPACE\" >/dev/null 2>&1 || \\",
+        "  kubectl $KUBECTL_ARGS create namespace \"$NAMESPACE\"",
+        "",
+        "NAME=\"inspect-agent\"",
+        "CONFIG_NAME=\"${NAME}-config\"",
+        "SECRET_NAME=\"${NAME}-secret\"",
+        "CLUSTER_ROLE_NAME=\"${NAME}-readonly-${NAMESPACE}\"",
+        "CLUSTER_ROLE_BINDING_NAME=\"${NAME}-readonly-${NAMESPACE}\"",
+        "",
+        "if [ -n \"$IMAGE_PULL_SECRET\" ]; then",
+        "  cat <<EOF | kubectl $KUBECTL_ARGS apply -f -",
+        "apiVersion: v1",
+        "kind: ServiceAccount",
+        "metadata:",
+        "  name: ${NAME}",
+        "  namespace: ${NAMESPACE}",
+        "---",
+        "apiVersion: rbac.authorization.k8s.io/v1",
+        "kind: ClusterRole",
+        "metadata:",
+        "  name: ${CLUSTER_ROLE_NAME}",
+        "rules:",
+        "  - apiGroups: [\"*\"]",
+        "    resources: [\"*\"]",
+        "    verbs: [\"get\", \"list\", \"watch\"]",
+        "---",
+        "apiVersion: rbac.authorization.k8s.io/v1",
+        "kind: ClusterRoleBinding",
+        "metadata:",
+        "  name: ${CLUSTER_ROLE_BINDING_NAME}",
+        "subjects:",
+        "  - kind: ServiceAccount",
+        "    name: ${NAME}",
+        "    namespace: ${NAMESPACE}",
+        "roleRef:",
+        "  apiGroup: rbac.authorization.k8s.io",
+        "  kind: ClusterRole",
+        "  name: ${CLUSTER_ROLE_NAME}",
+        "---",
+        "apiVersion: v1",
+        "kind: ConfigMap",
+        "metadata:",
+        "  name: ${CONFIG_NAME}",
+        "  namespace: ${NAMESPACE}",
+        "data:",
+        "  config.yaml: |",
+        "    server:",
+        "      base_url: ${SERVER}",
+        "      token_file: /var/lib/inspect-agent/agent.token",
+        "    agent:",
+        "      poll_interval: 10",
+        "      batch_size: 1",
+        "      verify_ssl: ${VERIFY_SSL}",
+        "      request_timeout: 15",
+        "    cluster:",
+        "      name: ${CLUSTER_NAME}",
+        "    prometheus:",
+        "      base_url: ${PROM_URL}",
+        "---",
+        "apiVersion: v1",
+        "kind: Secret",
+        "metadata:",
+        "  name: ${SECRET_NAME}",
+        "  namespace: ${NAMESPACE}",
+        "type: Opaque",
+        "stringData:",
+        "  registration_token: ${TOKEN}",
+        "---",
+        "apiVersion: apps/v1",
+        "kind: Deployment",
+        "metadata:",
+        "  name: ${NAME}",
+        "  namespace: ${NAMESPACE}",
+        "spec:",
+        "  replicas: 1",
+        "  selector:",
+        "    matchLabels:",
+        "      app: ${NAME}",
+        "  template:",
+        "    metadata:",
+        "      labels:",
+        "        app: ${NAME}",
+        "    spec:",
+        "      serviceAccountName: ${NAME}",
+        "      imagePullSecrets:",
+        "        - name: ${IMAGE_PULL_SECRET}",
+        "      volumes:",
+        "        - name: config",
+        "          configMap:",
+        "            name: ${CONFIG_NAME}",
+        "        - name: state",
+        "          emptyDir: {}",
+        "      containers:",
+        "        - name: ${NAME}",
+        "          image: ${AGENT_IMAGE}",
+        "          imagePullPolicy: IfNotPresent",
+        "          env:",
+        "            - name: INSPECT_AGENT_CONFIG",
+        "              value: /app/config/config.yaml",
+        "            - name: INSPECT_AGENT_REGISTRATION_TOKEN",
+        "              valueFrom:",
+        "                secretKeyRef:",
+        "                  name: ${SECRET_NAME}",
+        "                  key: registration_token",
+        "                  optional: true",
+        "          volumeMounts:",
+        "            - name: config",
+        "              mountPath: /app/config",
+        "            - name: state",
+        "              mountPath: /var/lib/inspect-agent",
+        "EOF",
+        "else",
+        "  cat <<EOF | kubectl $KUBECTL_ARGS apply -f -",
+        "apiVersion: v1",
+        "kind: ServiceAccount",
+        "metadata:",
+        "  name: ${NAME}",
+        "  namespace: ${NAMESPACE}",
+        "---",
+        "apiVersion: rbac.authorization.k8s.io/v1",
+        "kind: ClusterRole",
+        "metadata:",
+        "  name: ${CLUSTER_ROLE_NAME}",
+        "rules:",
+        "  - apiGroups: [\"*\"]",
+        "    resources: [\"*\"]",
+        "    verbs: [\"get\", \"list\", \"watch\"]",
+        "---",
+        "apiVersion: rbac.authorization.k8s.io/v1",
+        "kind: ClusterRoleBinding",
+        "metadata:",
+        "  name: ${CLUSTER_ROLE_BINDING_NAME}",
+        "subjects:",
+        "  - kind: ServiceAccount",
+        "    name: ${NAME}",
+        "    namespace: ${NAMESPACE}",
+        "roleRef:",
+        "  apiGroup: rbac.authorization.k8s.io",
+        "  kind: ClusterRole",
+        "  name: ${CLUSTER_ROLE_NAME}",
+        "---",
+        "apiVersion: v1",
+        "kind: ConfigMap",
+        "metadata:",
+        "  name: ${CONFIG_NAME}",
+        "  namespace: ${NAMESPACE}",
+        "data:",
+        "  config.yaml: |",
+        "    server:",
+        "      base_url: ${SERVER}",
+        "      token_file: /var/lib/inspect-agent/agent.token",
+        "    agent:",
+        "      poll_interval: 10",
+        "      batch_size: 1",
+        "      verify_ssl: ${VERIFY_SSL}",
+        "      request_timeout: 15",
+        "    cluster:",
+        "      name: ${CLUSTER_NAME}",
+        "    prometheus:",
+        "      base_url: ${PROM_URL}",
+        "---",
+        "apiVersion: v1",
+        "kind: Secret",
+        "metadata:",
+        "  name: ${SECRET_NAME}",
+        "  namespace: ${NAMESPACE}",
+        "type: Opaque",
+        "stringData:",
+        "  registration_token: ${TOKEN}",
+        "---",
+        "apiVersion: apps/v1",
+        "kind: Deployment",
+        "metadata:",
+        "  name: ${NAME}",
+        "  namespace: ${NAMESPACE}",
+        "spec:",
+        "  replicas: 1",
+        "  selector:",
+        "    matchLabels:",
+        "      app: ${NAME}",
+        "  template:",
+        "    metadata:",
+        "      labels:",
+        "        app: ${NAME}",
+        "    spec:",
+        "      serviceAccountName: ${NAME}",
+        "      volumes:",
+        "        - name: config",
+        "          configMap:",
+        "            name: ${CONFIG_NAME}",
+        "        - name: state",
+        "          emptyDir: {}",
+        "      containers:",
+        "        - name: ${NAME}",
+        "          image: ${AGENT_IMAGE}",
+        "          imagePullPolicy: IfNotPresent",
+        "          env:",
+        "            - name: INSPECT_AGENT_CONFIG",
+        "              value: /app/config/config.yaml",
+        "            - name: INSPECT_AGENT_REGISTRATION_TOKEN",
+        "              valueFrom:",
+        "                secretKeyRef:",
+        "                  name: ${SECRET_NAME}",
+        "                  key: registration_token",
+        "                  optional: true",
+        "          volumeMounts:",
+        "            - name: config",
+        "              mountPath: /app/config",
+        "            - name: state",
+        "              mountPath: /var/lib/inspect-agent",
+        "EOF",
+        "fi",
+        "",
+        "echo \"Agent resources applied.\"",
+    ]
+    return \"\\n\".join(lines) + \"\\n\"
 
 
 app = FastAPI(title="K8s Inspection Service", version="0.3.0")
