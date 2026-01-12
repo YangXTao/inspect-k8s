@@ -189,7 +189,9 @@ body {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 10px;
+  gap: 14px;
+  margin-left: 6px;
+  margin-top: 4px;
 }
 
 .branding-logo {
@@ -202,6 +204,7 @@ body {
   padding: 10px 14px;
   border-radius: 8px;
   font-weight: 600;
+  font-size: 18px;
 }
 
 .app-header h1 {
@@ -211,7 +214,7 @@ body {
 }
 
 .app-header p {
-  margin: 6px 0 0;
+  margin: 10px 0 0;
   font-size: 14px;
   opacity: 0.9;
 }
