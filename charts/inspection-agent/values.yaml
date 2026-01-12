@@ -1,0 +1,43 @@
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+
+rbac:
+  create: true
+  clusterRoleName: ""
+  clusterRoleBindingName: ""
+
+config:
+  server:
+    base_url: http://backend:8000
+    token_file: /var/lib/inspect-agent/agent.token
+  agent:
+    poll_interval: 10
+    batch_size: 1
+    verify_ssl: false
+    request_timeout: 15
+  cluster:
+    name: demo-cluster
+  prometheus:
+    base_url: http://prometheus.monitoring:9090
+
+secret:
+  create: true
+  name: ""
+  registrationToken: ""
+
+deployment:
+  replicaCount: 1
+  image:
+    repository: inspect-agent
+    tag: dev
+    pullPolicy: IfNotPresent
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}

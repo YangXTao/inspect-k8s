@@ -35,14 +35,14 @@ http://localhost:8080
 
 ## 使用 Helm 部署
 
-官方 Chart 仓库：`https://helm.com/zs-k8s-inspection`
+官方 Chart 仓库：`https://yangxtao.github.io/inspect-k8s`
 
 ```bash
 # 添加仓库并更新索引
-helm repo add zs-k8s-inspection https://helm.com/zs-k8s-inspection
+helm repo add inspect-k8s https://yangxtao.github.io/inspect-k8s
 helm repo update
 
-# 自定义配置（可选）
+# 自定义配置（可选，后端+前端）
 cat > my-values.yaml <<'EOF'
 backend:
   image:
@@ -50,18 +50,12 @@ backend:
     tag: v0.1.0
     pullPolicy: Always
   env:
-    - name: MYSQL_HOST
-      value: 192.168.10.184
-    - name: MYSQL_PORT
-      value: "3306"
-    - name: MYSQL_USER
-      value: root
-    - name: MYSQL_PASSWORD
-      value: root
-    - name: MYSQL_DATABASE
-      value: demo
-    - name: LICENSE_SECRET
-      value: demo-secret
+    MYSQL_HOST: 192.168.10.184
+    MYSQL_PORT: "3306"
+    MYSQL_USER: root
+    MYSQL_PASSWORD: root
+    MYSQL_DATABASE: demo
+    LICENSE_SECRET: demo-secret
   persistence:
     storageClassName: local-path
     size: 10Gi
@@ -71,9 +65,31 @@ frontend:
 EOF
 
 # 安装到目标命名空间
-helm install inspection zs-k8s-inspection/inspection-center \
+helm install inspection inspect-k8s/inspection-center \
   -n inspect --create-namespace \
   -f my-values.yaml
+
+# 自定义配置（可选，Agent）
+cat > agent-values.yaml <<'EOF'
+deployment:
+  image:
+    repository: inspect-agent
+    tag: dev
+config:
+  server:
+    base_url: http://backend:8000
+  cluster:
+    name: demo-cluster
+  prometheus:
+    base_url: http://prometheus.monitoring:9090
+secret:
+  registrationToken: ""
+EOF
+
+# 安装 Agent 到目标命名空间
+helm install inspection-agent inspect-k8s/inspection-agent \
+  -n inspect --create-namespace \
+  -f agent-values.yaml
 ```
 
 部署完成后：
