@@ -266,6 +266,17 @@ def _ensure_inspection_runs_schema() -> None:
         statements.append(
             f"ALTER TABLE inspection_runs ADD COLUMN plan_json {column_type} NULL"
         )
+    if "prometheus_version" not in existing_columns:
+        if dialect == "sqlite":
+            statements.append(
+                "ALTER TABLE inspection_runs "
+                "ADD COLUMN prometheus_version TEXT NOT NULL DEFAULT '3.0'"
+            )
+        else:
+            statements.append(
+                "ALTER TABLE inspection_runs "
+                "ADD COLUMN prometheus_version VARCHAR(20) NOT NULL DEFAULT '3.0'"
+            )
     if "executor" not in existing_columns:
         column_type = "TEXT" if dialect == "sqlite" else "VARCHAR(20)"
         statements.append(

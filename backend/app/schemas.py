@@ -184,6 +184,7 @@ class InspectionRunBase(BaseModel):
 class InspectionRunCreate(InspectionRunBase):
     item_ids: List[int]
     cluster_id: int
+    prometheus_version: Optional[str] = Field("3.0", max_length=20)
 
 
 class InspectionRunOut(BaseModel):
@@ -201,6 +202,7 @@ class InspectionRunOut(BaseModel):
     progress: int
     created_at: datetime
     completed_at: Optional[datetime]
+    prometheus_version: Optional[str] = None
     executor: str
     agent_status: Optional[str]
     agent_id: Optional[int]
@@ -259,6 +261,7 @@ class InspectionRunListOut(BaseModel):
     progress: int
     created_at: datetime
     completed_at: Optional[datetime]
+    prometheus_version: Optional[str] = None
     executor: str
     agent_status: Optional[str]
     agent_id: Optional[int]

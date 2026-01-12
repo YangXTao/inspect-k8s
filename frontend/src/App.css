@@ -2596,20 +2596,24 @@ th {
 }
 
 .operator-inline input {
-  flex: 1 1 220px;
+  flex: 0 1 220px;
   border-radius: 8px;
   border: 1px solid #cbd5f5;
   padding: 7px 10px;
   font-size: 13px;
+  width: 220px;
+  max-width: 100%;
 }
 
 .operator-inline select {
-  flex: 1 1 220px;
+  flex: 0 1 140px;
   border-radius: 8px;
   border: 1px solid #cbd5f5;
   padding: 7px 10px;
   font-size: 13px;
   background: #fff;
+  width: 140px;
+  max-width: 100%;
 }
 
 .detail-empty {

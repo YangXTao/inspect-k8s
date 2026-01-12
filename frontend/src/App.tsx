@@ -2256,7 +2256,10 @@ interface ClusterDetailViewProps {
   operator: string;
   setOperator: (value: string) => void;
   inspectionLoading: boolean;
-  onStartInspection: (clusterId: number) => Promise<void>;
+  onStartInspection: (
+    clusterId: number,
+    prometheusVersion: string
+  ) => Promise<void>;
   onDeleteRun: (run: InspectionRunListItem) => Promise<void>;
   onDeleteRunsBulk: (runIds: number[]) => Promise<void>;
   onCancelRun: (run: InspectionRunListItem) => Promise<void>;
@@ -2361,6 +2364,14 @@ const ClusterDetailView = ({
     setSelectedIds(() => []);
     setSelectedRunIds([]);
   }, [resolvedClusterId, setSelectedIds]);
+
+  useEffect(() => {
+    setPrometheusVersion(DEFAULT_PROMETHEUS_VERSION);
+  }, [resolvedClusterId]);
+
+  useEffect(() => {
+    setSelectedIds(() => []);
+  }, [prometheusVersion, setSelectedIds]);
 
   useEffect(() => {
     setSelectedRunIds((prev) =>
@@ -2543,8 +2554,11 @@ const ClusterDetailView = ({
     if (!cluster) {
       return;
     }
-    void onStartInspection(cluster.id);
-  }, [cluster, onStartInspection]);
+    void onStartInspection(
+      cluster.id,
+      normalizePrometheusVersion(prometheusVersion)
+    );
+  }, [cluster, onStartInspection, prometheusVersion]);
 
   const handleClusterRunPageChange = useCallback(
     (offset: number) => {
@@ -3568,6 +3582,7 @@ const InspectionSettingsPanel = ({
   const [itemFilterType, setItemFilterType] = useState<
     "all" | "command" | "promql" | "other"
   >("all");
+  const [itemFilterVersion, setItemFilterVersion] = useState<string>("all");
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
   const [pageInput, setPageInput] = useState("");
@@ -3787,19 +3802,30 @@ const InspectionSettingsPanel = ({
     [items]
   );
   const filteredItems = useMemo(() => {
+    const versionFilter =
+      itemFilterVersion === "all"
+        ? null
+        : normalizePrometheusVersion(itemFilterVersion);
+    let nextItems = sortedItems;
+    if (versionFilter) {
+      nextItems = nextItems.filter(
+        (item) =>
+          normalizePrometheusVersion(item.prometheus_version) === versionFilter
+      );
+    }
     if (itemFilterType === "all") {
-      return sortedItems;
+      return nextItems;
     }
     if (itemFilterType === "command") {
-      return sortedItems.filter((item) => item.check_type === "command");
+      return nextItems.filter((item) => item.check_type === "command");
     }
     if (itemFilterType === "promql") {
-      return sortedItems.filter((item) => item.check_type === "promql");
+      return nextItems.filter((item) => item.check_type === "promql");
     }
-    return sortedItems.filter(
+    return nextItems.filter(
       (item) => item.check_type !== "command" && item.check_type !== "promql"
     );
-  }, [itemFilterType, sortedItems]);
+  }, [itemFilterType, itemFilterVersion, sortedItems]);
 
   const filteredItemIdSet = useMemo(
     () => new Set(filteredItems.map((item) => item.id)),
@@ -3874,7 +3900,7 @@ const InspectionSettingsPanel = ({
   useEffect(() => {
     setPage(1);
     setPageInput("");
-  }, [itemFilterType]);
+  }, [itemFilterType, itemFilterVersion]);
 
   useEffect(() => {
     setPage((prev) => Math.min(Math.max(prev, 1), totalPages));
@@ -3975,6 +4001,20 @@ const InspectionSettingsPanel = ({
                 >
                   批量删除
                 </button>
+                <label className="settings-filter">
+                  Prometheus 版本
+                  <select
+                    value={itemFilterVersion}
+                    onChange={(event) => setItemFilterVersion(event.target.value)}
+                  >
+                    <option value="all">全部</option>
+                    {PROMETHEUS_VERSION_OPTIONS.map((version) => (
+                      <option key={version} value={version}>
+                        {version}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="settings-filter">
                   类型
                   <select
@@ -4991,6 +5031,10 @@ const RunDetailView = ({
           <div>
             <strong>巡检人：</strong>
             {summaryRun?.operator || "-"}
+          </div>
+          <div>
+            <strong>Prometheus 版本：</strong>
+            {normalizePrometheusVersion(summaryRun?.prometheus_version)}
           </div>
           <div>
             <strong>开始时间：</strong>
@@ -6714,7 +6758,7 @@ const hasManualKubeconfig = useMemo(
   );
 
   const handleStartInspection = useCallback(
-    async (clusterId: number) => {
+    async (clusterId: number, prometheusVersion: string) => {
       if (!licenseCapabilities.canRunInspections) {
         setInspectionError(
           licenseCapabilities.reason ?? "当前 License 不支持巡检功能。"
@@ -6741,7 +6785,8 @@ const hasManualKubeconfig = useMemo(
         const run = await createInspectionRun(
           selectedItemIds,
           clusterId,
-          operatorName || undefined
+          operatorName || undefined,
+          prometheusVersion
         );
         setInspectionNotice("巡检任务已启动，状态会自动更新。");
         setSelectedItemIdsState([]);

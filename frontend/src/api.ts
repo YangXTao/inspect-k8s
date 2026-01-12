@@ -119,11 +119,17 @@ export function importInspectionItems(
 export function createInspectionRun(
   itemIds: number[],
   clusterId: number,
-  operator?: string
+  operator?: string,
+  prometheusVersion?: string
 ): Promise<InspectionRun> {
   return request<InspectionRun>("/inspection-runs", {
     method: "POST",
-    body: JSON.stringify({ item_ids: itemIds, cluster_id: clusterId, operator }),
+    body: JSON.stringify({
+      item_ids: itemIds,
+      cluster_id: clusterId,
+      operator,
+      prometheus_version: prometheusVersion,
+    }),
   });
 }
 
