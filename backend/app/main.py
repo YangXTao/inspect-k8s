@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 import re
 import secrets
 import shutil
@@ -340,7 +341,39 @@ def _agent_request_dependency(
         db.close()
 
 
+def _derive_agent_image_from_backend_image(
+    backend_image: str | None,
+) -> str | None:
+    if not backend_image:
+        return None
+    image = backend_image.strip()
+    if not image:
+        return None
+    name = image
+    digest = None
+    if "@" in image:
+        name, digest = image.split("@", 1)
+    tag = None
+    last_slash = name.rfind("/")
+    last_colon = name.rfind(":")
+    if last_colon > last_slash:
+        tag = name[last_colon + 1 :]
+        name = name[:last_colon]
+    if "/" in name:
+        repo = name.rsplit("/", 1)[0]
+        new_name = f"{repo}/agent"
+    else:
+        new_name = "agent"
+    if tag:
+        new_name = f"{new_name}:{tag}"
+    if digest:
+        new_name = f"{new_name}@{digest}"
+    return new_name
+
+
 def _build_system_agent_install_script() -> str:
+    backend_image = os.getenv("INSPECT_BACKEND_IMAGE") or os.getenv("BACKEND_IMAGE") or ""
+    agent_image_default = _derive_agent_image_from_backend_image(backend_image) or ""
     lines = [
         "#!/bin/sh",
         "set -eu",
@@ -370,6 +403,7 @@ def _build_system_agent_install_script() -> str:
         "INSECURE=\"false\"",
         "NAMESPACE=\"inspect\"",
         "AGENT_IMAGE=\"\"",
+        f"DEFAULT_AGENT_IMAGE=\"{agent_image_default}\"",
         "IMAGE_PULL_SECRET=\"\"",
         "VERIFY_SSL=\"true\"",
         "",
@@ -413,7 +447,13 @@ def _build_system_agent_install_script() -> str:
         "fi",
         "",
         "if command -v base64 >/dev/null 2>&1; then",
-        "  KUBE_B64=$(printf \"%s\" \"$KUBE_DATA\" | base64 | awk '{printf \"%s\", $0}')",
+        "  if printf \"%s\" \"$KUBE_DATA\" | base64 -w 0 >/dev/null 2>&1; then",
+        "    KUBE_B64=$(printf \"%s\" \"$KUBE_DATA\" | base64 -w 0)",
+        "  elif printf \"%s\" \"$KUBE_DATA\" | base64 -b 0 >/dev/null 2>&1; then",
+        "    KUBE_B64=$(printf \"%s\" \"$KUBE_DATA\" | base64 -b 0)",
+        "  else",
+        "    KUBE_B64=$(printf \"%s\" \"$KUBE_DATA\" | base64 | tr -d '\\\\r\\\\n')",
+        "  fi",
         "else",
         "  echo \"base64 not found.\" >&2",
         "  exit 1",
@@ -430,79 +470,13 @@ def _build_system_agent_install_script() -> str:
         "  printf \"%s\" \"$1\" | sed 's/\\\\/\\\\\\\\/g; s/\\\"/\\\\\\\"/g'",
         "}",
         "",
-        "detect_backend_image() {",
-        "  images=\"\"",
-        "  selector=\"app.kubernetes.io/component=backend\"",
-        "  images=$(kubectl $KUBECTL_ARGS get deploy -A -l \"$selector\" -o jsonpath='{range .items[*]}{.metadata.namespace}{\"\\\\t\"}{.metadata.name}{\"\\\\t\"}{.spec.template.spec.containers[0].image}{\"\\\\n\"}{end}' 2>/dev/null || true)",
-        "  if [ -z \"$images\" ]; then",
-        "    images=$(kubectl $KUBECTL_ARGS get deploy -n \"$NAMESPACE\" -l \"$selector\" -o jsonpath='{range .items[*]}{.metadata.namespace}{\"\\\\t\"}{.metadata.name}{\"\\\\t\"}{.spec.template.spec.containers[0].image}{\"\\\\n\"}{end}' 2>/dev/null || true)",
-        "  fi",
-        "  if [ -z \"$images\" ]; then",
-        "    selector=\"app=backend\"",
-        "    images=$(kubectl $KUBECTL_ARGS get deploy -A -l \"$selector\" -o jsonpath='{range .items[*]}{.metadata.namespace}{\"\\\\t\"}{.metadata.name}{\"\\\\t\"}{.spec.template.spec.containers[0].image}{\"\\\\n\"}{end}' 2>/dev/null || true)",
-        "  fi",
-        "  if [ -z \"$images\" ]; then",
-        "    images=$(kubectl $KUBECTL_ARGS get deploy -n \"$NAMESPACE\" -l \"$selector\" -o jsonpath='{range .items[*]}{.metadata.namespace}{\"\\\\t\"}{.metadata.name}{\"\\\\t\"}{.spec.template.spec.containers[0].image}{\"\\\\n\"}{end}' 2>/dev/null || true)",
-        "  fi",
-        "  if [ -z \"$images\" ]; then",
-        "    images=$(kubectl $KUBECTL_ARGS get deploy -A -o jsonpath='{range .items[*]}{.metadata.namespace}{\"\\\\t\"}{.metadata.name}{\"\\\\t\"}{.spec.template.spec.containers[0].image}{\"\\\\n\"}{end}' 2>/dev/null || true)",
-        "  fi",
-        "  if [ -z \"$images\" ]; then",
-        "    return 0",
-        "  fi",
-        "  backend_image=$(printf \"%s\\\\n\" \"$images\" | awk '$2==\"backend\"{print $3; exit}')",
-        "  if [ -z \"$backend_image\" ]; then",
-        "    backend_image=$(printf \"%s\\\\n\" \"$images\" | awk 'index($3, \"/backend\") || index($3, \"backend:\") || index($3, \"backend@\"){print $3; exit}')",
-        "  fi",
-        "  if [ -z \"$backend_image\" ]; then",
-        "    backend_image=$(printf \"%s\\\\n\" \"$images\" | awk 'NR==1{print $3}')",
-        "  fi",
-        "  printf \"%s\" \"$backend_image\"",
-        "}",
-        "",
-        "derive_agent_image() {",
-        "  image=\"$1\"",
-        "  if [ -z \"$image\" ]; then",
-        "    return 0",
-        "  fi",
-        "  name=\"$image\"",
-        "  digest=\"\"",
-        "  tag=\"\"",
-        "  case \"$name\" in",
-        "    *@*) digest=\"${name#*@}\"; name=\"${name%@*}\" ;;",
-        "  esac",
-        "  base=\"${name##*/}\"",
-        "  if [ \"${base#*:}\" != \"$base\" ]; then",
-        "    tag=\"${base#*:}\"",
-        "    name=\"${name%:*}\"",
-        "  fi",
-        "  repo=\"${name%/*}\"",
-        "  if [ \"$repo\" = \"$name\" ]; then",
-        "    repo=\"\"",
-        "  fi",
-        "  if [ -n \"$repo\" ]; then",
-        "    new_name=\"${repo}/agent\"",
-        "  else",
-        "    new_name=\"agent\"",
-        "  fi",
-        "  if [ -n \"$digest\" ]; then",
-        "    printf \"%s@%s\" \"$new_name\" \"$digest\"",
-        "  elif [ -n \"$tag\" ]; then",
-        "    printf \"%s:%s\" \"$new_name\" \"$tag\"",
-        "  else",
-        "    printf \"%s\" \"$new_name\"",
-        "  fi",
-        "}",
-        "",
         "TOKEN_ESC=$(json_escape \"$TOKEN\")",
         "CLUSTER_NAME_ESC=$(json_escape \"$CLUSTER_NAME\")",
         "PROM_URL_ESC=$(json_escape \"$PROM_URL\")",
         "",
         "if [ -z \"$AGENT_IMAGE\" ]; then",
-        "  BACKEND_IMAGE=$(detect_backend_image || true)",
-        "  if [ -n \"$BACKEND_IMAGE\" ]; then",
-        "    AGENT_IMAGE=$(derive_agent_image \"$BACKEND_IMAGE\")",
-        "    echo \"Detected backend image: $BACKEND_IMAGE\"",
+        "  if [ -n \"$DEFAULT_AGENT_IMAGE\" ]; then",
+        "    AGENT_IMAGE=\"$DEFAULT_AGENT_IMAGE\"",
         "    echo \"Using agent image: $AGENT_IMAGE\"",
         "  else",
         "    AGENT_IMAGE=\"inspect-agent:dev\"",

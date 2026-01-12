@@ -27,6 +27,8 @@ spec:
               value: <MYSQL_DATABASE>
             - name: LICENSE_SECRET
               value: <LICENSE_SECRET>
+            - name: INSPECT_BACKEND_IMAGE
+              value: <NAME>:<image-tag>
           image: <NAME>:<image-tag>
           imagePullPolicy: Always
           name: backend

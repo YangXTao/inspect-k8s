@@ -40,6 +40,8 @@ spec:
             - name: {{ $name }}
               value: {{ $value | quote }}
             {{- end }}
+            - name: INSPECT_BACKEND_IMAGE
+              value: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
           volumeMounts:
             - name: backend-data
               mountPath: {{ .Values.backend.persistence.mountPath }}
