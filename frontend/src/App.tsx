@@ -2407,24 +2407,44 @@ const ClusterDetailView = ({
     return clusterRuns.slice(start, start + clusterRunPageSize);
   }, [clusterRuns, clusterRunPage, clusterRunPageSize]);
 
-  const filteredInspectionItems = useMemo(() => {
-    const keyword = itemKeyword.trim().toLowerCase();
-    const selectedVersion = normalizePrometheusVersion(prometheusVersion);
-    return items.filter((item) => {
-      if (
-        isPromqlType(item.check_type) &&
-        normalizePrometheusVersion(item.prometheus_version) !== selectedVersion
-      ) {
-        return false;
-      }
-      if (!keyword) {
+  const inspectionKeyword = itemKeyword.trim().toLowerCase();
+  const selectedPrometheusVersion =
+    normalizePrometheusVersion(prometheusVersion);
+  const matchesInspectionKeyword = useCallback(
+    (item: InspectionItem) => {
+      if (!inspectionKeyword) {
         return true;
       }
       const name = (item.name ?? "").toLowerCase();
       const desc = (item.description ?? "").toLowerCase();
-      return name.includes(keyword) || desc.includes(keyword);
-    });
-  }, [itemKeyword, items, prometheusVersion]);
+      return name.includes(inspectionKeyword) || desc.includes(inspectionKeyword);
+    },
+    [inspectionKeyword]
+  );
+  const filteredPromqlItems = useMemo(
+    () =>
+      items.filter(
+        (item) =>
+          isPromqlType(item.check_type) &&
+          normalizePrometheusVersion(item.prometheus_version) ===
+            selectedPrometheusVersion &&
+          matchesInspectionKeyword(item)
+      ),
+    [items, matchesInspectionKeyword, selectedPrometheusVersion]
+  );
+  const filteredCommonItems = useMemo(
+    () =>
+      items.filter(
+        (item) =>
+          !isPromqlType(item.check_type) &&
+          matchesInspectionKeyword(item)
+      ),
+    [items, matchesInspectionKeyword]
+  );
+  const filteredInspectionItems = useMemo(
+    () => [...filteredPromqlItems, ...filteredCommonItems],
+    [filteredPromqlItems, filteredCommonItems]
+  );
 
   const totalInspectionPages = useMemo(
     () =>
@@ -2451,6 +2471,25 @@ const ClusterDetailView = ({
     const start = (itemPage - 1) * itemPageSize;
     return filteredInspectionItems.slice(start, start + itemPageSize);
   }, [filteredInspectionItems, itemPage, itemPageSize]);
+  const pagedPromqlItems = useMemo(
+    () => pagedInspectionItems.filter((item) => isPromqlType(item.check_type)),
+    [pagedInspectionItems]
+  );
+  const pagedCommonItems = useMemo(
+    () =>
+      pagedInspectionItems.filter((item) => !isPromqlType(item.check_type)),
+    [pagedInspectionItems]
+  );
+  const versionHint = useMemo(() => {
+    if (filteredPromqlItems.length === 0 && filteredCommonItems.length > 0) {
+      return `当前 Prometheus 版本 ${selectedPrometheusVersion} 暂无 PromQL 巡检项，以下为通用巡检项。`;
+    }
+    return "Prometheus 版本仅影响 PromQL 巡检项，命令行/其他类型始终可用。";
+  }, [
+    filteredCommonItems.length,
+    filteredPromqlItems.length,
+    selectedPrometheusVersion,
+  ]);
 
   const statusMeta = useMemo(() => {
     if (!cluster) {
@@ -2815,6 +2854,12 @@ const ClusterDetailView = ({
               </button>
             </div>
           </div>
+          <div className="inspection-version-hint">
+            <span>{versionHint}</span>
+            <span className="inspection-version-counts">
+              PromQL 巡检项（{selectedPrometheusVersion}）{filteredPromqlItems.length} 条 · 通用巡检项 {filteredCommonItems.length} 条
+            </span>
+          </div>
           {items.length === 0 ? (
             <ul className="item-list">
               <li className="placeholder">暂无巡检项，请在设置中添加。</li>
@@ -2825,25 +2870,74 @@ const ClusterDetailView = ({
             </ul>
           ) : (
             <>
-              <ul className="item-list">
-                {pagedInspectionItems.map((item) => (
-                  <li key={item.id}>
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.includes(item.id)}
-                        onChange={() => handleToggleItem(item.id)}
-                      />
-                      <div>
-                        <div className="item-name">{item.name}</div>
-                        <div className="item-desc">
-                          {item.description || "未提供描述"}
-                        </div>
-                      </div>
-                    </label>
-                  </li>
-                ))}
-              </ul>
+              {pagedPromqlItems.length > 0 && (
+                <div className="inspection-item-group">
+                  <div className="inspection-item-group-title">
+                    <span>
+                      PromQL 巡检项（Prometheus 版本：{selectedPrometheusVersion}）
+                    </span>
+                    <span className="group-count">
+                      {filteredPromqlItems.length} 条
+                    </span>
+                  </div>
+                  <ul className="item-list">
+                    {pagedPromqlItems.map((item) => (
+                      <li key={item.id}>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.includes(item.id)}
+                            onChange={() => handleToggleItem(item.id)}
+                          />
+                          <div>
+                            <div className="item-title-row">
+                              <div className="item-name">{item.name}</div>
+                              <span className="item-tag promql">
+                                PromQL · {normalizePrometheusVersion(item.prometheus_version)}
+                              </span>
+                            </div>
+                            <div className="item-desc">
+                              {item.description || "未提供描述"}
+                            </div>
+                          </div>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {pagedCommonItems.length > 0 && (
+                <div className="inspection-item-group">
+                  <div className="inspection-item-group-title">
+                    <span>通用巡检项（与 Prometheus 无关）</span>
+                    <span className="group-count">
+                      {filteredCommonItems.length} 条
+                    </span>
+                  </div>
+                  <ul className="item-list">
+                    {pagedCommonItems.map((item) => (
+                      <li key={item.id}>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.includes(item.id)}
+                            onChange={() => handleToggleItem(item.id)}
+                          />
+                          <div>
+                            <div className="item-title-row">
+                              <div className="item-name">{item.name}</div>
+                              <span className="item-tag neutral">通用</span>
+                            </div>
+                            <div className="item-desc">
+                              {item.description || "未提供描述"}
+                            </div>
+                          </div>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div className="history-pagination-controls inspection-items-pagination">
                 <label className="page-size-control">
                   每页
