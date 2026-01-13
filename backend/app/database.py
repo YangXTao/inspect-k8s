@@ -183,6 +183,22 @@ def _ensure_inspection_schema() -> None:
     existing_columns = {column["name"] for column in inspector.get_columns("inspection_items")}
     dialect = engine.dialect.name
     statements: list[str] = []
+    if dialect != "sqlite":
+        unique_index_names: set[str] = set()
+        for constraint in inspector.get_unique_constraints("inspection_items"):
+            if constraint.get("column_names") == ["name"] and constraint.get("name"):
+                unique_index_names.add(constraint["name"])
+        for index in inspector.get_indexes("inspection_items"):
+            if (
+                index.get("unique")
+                and index.get("column_names") == ["name"]
+                and index.get("name")
+            ):
+                unique_index_names.add(index["name"])
+        for index_name in sorted(unique_index_names):
+            statements.append(
+                f"ALTER TABLE inspection_items DROP INDEX {index_name}"
+            )
 
     if "config_json" not in existing_columns:
         column_type = "TEXT"
@@ -230,12 +246,22 @@ def _ensure_inspection_schema() -> None:
             "ALTER TABLE inspection_items MODIFY is_archived TINYINT(1) NOT NULL DEFAULT 0"
         )
 
-    if not statements:
+    if statements:
+        with engine.begin() as connection:
+            for statement in statements:
+                connection.execute(text(statement))
+
+    if dialect == "sqlite":
+        if _sqlite_inspection_items_has_unique_name():
+            refreshed_columns = {
+                column["name"]
+                for column in inspect(engine).get_columns("inspection_items")
+            }
+            _rebuild_sqlite_inspection_items_table(refreshed_columns)
         return
 
-    with engine.begin() as connection:
-        for statement in statements:
-            connection.execute(text(statement))
+    if not statements:
+        return
 
 
 def _ensure_inspection_runs_schema() -> None:
@@ -395,6 +421,106 @@ def _ensure_inspection_results_schema() -> None:
                 "END"
             )
         )
+
+def _sqlite_inspection_items_has_unique_name() -> bool:
+    if engine.dialect.name != "sqlite":
+        return False
+    with engine.begin() as connection:
+        indexes = connection.execute(
+            text("PRAGMA index_list('inspection_items')")
+        ).fetchall()
+        for row in indexes:
+            mapping = row._mapping if hasattr(row, "_mapping") else row
+            index_name = mapping[1]
+            is_unique = mapping[2]
+            if not is_unique:
+                continue
+            columns = connection.execute(
+                text(f"PRAGMA index_info('{index_name}')")
+            ).fetchall()
+            column_names = []
+            for column in columns:
+                column_mapping = (
+                    column._mapping if hasattr(column, "_mapping") else column
+                )
+                column_names.append(column_mapping[2])
+            if column_names == ["name"]:
+                return True
+    return False
+
+
+def _rebuild_sqlite_inspection_items_table(existing_columns: set[str]) -> None:
+    def _column_or_default(column: str, default_sql: str) -> str:
+        return column if column in existing_columns else default_sql
+
+    with engine.begin() as connection:
+        connection.execute(text("PRAGMA foreign_keys=OFF"))
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS inspection_items_tmp (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    description TEXT NULL,
+                    check_type TEXT NOT NULL DEFAULT 'custom',
+                    prometheus_version TEXT NOT NULL DEFAULT '3.2',
+                    config_json TEXT NULL,
+                    is_archived INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+        )
+
+        name_expr = _column_or_default("name", "''")
+        description_expr = _column_or_default("description", "NULL")
+        check_type_expr = _column_or_default("check_type", "'custom'")
+        prom_expr = _column_or_default("prometheus_version", "'3.2'")
+        config_expr = _column_or_default("config_json", "NULL")
+        archived_expr = _column_or_default("is_archived", "0")
+        created_expr = _column_or_default("created_at", "CURRENT_TIMESTAMP")
+        updated_expr = _column_or_default("updated_at", "CURRENT_TIMESTAMP")
+
+        connection.execute(
+            text(
+                f"""
+                INSERT INTO inspection_items_tmp (
+                    id,
+                    name,
+                    description,
+                    check_type,
+                    prometheus_version,
+                    config_json,
+                    is_archived,
+                    created_at,
+                    updated_at
+                )
+                SELECT
+                    id,
+                    {name_expr},
+                    {description_expr},
+                    {check_type_expr},
+                    {prom_expr},
+                    {config_expr},
+                    {archived_expr},
+                    {created_expr},
+                    {updated_expr}
+                FROM inspection_items
+                """
+            )
+        )
+        connection.execute(text("DROP TABLE inspection_items"))
+        connection.execute(
+            text("ALTER TABLE inspection_items_tmp RENAME TO inspection_items")
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_inspection_items_name "
+                "ON inspection_items(name)"
+            )
+        )
+        connection.execute(text("PRAGMA foreign_keys=ON"))
 
 
 def _rebuild_sqlite_inspection_results_table(existing_columns: set[str]) -> None:

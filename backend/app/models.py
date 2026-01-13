@@ -67,7 +67,7 @@ class InspectionItem(Base):
     __tablename__ = "inspection_items"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), unique=True, nullable=False)
+    name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     check_type = Column(String(50), nullable=False, default="custom")
     prometheus_version = Column(String(20), nullable=False, default="3.2")

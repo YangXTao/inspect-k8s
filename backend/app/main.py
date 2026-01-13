@@ -834,6 +834,47 @@ def _normalize_prometheus_url(value: Optional[str]) -> Optional[str]:
     return trimmed.rstrip("/")
 
 
+def _is_promql_check_type(check_type: Optional[str]) -> bool:
+    return (check_type or "").strip() == "promql"
+
+
+def _normalize_prometheus_version(value: Optional[str]) -> str:
+    if value is None:
+        return "3.2"
+    trimmed = str(value).strip()
+    return trimmed or "3.2"
+
+
+def _inspection_item_name_conflict(
+    existing_items: Iterable[models.InspectionItem],
+    *,
+    name: str,
+    check_type: Optional[str],
+    prometheus_version: Optional[str],
+    exclude_id: Optional[int] = None,
+) -> Optional[str]:
+    trimmed_name = name.strip()
+    new_is_promql = _is_promql_check_type(check_type)
+    new_version = (
+        _normalize_prometheus_version(prometheus_version) if new_is_promql else None
+    )
+    for item in existing_items:
+        if exclude_id is not None and item.id == exclude_id:
+            continue
+        if (item.name or "").strip() != trimmed_name:
+            continue
+        existing_is_promql = _is_promql_check_type(item.check_type)
+        if new_is_promql and existing_is_promql:
+            existing_version = _normalize_prometheus_version(item.prometheus_version)
+            if existing_version == new_version:
+                return (
+                    f"已存在同名同版本的 PromQL 巡检项（{new_version}）。"
+                )
+            continue
+        return "已存在同名巡检项，非 PromQL 类型不支持重名。"
+    return None
+
+
 def _sync_cluster_prometheus_to_agents(
     db: Session, cluster: models.ClusterConfig
 ) -> None:
@@ -1829,9 +1870,14 @@ async def import_inspection_items(
     if not items_data:
         raise HTTPException(status_code=400, detail="导入文件中没有巡检项数据")
 
-    validated_items: List[tuple[str, schemas.InspectionItemCreate]] = []
-    seen_names: set[str] = set()
-    duplicates: set[str] = set()
+    validated_items: List[
+        tuple[str, Optional[str], bool, schemas.InspectionItemCreate]
+    ] = []
+    seen_keys: set[tuple[str, Optional[str], bool]] = set()
+    seen_promql_names: set[str] = set()
+    seen_non_promql_names: set[str] = set()
+    duplicate_keys: set[str] = set()
+    mixed_name_conflicts: set[str] = set()
 
     for index, item in enumerate(items_data, start=1):
         if not isinstance(item, dict):
@@ -1859,32 +1905,108 @@ async def import_inspection_items(
                 status_code=400,
                 detail=f"第 {index} 个巡检项名称不能为空",
             )
-        if trimmed_name in seen_names:
-            duplicates.add(trimmed_name)
-        seen_names.add(trimmed_name)
-        validated_items.append((trimmed_name, validated))
+        is_promql = _is_promql_check_type(validated.check_type)
+        resolved_version = (
+            _normalize_prometheus_version(validated.prometheus_version)
+            if is_promql
+            else None
+        )
+        if is_promql:
+            if trimmed_name in seen_non_promql_names:
+                mixed_name_conflicts.add(trimmed_name)
+            seen_promql_names.add(trimmed_name)
+            key = (trimmed_name, resolved_version, True)
+            key_label = f"{trimmed_name}({resolved_version})"
+            validated.prometheus_version = resolved_version
+        else:
+            if trimmed_name in seen_promql_names or trimmed_name in seen_non_promql_names:
+                mixed_name_conflicts.add(trimmed_name)
+            seen_non_promql_names.add(trimmed_name)
+            key = (trimmed_name, None, False)
+            key_label = trimmed_name
+        if key in seen_keys:
+            duplicate_keys.add(key_label)
+        seen_keys.add(key)
+        validated_items.append((trimmed_name, resolved_version, is_promql, validated))
 
-    if duplicates:
-        duplicate_list = "、".join(sorted(duplicates))
+    if mixed_name_conflicts or duplicate_keys:
+        messages: list[str] = []
+        if mixed_name_conflicts:
+            conflict_list = "、".join(sorted(mixed_name_conflicts))
+            messages.append(f"PromQL 与非 PromQL 不能同名：{conflict_list}")
+        if duplicate_keys:
+            duplicate_list = "、".join(sorted(duplicate_keys))
+            messages.append(f"存在同名同版本的重复项：{duplicate_list}")
         raise HTTPException(
             status_code=400,
-            detail=f"导入文件中存在重复的巡检项名称：{duplicate_list}",
+            detail="；".join(messages),
         )
 
-    lookup_names = [name for name, _ in validated_items]
+    lookup_names = [name for name, _, _, _ in validated_items]
     existing_items = (
         db.query(models.InspectionItem)
         .filter(models.InspectionItem.name.in_(lookup_names))
         .all()
     )
-    existing_map = {item.name.strip(): item for item in existing_items}
+    existing_by_name: dict[str, list[models.InspectionItem]] = {}
+    for item in existing_items:
+        key_name = (item.name or "").strip()
+        if not key_name:
+            continue
+        existing_by_name.setdefault(key_name, []).append(item)
+
+    conflict_names: set[str] = set()
+    for name, _, is_promql, _ in validated_items:
+        candidates = existing_by_name.get(name, [])
+        if not candidates:
+            continue
+        has_non_promql = any(
+            not _is_promql_check_type(item.check_type) for item in candidates
+        )
+        has_promql = any(
+            _is_promql_check_type(item.check_type) for item in candidates
+        )
+        if is_promql and has_non_promql:
+            conflict_names.add(name)
+        if not is_promql and has_promql:
+            conflict_names.add(name)
+        if is_promql and has_non_promql and has_promql:
+            conflict_names.add(name)
+    if conflict_names:
+        conflict_list = "、".join(sorted(conflict_names))
+        raise HTTPException(
+            status_code=400,
+            detail=f"已有同名但类型冲突（PromQL 与非 PromQL 不可同名）：{conflict_list}",
+        )
 
     created_items: List[models.InspectionItem] = []
     updated_items: List[models.InspectionItem] = []
 
-    for name, payload in validated_items:
+    for name, resolved_version, is_promql, payload in validated_items:
         config = payload.config if isinstance(payload.config, dict) else None
-        existing = existing_map.get(name)
+        candidates = existing_by_name.get(name, [])
+        existing = None
+        if is_promql:
+            existing = next(
+                (
+                    item
+                    for item in candidates
+                    if _is_promql_check_type(item.check_type)
+                    and _normalize_prometheus_version(item.prometheus_version)
+                    == resolved_version
+                ),
+                None,
+            )
+        else:
+            existing = next(
+                (
+                    item
+                    for item in candidates
+                    if not _is_promql_check_type(item.check_type)
+                ),
+                None,
+            )
+
         if existing:
             existing.name = name
             existing.description = payload.description
@@ -1940,17 +2062,34 @@ async def import_inspection_items(
 def create_inspection_item(
     item_in: schemas.InspectionItemCreate, db: Session = Depends(get_db)
 ):
-    existing = (
-        db.query(models.InspectionItem)
-        .filter(models.InspectionItem.name == item_in.name)
-        .first()
+    trimmed_name = (item_in.name or "").strip()
+    if not trimmed_name:
+        raise HTTPException(status_code=400, detail="巡检项名称不能为空。")
+    is_promql = _is_promql_check_type(item_in.check_type)
+    normalized_version = (
+        _normalize_prometheus_version(item_in.prometheus_version)
+        if is_promql
+        else item_in.prometheus_version
     )
-    if existing:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Inspection item with name '{item_in.name}' already exists.",
-        )
-    return crud.create_inspection_item(db, item_in)
+    existing_items = (
+        db.query(models.InspectionItem)
+        .filter(models.InspectionItem.name == trimmed_name)
+        .all()
+    )
+    conflict_message = _inspection_item_name_conflict(
+        existing_items,
+        name=trimmed_name,
+        check_type=item_in.check_type,
+        prometheus_version=normalized_version,
+    )
+    if conflict_message:
+        raise HTTPException(status_code=400, detail=conflict_message)
+    payload = item_in.model_dump()
+    payload["name"] = trimmed_name
+    if is_promql:
+        payload["prometheus_version"] = normalized_version
+    sanitized = schemas.InspectionItemCreate.model_validate(payload)
+    return crud.create_inspection_item(db, sanitized)
 
 
 @app.put("/inspection-items/{item_id}", response_model=schemas.InspectionItemOut)
@@ -1962,7 +2101,44 @@ def update_inspection_item(
     item = crud.get_inspection_item(db, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Inspection item not found.")
-    return crud.update_inspection_item(db, item, item_in)
+    next_name = item_in.name if item_in.name is not None else item.name
+    next_check_type = (
+        item_in.check_type if item_in.check_type is not None else item.check_type
+    )
+    next_version = (
+        item_in.prometheus_version
+        if item_in.prometheus_version is not None
+        else item.prometheus_version
+    )
+    trimmed_name = (next_name or "").strip()
+    if not trimmed_name:
+        raise HTTPException(status_code=400, detail="巡检项名称不能为空。")
+    normalized_version = (
+        _normalize_prometheus_version(next_version)
+        if _is_promql_check_type(next_check_type)
+        else None
+    )
+    existing_items = (
+        db.query(models.InspectionItem)
+        .filter(models.InspectionItem.name == trimmed_name)
+        .all()
+    )
+    conflict_message = _inspection_item_name_conflict(
+        existing_items,
+        name=trimmed_name,
+        check_type=next_check_type,
+        prometheus_version=normalized_version,
+        exclude_id=item.id,
+    )
+    if conflict_message:
+        raise HTTPException(status_code=400, detail=conflict_message)
+    payload = item_in.model_dump(exclude_unset=True)
+    if "name" in payload:
+        payload["name"] = trimmed_name
+    if _is_promql_check_type(next_check_type):
+        payload["prometheus_version"] = normalized_version
+    sanitized = schemas.InspectionItemUpdate.model_validate(payload)
+    return crud.update_inspection_item(db, item, sanitized)
 
 
 @app.delete("/inspection-items/{item_id}", status_code=204)
