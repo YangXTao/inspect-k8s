@@ -4167,7 +4167,7 @@ const InspectionSettingsPanel = ({
                   <thead>
                     <tr>
                       <th>名称</th>
-                      <th>Prometheus 版本</th>
+                      <th className="th-nowrap">Prometheus 版本</th>
                       <th>类型</th>
                       <th>更新时间</th>
                       <th>操作</th>
