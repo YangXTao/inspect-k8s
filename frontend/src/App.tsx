@@ -2490,6 +2490,8 @@ const ClusterDetailView = ({
     filteredPromqlItems.length,
     selectedPrometheusVersion,
   ]);
+  const promqlCountLabel = `PromQL 巡检项（${selectedPrometheusVersion}）${filteredPromqlItems.length} 条`;
+  const commonCountLabel = `通用巡检项 ${filteredCommonItems.length} 条`;
 
   const statusMeta = useMemo(() => {
     if (!cluster) {
@@ -2855,9 +2857,9 @@ const ClusterDetailView = ({
             </div>
           </div>
           <div className="inspection-version-hint">
-            <span>{versionHint}</span>
+            <span className="inspection-version-hint-text">{versionHint}</span>
             <span className="inspection-version-counts">
-              PromQL 巡检项（{selectedPrometheusVersion}）{filteredPromqlItems.length} 条 · 通用巡检项 {filteredCommonItems.length} 条
+              {promqlCountLabel} · {commonCountLabel}
             </span>
           </div>
           {items.length === 0 ? (
@@ -2873,9 +2875,7 @@ const ClusterDetailView = ({
               {pagedPromqlItems.length > 0 && (
                 <div className="inspection-item-group">
                   <div className="inspection-item-group-title">
-                    <span>
-                      PromQL 巡检项（Prometheus 版本：{selectedPrometheusVersion}）
-                    </span>
+                    <span className="inspection-group-title-text">PromQL 巡检项</span>
                     <span className="group-count">
                       {filteredPromqlItems.length} 条
                     </span>
@@ -2909,7 +2909,7 @@ const ClusterDetailView = ({
               {pagedCommonItems.length > 0 && (
                 <div className="inspection-item-group">
                   <div className="inspection-item-group-title">
-                    <span>通用巡检项（与 Prometheus 无关）</span>
+                    <span className="inspection-group-title-text">通用巡检项</span>
                     <span className="group-count">
                       {filteredCommonItems.length} 条
                     </span>
