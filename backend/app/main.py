@@ -1889,6 +1889,7 @@ async def import_inspection_items(
             existing.name = name
             existing.description = payload.description
             existing.check_type = payload.check_type
+            existing.prometheus_version = payload.prometheus_version
             existing.is_archived = False
             existing.set_config(config)
             existing.updated_at = datetime.utcnow()
@@ -1899,6 +1900,7 @@ async def import_inspection_items(
                 name=name,
                 description=payload.description,
                 check_type=payload.check_type,
+                prometheus_version=payload.prometheus_version,
                 is_archived=False,
             )
             item.set_config(config)
