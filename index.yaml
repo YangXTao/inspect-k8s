@@ -2,8 +2,18 @@ apiVersion: v1
 entries:
   inspection-center:
   - apiVersion: v2
+    appVersion: 0.3.2
+    created: "2026-01-13T08:18:46.120351981Z"
+    description: Helm chart for the Kubernetes 巡检中心应用
+    digest: 07e81b099bc613df60b82a0c374c450516099806f7ff316c26fb33a4e30bc601
+    name: inspection-center
+    type: application
+    urls:
+    - https://yangxtao.github.io/inspect-k8s/inspection-center-0.3.2.tgz
+    version: 0.3.2
+  - apiVersion: v2
     appVersion: 0.3.1
-    created: "2026-01-13T07:42:08.511580294Z"
+    created: "2026-01-13T08:18:46.119338938Z"
     description: Helm chart for the Kubernetes 巡检中心应用
     digest: eba220a06d1d295185707b590eef621a673d1926a74e61bee68976b5e9ebaad7
     name: inspection-center
@@ -13,7 +23,7 @@ entries:
     version: 0.3.1
   - apiVersion: v2
     appVersion: 0.1.4
-    created: "2026-01-13T07:42:08.511004757Z"
+    created: "2026-01-13T08:18:46.118373324Z"
     description: Helm chart for the Kubernetes 巡检中心应用（后端 + 前端）
     digest: 3a0583126f8ce0712f8809659b42d71667a3c9c9772e49649a6f130db5cc7bf4
     name: inspection-center
@@ -21,4 +31,4 @@ entries:
     urls:
     - https://yangxtao.github.io/inspect-k8s/inspection-center-0.1.4.tgz
     version: 0.1.4
-generated: "2026-01-13T07:42:08.510240313Z"
+generated: "2026-01-13T08:18:46.117550942Z"
