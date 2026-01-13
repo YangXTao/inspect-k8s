@@ -1889,6 +1889,53 @@ th {
   color: #64748b;
 }
 
+.version-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.version-manager-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.version-manager-label {
+  font-size: 12px;
+  color: #64748b;
+  min-width: 84px;
+}
+
+.version-manager-list .chip {
+  font-size: 12px;
+}
+
+.version-manager-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.version-manager-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.version-manager-form input {
+  border: 1px solid #cbd5f5;
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 13px;
+  background: #fff;
+  color: #1e293b;
+}
+
 .agent-inline-form {
   background: rgba(255, 255, 255, 0.15);
   border-radius: 12px;
