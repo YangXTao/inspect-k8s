@@ -1912,6 +1912,31 @@ th {
   font-size: 12px;
 }
 
+.version-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.version-remove {
+  border-radius: 999px;
+  border: 1px solid #fecaca;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.version-remove:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.version-remove:hover:not(:disabled) {
+  background: #fecaca;
+}
+
 .version-manager-form {
   display: flex;
   align-items: flex-end;
