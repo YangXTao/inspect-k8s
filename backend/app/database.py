@@ -194,12 +194,12 @@ def _ensure_inspection_schema() -> None:
         if dialect == "sqlite":
             statements.append(
                 "ALTER TABLE inspection_items "
-                "ADD COLUMN prometheus_version TEXT NOT NULL DEFAULT '3.0'"
+                "ADD COLUMN prometheus_version TEXT NOT NULL DEFAULT '3.2'"
             )
         else:
             statements.append(
                 "ALTER TABLE inspection_items "
-                "ADD COLUMN prometheus_version VARCHAR(20) NOT NULL DEFAULT '3.0'"
+                "ADD COLUMN prometheus_version VARCHAR(20) NOT NULL DEFAULT '3.2'"
             )
 
     if "is_archived" not in existing_columns:
@@ -219,7 +219,7 @@ def _ensure_inspection_schema() -> None:
                 "ALTER TABLE inspection_items MODIFY name VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
                 "ALTER TABLE inspection_items MODIFY description TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
                 "ALTER TABLE inspection_items MODIFY check_type VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
-                "ALTER TABLE inspection_items MODIFY prometheus_version VARCHAR(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '3.0'",
+                "ALTER TABLE inspection_items MODIFY prometheus_version VARCHAR(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '3.2'",
             ]
         )
         if "config_json" in existing_columns:
@@ -270,12 +270,12 @@ def _ensure_inspection_runs_schema() -> None:
         if dialect == "sqlite":
             statements.append(
                 "ALTER TABLE inspection_runs "
-                "ADD COLUMN prometheus_version TEXT NOT NULL DEFAULT '3.0'"
+                "ADD COLUMN prometheus_version TEXT NOT NULL DEFAULT '3.2'"
             )
         else:
             statements.append(
                 "ALTER TABLE inspection_runs "
-                "ADD COLUMN prometheus_version VARCHAR(20) NOT NULL DEFAULT '3.0'"
+                "ADD COLUMN prometheus_version VARCHAR(20) NOT NULL DEFAULT '3.2'"
             )
     if "executor" not in existing_columns:
         column_type = "TEXT" if dialect == "sqlite" else "VARCHAR(20)"

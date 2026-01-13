@@ -144,7 +144,7 @@ class InspectionItemBase(BaseModel):
     name: str = Field(..., max_length=100)
     description: Optional[str] = None
     check_type: str = Field(..., max_length=50)
-    prometheus_version: str = Field("3.0", max_length=20)
+    prometheus_version: str = Field("3.2", max_length=20)
     config: Optional[Dict[str, Any]] = None
 
 
@@ -184,7 +184,7 @@ class InspectionRunBase(BaseModel):
 class InspectionRunCreate(InspectionRunBase):
     item_ids: List[int]
     cluster_id: int
-    prometheus_version: Optional[str] = Field("3.0", max_length=20)
+    prometheus_version: Optional[str] = Field("3.2", max_length=20)
 
 
 class InspectionRunOut(BaseModel):
