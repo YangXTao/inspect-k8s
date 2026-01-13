@@ -1225,18 +1225,23 @@ const OverviewView = ({
     (page: number, options?: { replace?: boolean }) => {
       const boundedPage = Math.max(page, 1);
       setCurrentPage(boundedPage);
-      const nextParams = new URLSearchParams(searchParams);
-      if (boundedPage <= 1) {
-        nextParams.delete("page");
-      } else {
-        nextParams.set("page", String(boundedPage));
-      }
-      if (nextParams.toString() === searchParams.toString()) {
-        return;
-      }
-      setSearchParams(nextParams, { replace: options?.replace ?? false });
+      setSearchParams(
+        (prev) => {
+          const nextParams = new URLSearchParams(prev);
+          if (boundedPage <= 1) {
+            nextParams.delete("page");
+          } else {
+            nextParams.set("page", String(boundedPage));
+          }
+          if (nextParams.toString() === prev.toString()) {
+            return prev;
+          }
+          return nextParams;
+        },
+        { replace: options?.replace ?? false }
+      );
     },
-    [searchParams, setSearchParams]
+    [setSearchParams]
   );
 
   useEffect(() => {
