@@ -972,7 +972,7 @@ body {
 
 .inspection-version-counts {
   color: inherit;
-  font-weight: 400;
+  font-weight: 600;
   white-space: nowrap;
   justify-self: end;
 }
@@ -988,7 +988,7 @@ body {
   gap: 8px;
   padding: 2px 6px;
   font-size: 13px;
-  font-weight: 400;
+  font-weight: 600;
   color: #64748b;
 }
 
