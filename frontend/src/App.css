@@ -1010,6 +1010,10 @@ body {
   cursor: pointer;
 }
 
+.th-nowrap {
+  white-space: nowrap;
+}
+
 .item-title-row {
   display: flex;
   align-items: center;
