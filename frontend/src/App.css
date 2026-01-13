@@ -956,8 +956,8 @@ body {
   border-radius: 10px;
   border: 1px dashed #cbd5f5;
   background: #f8fafc;
-  font-size: 12px;
-  color: #475569;
+  font-size: 13px;
+  color: #64748b;
   display: flex;
   justify-content: space-between;
   gap: 10px;
@@ -965,13 +965,13 @@ body {
 }
 
 .inspection-version-hint-text {
-  font-weight: 600;
+  font-weight: 400;
   color: inherit;
 }
 
 .inspection-version-counts {
   color: inherit;
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .inspection-item-group {
@@ -984,13 +984,13 @@ body {
   justify-content: space-between;
   gap: 8px;
   padding: 2px 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #475569;
+  font-size: 13px;
+  font-weight: 400;
+  color: #64748b;
 }
 
 .inspection-group-title-text {
-  font-weight: 600;
+  font-weight: 400;
   color: inherit;
 }
 
