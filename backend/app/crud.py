@@ -342,7 +342,7 @@ def create_inspection_run(
     total_items: int = 0,
     processed_items: int = 0,
     plan_json: Optional[str] = None,
-    prometheus_version: str = "3.0",
+    prometheus_version: str = "3.2",
     executor: str = "server",
     agent_status: Optional[str] = None,
     agent_id: Optional[int] = None,

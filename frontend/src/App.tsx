@@ -127,7 +127,7 @@ const DEFAULT_CLUSTER_PAGE_SIZE = CLUSTER_PAGE_SIZE_OPTIONS[0];
 const RUN_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const CLUSTER_ITEM_PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
 const RESULT_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
-const DEFAULT_PROMETHEUS_VERSION = "3.0";
+const DEFAULT_PROMETHEUS_VERSION = "3.2";
 const PROMETHEUS_VERSION_OPTIONS = [
   "1.8",
   "2.55",
@@ -4036,15 +4036,17 @@ const InspectionSettingsPanel = ({
 
   const currentSummary = editingItem
     ? `正在编辑：${editingItem.name}`
-    : "新增巡检项";
+    : "";
   const promqlSeverityLabel = promqlSeverity === "critical" ? "严重" : "告警";
+  const showVersionColumn =
+    itemFilterType === "all" || itemFilterType === "promql";
 
   return (
     <div className="inspection-settings-panel">
       <div className="settings-header">
         <div>
           <h3>巡检项管理</h3>
-          <p>{currentSummary}</p>
+          {currentSummary && <p>{currentSummary}</p>}
         </div>
         <div className="settings-actions">
           <button
@@ -4167,7 +4169,9 @@ const InspectionSettingsPanel = ({
                   <thead>
                     <tr>
                       <th>名称</th>
-                      <th className="th-nowrap">Prometheus 版本</th>
+                      {showVersionColumn && (
+                        <th className="th-nowrap">Prometheus 版本</th>
+                      )}
                       <th>类型</th>
                       <th>更新时间</th>
                       <th>操作</th>
@@ -4186,11 +4190,15 @@ const InspectionSettingsPanel = ({
                             <span>{item.name}</span>
                           </label>
                         </td>
-                        <td>
-                          {isPromqlType(item.check_type)
-                            ? normalizePrometheusVersion(item.prometheus_version)
-                            : "-"}
-                        </td>
+                        {showVersionColumn && (
+                          <td>
+                            {isPromqlType(item.check_type)
+                              ? normalizePrometheusVersion(
+                                  item.prometheus_version
+                                )
+                              : "-"}
+                          </td>
+                        )}
                         <td>{item.check_type}</td>
                         <td>{formatDate(item.updated_at)}</td>
                         <td className="actions">

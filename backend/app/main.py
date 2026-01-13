@@ -270,7 +270,7 @@ def _enqueue_connection_test_run(
         total_items=1,
         processed_items=0,
         plan_json=plan_json,
-        prometheus_version="3.0",
+        prometheus_version="3.2",
         executor="agent",
         agent_status="queued",
         agent_id=agent.id,
@@ -2075,7 +2075,7 @@ def trigger_inspection(
     agent_id = agent.id
     agent_status: Optional[str] = "queued"
 
-    prometheus_version = run_in.prometheus_version or "3.0"
+    prometheus_version = run_in.prometheus_version or "3.2"
     run = crud.create_inspection_run(
         db,
         operator=run_in.operator,

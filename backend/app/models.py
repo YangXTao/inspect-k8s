@@ -70,7 +70,7 @@ class InspectionItem(Base):
     name = Column(String(100), unique=True, nullable=False)
     description = Column(Text, nullable=True)
     check_type = Column(String(50), nullable=False, default="custom")
-    prometheus_version = Column(String(20), nullable=False, default="3.0")
+    prometheus_version = Column(String(20), nullable=False, default="3.2")
     config_json = Column(Text, nullable=True)
     is_archived = Column(Boolean, nullable=False, default=False)
 
@@ -116,7 +116,7 @@ class InspectionRun(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     completed_at = Column(DateTime, nullable=True)
     plan_json = Column(Text, nullable=True)
-    prometheus_version = Column(String(20), nullable=False, default="3.0")
+    prometheus_version = Column(String(20), nullable=False, default="3.2")
     executor = Column(String(20), nullable=False, default="server")
     agent_status = Column(String(20), nullable=True)
     agent_id = Column(
