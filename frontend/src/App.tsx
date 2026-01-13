@@ -2416,6 +2416,12 @@ const ClusterDetailView = ({
   }, [resolvedClusterId]);
 
   useEffect(() => {
+    if (!prometheusVersionOptions.includes(prometheusVersion)) {
+      setPrometheusVersion(DEFAULT_PROMETHEUS_VERSION);
+    }
+  }, [prometheusVersionOptions, prometheusVersion]);
+
+  useEffect(() => {
     setSelectedIds(() => []);
   }, [prometheusVersion, setSelectedIds]);
 
@@ -3694,7 +3700,6 @@ interface InspectionSettingsPanelProps {
   onDeleteMany: (ids: number[]) => void;
   onExport: (format: "json" | "yaml") => Promise<void> | void;
   onImport: (file: File) => Promise<void>;
-  onAddPrometheusVersion: (value: string) => { ok: boolean; message?: string };
 }
 
 const InspectionSettingsPanel = ({
@@ -3709,7 +3714,6 @@ const InspectionSettingsPanel = ({
   onDeleteMany,
   onExport,
   onImport,
-  onAddPrometheusVersion,
 }: InspectionSettingsPanelProps) => {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [editingItem, setEditingItem] = useState<InspectionItem | null>(null);
@@ -3733,8 +3737,6 @@ const InspectionSettingsPanel = ({
   const [promqlDescribe, setPromqlDescribe] = useState("");
   const [configText, setConfigText] = useState("{}");
   const [formError, setFormError] = useState<string | null>(null);
-  const [versionInput, setVersionInput] = useState("");
-  const [versionError, setVersionError] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [itemFilterType, setItemFilterType] = useState<
     "all" | "command" | "promql" | "other"
@@ -3964,16 +3966,6 @@ const InspectionSettingsPanel = ({
     resetForm();
   };
 
-  const handleAddVersion = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const result = onAddPrometheusVersion(versionInput);
-    if (!result.ok) {
-      setVersionError(result.message ?? "版本添加失败");
-      return;
-    }
-    setVersionInput("");
-    setVersionError(null);
-  };
 
   const toggleSelection = (id: number) => {
     setSelectedIds((prev) =>
@@ -4101,6 +4093,15 @@ const InspectionSettingsPanel = ({
   }, [itemFilterType, itemFilterVersion]);
 
   useEffect(() => {
+    if (
+      itemFilterVersion !== "all" &&
+      !prometheusVersionOptions.includes(itemFilterVersion)
+    ) {
+      setItemFilterVersion("all");
+    }
+  }, [itemFilterVersion, prometheusVersionOptions]);
+
+  useEffect(() => {
     setPage((prev) => Math.min(Math.max(prev, 1), totalPages));
   }, [totalPages]);
 
@@ -4168,52 +4169,6 @@ const InspectionSettingsPanel = ({
       {error && <div className="feedback error">{error}</div>}
       {formError && <div className="feedback error">{formError}</div>}
       <div className="inspection-settings-body">
-        <section className="inspection-section inspection-section-version">
-          <div className="inspection-section-header">
-            <div>
-              <h4>Prometheus 版本管理</h4>
-              <span className="inspection-section-hint">
-                用于 PromQL 巡检项的版本筛选与显示
-              </span>
-            </div>
-          </div>
-          <div className="version-manager">
-            <div className="version-manager-row">
-              <span className="version-manager-label">当前默认版本</span>
-              <span className="chip">{DEFAULT_PROMETHEUS_VERSION}</span>
-            </div>
-            <div className="version-manager-row">
-              <span className="version-manager-label">已配置版本</span>
-              <div className="chip-group version-manager-list">
-                {prometheusVersionOptions.map((version) => (
-                  <span key={version} className="chip">
-                    {version}
-                  </span>
-                ))}
-              </div>
-            </div>
-            <form className="version-manager-form" onSubmit={handleAddVersion}>
-              <label>
-                新增版本
-                <input
-                  type="text"
-                  value={versionInput}
-                  onChange={(event) => {
-                    setVersionInput(event.target.value);
-                    if (versionError) {
-                      setVersionError(null);
-                    }
-                  }}
-                  placeholder="例如：3.2"
-                />
-              </label>
-              <button type="submit" className="secondary">
-                添加版本
-              </button>
-            </form>
-            {versionError && <div className="feedback error">{versionError}</div>}
-          </div>
-        </section>
         <section className="inspection-section inspection-section-list">
           <div className="inspection-section-header">
             <div>
@@ -4614,6 +4569,147 @@ const InspectionSettingsPanel = ({
             </button>
           </div>
           </form>
+        </section>
+      </div>
+    </div>
+  );
+};
+
+interface PrometheusVersionSettingsPanelProps {
+  items: InspectionItem[];
+  versions: string[];
+  defaultVersion: string;
+  onAddVersion: (value: string) => { ok: boolean; message?: string };
+  onDeleteVersion: (value: string) => { ok: boolean; message?: string };
+}
+
+const PrometheusVersionSettingsPanel = ({
+  items,
+  versions,
+  defaultVersion,
+  onAddVersion,
+  onDeleteVersion,
+}: PrometheusVersionSettingsPanelProps) => {
+  const [versionInput, setVersionInput] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const usageMap = useMemo(() => {
+    const counts = new Map<string, number>();
+    items.forEach((item) => {
+      if (!isPromqlType(item.check_type)) {
+        return;
+      }
+      const raw = String(item.prometheus_version ?? defaultVersion).trim();
+      const resolved = raw || defaultVersion;
+      counts.set(resolved, (counts.get(resolved) ?? 0) + 1);
+    });
+    return counts;
+  }, [items, defaultVersion]);
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const result = onAddVersion(versionInput);
+    if (!result.ok) {
+      setError(result.message ?? "版本添加失败");
+      setNotice(null);
+      return;
+    }
+    setNotice(`已添加版本 ${versionInput.trim()}`);
+    setError(null);
+    setVersionInput("");
+  };
+
+  const handleDelete = (value: string) => {
+    const result = onDeleteVersion(value);
+    if (!result.ok) {
+      setError(result.message ?? "版本删除失败");
+      setNotice(null);
+      return;
+    }
+    setNotice(`已删除版本 ${value}`);
+    setError(null);
+  };
+
+  return (
+    <div className="inspection-settings-panel">
+      <div className="settings-header">
+        <div>
+          <h3>Prometheus 版本管理</h3>
+          <p>用于 PromQL 巡检项的版本筛选与显示</p>
+        </div>
+      </div>
+      {notice && <div className="feedback success">{notice}</div>}
+      {error && <div className="feedback error">{error}</div>}
+      <div className="inspection-settings-body">
+        <section className="inspection-section inspection-section-version">
+          <div className="inspection-section-header">
+            <div>
+              <h4>版本配置</h4>
+              <span className="inspection-section-hint">
+                默认版本用于未填写 Prometheus 版本的 PromQL 巡检项
+              </span>
+            </div>
+          </div>
+          <div className="version-manager">
+            <div className="version-manager-row">
+              <span className="version-manager-label">当前默认版本</span>
+              <span className="chip">{defaultVersion}</span>
+              <span className="chip muted">默认</span>
+            </div>
+            <div className="version-manager-row">
+              <span className="version-manager-label">已配置版本</span>
+              <div className="chip-group version-manager-list">
+                {versions.map((version) => {
+                  const isDefault = version === defaultVersion;
+                  const usageCount = usageMap.get(version) ?? 0;
+                  const canDelete = !isDefault && usageCount === 0;
+                  const reason = isDefault
+                    ? "默认版本不可删除"
+                    : usageCount > 0
+                      ? `该版本已被 ${usageCount} 个 PromQL 巡检项使用`
+                      : "删除版本";
+                  return (
+                    <span key={version} className="version-chip">
+                      <span className={`chip${isDefault ? " muted" : ""}`}>
+                        {version}
+                      </span>
+                      {!isDefault && (
+                        <button
+                          type="button"
+                          className="version-remove"
+                          onClick={() => handleDelete(version)}
+                          disabled={!canDelete}
+                          title={reason}
+                        >
+                          删除
+                        </button>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+            <form className="version-manager-form" onSubmit={handleSubmit}>
+              <label>
+                新增版本
+                <input
+                  type="text"
+                  value={versionInput}
+                  onChange={(event) => {
+                    setVersionInput(event.target.value);
+                    if (error) {
+                      setError(null);
+                    }
+                  }}
+                  placeholder="例如：3.2"
+                />
+              </label>
+              <button type="submit" className="secondary">
+                添加版本
+              </button>
+            </form>
+          </div>
         </section>
       </div>
     </div>
@@ -7613,6 +7709,38 @@ const hasManualKubeconfig = useMemo(
     [prometheusVersionOptions]
   );
 
+  const handleDeletePrometheusVersion = useCallback(
+    (value: string): { ok: boolean; message?: string } => {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return { ok: false, message: "版本号无效" };
+      }
+      if (trimmed === DEFAULT_PROMETHEUS_VERSION) {
+        return { ok: false, message: "默认版本不可删除" };
+      }
+      const usedCount = items.filter((item) => {
+        if (!isPromqlType(item.check_type)) {
+          return false;
+        }
+        const raw = String(item.prometheus_version ?? DEFAULT_PROMETHEUS_VERSION)
+          .trim();
+        const resolved = raw || DEFAULT_PROMETHEUS_VERSION;
+        return resolved === trimmed;
+      }).length;
+      if (usedCount > 0) {
+        return {
+          ok: false,
+          message: `该版本已被 ${usedCount} 个 PromQL 巡检项使用，无法删除`,
+        };
+      }
+      setPrometheusVersionOptions((prev) =>
+        prev.filter((version) => version !== trimmed)
+      );
+      return { ok: true };
+    },
+    [items]
+  );
+
   const deleteInspectionItemsBatch = useCallback(
     async (ids: number[], successMessage: string) => {
       setSettingsSubmitting(true);
@@ -7809,7 +7937,19 @@ const hasManualKubeconfig = useMemo(
             onDeleteMany={handleDeleteInspectionItemsBulk}
             onExport={handleExportInspectionItems}
             onImport={handleImportInspectionItems}
-            onAddPrometheusVersion={handleAddPrometheusVersion}
+          />
+        ),
+      },
+      {
+        id: "prometheus-version",
+        label: "Prometheus 版本",
+        render: () => (
+          <PrometheusVersionSettingsPanel
+            items={sortedItems}
+            versions={prometheusVersionOptions}
+            defaultVersion={DEFAULT_PROMETHEUS_VERSION}
+            onAddVersion={handleAddPrometheusVersion}
+            onDeleteVersion={handleDeletePrometheusVersion}
           />
         ),
       },
@@ -7840,6 +7980,7 @@ const hasManualKubeconfig = useMemo(
       handleImportInspectionItems,
       prometheusVersionOptions,
       handleAddPrometheusVersion,
+      handleDeletePrometheusVersion,
       licenseCapabilities,
       licenseUploading,
       licenseTextUploading,
