@@ -4631,6 +4631,16 @@ const PrometheusVersionSettingsPanel = ({
     setError(null);
   };
 
+  useEffect(() => {
+    if (!notice || typeof window === "undefined") {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setNotice(null);
+    }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
   return (
     <div className="inspection-settings-panel">
       <div className="settings-header">
