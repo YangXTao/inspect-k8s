@@ -128,19 +128,60 @@ const RUN_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const CLUSTER_ITEM_PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
 const RESULT_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const DEFAULT_PROMETHEUS_VERSION = "3.2";
-const PROMETHEUS_VERSION_OPTIONS = [
+const DEFAULT_PROMETHEUS_VERSION_OPTIONS = [
   "1.8",
   "2.55",
   ...Array.from({ length: 10 }, (_, index) => `3.${index}`),
 ];
+const PROMETHEUS_VERSION_STORAGE_KEY = "prometheusVersionOptions.v1";
 
-const normalizePrometheusVersion = (value?: string | null) => {
+const loadPrometheusVersionOptions = () => {
+  if (typeof window === "undefined") {
+    return DEFAULT_PROMETHEUS_VERSION_OPTIONS;
+  }
+  try {
+    const raw = window.localStorage.getItem(PROMETHEUS_VERSION_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_PROMETHEUS_VERSION_OPTIONS;
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return DEFAULT_PROMETHEUS_VERSION_OPTIONS;
+    }
+    const merged = [...DEFAULT_PROMETHEUS_VERSION_OPTIONS];
+    const seen = new Set(merged);
+    parsed.forEach((value) => {
+      if (typeof value !== "string") {
+        return;
+      }
+      const trimmed = value.trim();
+      if (!trimmed || seen.has(trimmed)) {
+        return;
+      }
+      seen.add(trimmed);
+      merged.push(trimmed);
+    });
+    return merged;
+  } catch {
+    return DEFAULT_PROMETHEUS_VERSION_OPTIONS;
+  }
+};
+
+const normalizePrometheusVersion = (
+  value?: string | null,
+  options: string[] = DEFAULT_PROMETHEUS_VERSION_OPTIONS
+) => {
   if (!value) {
     return DEFAULT_PROMETHEUS_VERSION;
   }
-  return PROMETHEUS_VERSION_OPTIONS.includes(value)
-    ? value
-    : DEFAULT_PROMETHEUS_VERSION;
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return DEFAULT_PROMETHEUS_VERSION;
+  }
+  if (options.includes(trimmed)) {
+    return trimmed;
+  }
+  return trimmed;
 };
 
 const isPromqlType = (value?: string | null) =>
@@ -2254,6 +2295,7 @@ interface ClusterDetailViewProps {
   clusters: ClusterConfig[];
   items: InspectionItem[];
   runs: InspectionRunListItem[];
+  prometheusVersionOptions: string[];
   selectedIds: number[];
   setSelectedIds: (updater: (prev: number[]) => number[]) => void;
   operator: string;
@@ -2284,6 +2326,7 @@ const ClusterDetailView = ({
   clusters,
   items,
   runs,
+  prometheusVersionOptions,
   selectedIds,
   setSelectedIds,
   operator,
@@ -2408,8 +2451,10 @@ const ClusterDetailView = ({
   }, [clusterRuns, clusterRunPage, clusterRunPageSize]);
 
   const inspectionKeyword = itemKeyword.trim().toLowerCase();
-  const selectedPrometheusVersion =
-    normalizePrometheusVersion(prometheusVersion);
+  const selectedPrometheusVersion = normalizePrometheusVersion(
+    prometheusVersion,
+    prometheusVersionOptions
+  );
   const matchesInspectionKeyword = useCallback(
     (item: InspectionItem) => {
       if (!inspectionKeyword) {
@@ -2426,7 +2471,10 @@ const ClusterDetailView = ({
       items.filter(
         (item) =>
           isPromqlType(item.check_type) &&
-          normalizePrometheusVersion(item.prometheus_version) ===
+          normalizePrometheusVersion(
+            item.prometheus_version,
+            prometheusVersionOptions
+          ) ===
             selectedPrometheusVersion &&
           matchesInspectionKeyword(item)
       ),
@@ -2603,9 +2651,9 @@ const ClusterDetailView = ({
     }
     void onStartInspection(
       cluster.id,
-      normalizePrometheusVersion(prometheusVersion)
+      normalizePrometheusVersion(prometheusVersion, prometheusVersionOptions)
     );
-  }, [cluster, onStartInspection, prometheusVersion]);
+  }, [cluster, onStartInspection, prometheusVersion, prometheusVersionOptions]);
 
   const handleClusterRunPageChange = useCallback(
     (offset: number) => {
@@ -2816,7 +2864,7 @@ const ClusterDetailView = ({
               value={prometheusVersion}
               onChange={(event) => setPrometheusVersion(event.target.value)}
             >
-              {PROMETHEUS_VERSION_OPTIONS.map((version) => (
+              {prometheusVersionOptions.map((version) => (
                 <option key={version} value={version}>
                   {version}
                 </option>
@@ -2893,7 +2941,10 @@ const ClusterDetailView = ({
                             <div className="item-title-row">
                               <div className="item-name">{item.name}</div>
                               <span className="item-tag promql">
-                                PromQL · {normalizePrometheusVersion(item.prometheus_version)}
+                                PromQL · {normalizePrometheusVersion(
+                                  item.prometheus_version,
+                                  prometheusVersionOptions
+                                )}
                               </span>
                             </div>
                             <div className="item-desc">
@@ -3626,6 +3677,7 @@ const SettingsOverviewPanel = ({
 
 interface InspectionSettingsPanelProps {
   items: InspectionItem[];
+  prometheusVersionOptions: string[];
   submitting: boolean;
   notice: string | null;
   error: string | null;
@@ -3642,10 +3694,12 @@ interface InspectionSettingsPanelProps {
   onDeleteMany: (ids: number[]) => void;
   onExport: (format: "json" | "yaml") => Promise<void> | void;
   onImport: (file: File) => Promise<void>;
+  onAddPrometheusVersion: (value: string) => { ok: boolean; message?: string };
 }
 
 const InspectionSettingsPanel = ({
   items,
+  prometheusVersionOptions,
   submitting,
   notice,
   error,
@@ -3655,6 +3709,7 @@ const InspectionSettingsPanel = ({
   onDeleteMany,
   onExport,
   onImport,
+  onAddPrometheusVersion,
 }: InspectionSettingsPanelProps) => {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [editingItem, setEditingItem] = useState<InspectionItem | null>(null);
@@ -3678,6 +3733,8 @@ const InspectionSettingsPanel = ({
   const [promqlDescribe, setPromqlDescribe] = useState("");
   const [configText, setConfigText] = useState("{}");
   const [formError, setFormError] = useState<string | null>(null);
+  const [versionInput, setVersionInput] = useState("");
+  const [versionError, setVersionError] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [itemFilterType, setItemFilterType] = useState<
     "all" | "command" | "promql" | "other"
@@ -3711,7 +3768,12 @@ const InspectionSettingsPanel = ({
     setFormDescription(item.description ?? "");
     const rawType = (item.check_type ?? "custom").trim();
     if (isPromqlType(rawType)) {
-      setPrometheusVersion(normalizePrometheusVersion(item.prometheus_version));
+      setPrometheusVersion(
+        normalizePrometheusVersion(
+          item.prometheus_version,
+          prometheusVersionOptions
+        )
+      );
     } else {
       setPrometheusVersion(DEFAULT_PROMETHEUS_VERSION);
     }
@@ -3808,7 +3870,10 @@ const InspectionSettingsPanel = ({
           : customCheckType.trim() || "custom";
     const resolvedPrometheusVersion =
       resolvedCheckType === "promql"
-        ? normalizePrometheusVersion(prometheusVersion)
+        ? normalizePrometheusVersion(
+            prometheusVersion,
+            prometheusVersionOptions
+          )
         : undefined;
     if (formTypeMode === "other" && !customCheckType.trim()) {
       setFormError("请输入自定义类型名称");
@@ -3899,6 +3964,17 @@ const InspectionSettingsPanel = ({
     resetForm();
   };
 
+  const handleAddVersion = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const result = onAddPrometheusVersion(versionInput);
+    if (!result.ok) {
+      setVersionError(result.message ?? "版本添加失败");
+      return;
+    }
+    setVersionInput("");
+    setVersionError(null);
+  };
+
   const toggleSelection = (id: number) => {
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((itemId) => itemId !== id) : [...prev, id]
@@ -3913,14 +3989,20 @@ const InspectionSettingsPanel = ({
     const shouldFilterByVersion =
       itemFilterType === "promql" && itemFilterVersion !== "all";
     const versionFilter = shouldFilterByVersion
-      ? normalizePrometheusVersion(itemFilterVersion)
+      ? normalizePrometheusVersion(
+          itemFilterVersion,
+          prometheusVersionOptions
+        )
       : null;
     let nextItems = sortedItems;
     if (versionFilter) {
       nextItems = nextItems.filter(
         (item) =>
           isPromqlType(item.check_type) &&
-          normalizePrometheusVersion(item.prometheus_version) === versionFilter
+          normalizePrometheusVersion(
+            item.prometheus_version,
+            prometheusVersionOptions
+          ) === versionFilter
       );
     }
     if (itemFilterType === "all") {
@@ -4086,6 +4168,52 @@ const InspectionSettingsPanel = ({
       {error && <div className="feedback error">{error}</div>}
       {formError && <div className="feedback error">{formError}</div>}
       <div className="inspection-settings-body">
+        <section className="inspection-section inspection-section-version">
+          <div className="inspection-section-header">
+            <div>
+              <h4>Prometheus 版本管理</h4>
+              <span className="inspection-section-hint">
+                用于 PromQL 巡检项的版本筛选与显示
+              </span>
+            </div>
+          </div>
+          <div className="version-manager">
+            <div className="version-manager-row">
+              <span className="version-manager-label">当前默认版本</span>
+              <span className="chip">{DEFAULT_PROMETHEUS_VERSION}</span>
+            </div>
+            <div className="version-manager-row">
+              <span className="version-manager-label">已配置版本</span>
+              <div className="chip-group version-manager-list">
+                {prometheusVersionOptions.map((version) => (
+                  <span key={version} className="chip">
+                    {version}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <form className="version-manager-form" onSubmit={handleAddVersion}>
+              <label>
+                新增版本
+                <input
+                  type="text"
+                  value={versionInput}
+                  onChange={(event) => {
+                    setVersionInput(event.target.value);
+                    if (versionError) {
+                      setVersionError(null);
+                    }
+                  }}
+                  placeholder="例如：3.2"
+                />
+              </label>
+              <button type="submit" className="secondary">
+                添加版本
+              </button>
+            </form>
+            {versionError && <div className="feedback error">{versionError}</div>}
+          </div>
+        </section>
         <section className="inspection-section inspection-section-list">
           <div className="inspection-section-header">
             <div>
@@ -4129,7 +4257,7 @@ const InspectionSettingsPanel = ({
                       }
                     >
                       <option value="all">全部</option>
-                      {PROMETHEUS_VERSION_OPTIONS.map((version) => (
+                      {prometheusVersionOptions.map((version) => (
                         <option key={version} value={version}>
                           {version}
                         </option>
@@ -4194,7 +4322,8 @@ const InspectionSettingsPanel = ({
                           <td>
                             {isPromqlType(item.check_type)
                               ? normalizePrometheusVersion(
-                                  item.prometheus_version
+                                  item.prometheus_version,
+                                  prometheusVersionOptions
                                 )
                               : "-"}
                           </td>
@@ -4316,7 +4445,7 @@ const InspectionSettingsPanel = ({
                   onChange={(event) => setPrometheusVersion(event.target.value)}
                   disabled={submitting}
                 >
-                  {PROMETHEUS_VERSION_OPTIONS.map((version) => (
+                  {prometheusVersionOptions.map((version) => (
                     <option key={version} value={version}>
                       {version}
                     </option>
@@ -4686,6 +4815,7 @@ interface RunDetailViewProps {
   clusters: ClusterConfig[];
   items: InspectionItem[];
   runs: InspectionRunListItem[];
+  prometheusVersionOptions: string[];
   onDeleteRun: (runId: number, redirectPath?: string) => Promise<void>;
   onCancelRun: (runId: number, redirectPath?: string) => Promise<void>;
   onPauseRun: (runId: number) => Promise<void>;
@@ -4699,6 +4829,7 @@ const RunDetailView = ({
   clusters,
   items,
   runs,
+  prometheusVersionOptions,
   onDeleteRun,
   onCancelRun,
   onPauseRun,
@@ -5166,7 +5297,10 @@ const RunDetailView = ({
           </div>
           <div>
             <strong>Prometheus 版本：</strong>
-            {normalizePrometheusVersion(summaryRun?.prometheus_version)}
+            {normalizePrometheusVersion(
+              summaryRun?.prometheus_version,
+              prometheusVersionOptions
+            )}
           </div>
           <div>
             <strong>开始时间：</strong>
@@ -5939,6 +6073,9 @@ const [clusterUploading, setClusterUploading] = useState(false);
 
   const [selectedItemIds, setSelectedItemIdsState] = useState<number[]>([]);
   const [operator, setOperator] = useState("");
+  const [prometheusVersionOptions, setPrometheusVersionOptions] = useState<
+    string[]
+  >(() => loadPrometheusVersionOptions());
 
   const [confirmState, setConfirmState] = useState<ConfirmDialogState | null>(
     null
@@ -5977,6 +6114,16 @@ const [pendingRefreshTargets, setPendingRefreshTargets] = useState<
   const [licenseLoading, setLicenseLoading] = useState(false);
   const [licenseUploading, setLicenseUploading] = useState(false);
   const [licenseTextUploading, setLicenseTextUploading] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(
+      PROMETHEUS_VERSION_STORAGE_KEY,
+      JSON.stringify(prometheusVersionOptions)
+    );
+  }, [prometheusVersionOptions]);
 
   const licenseFeatureSet = useMemo(
     () =>
@@ -7445,6 +7592,27 @@ const hasManualKubeconfig = useMemo(
     [refreshItems]
   );
 
+  const handleAddPrometheusVersion = useCallback(
+    (value: string): { ok: boolean; message?: string } => {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return { ok: false, message: "请输入版本号" };
+      }
+      if (!/^\d+(?:\.\d+){1,2}$/.test(trimmed)) {
+        return { ok: false, message: "版本格式应类似 3.2 或 2.55" };
+      }
+      const exists = prometheusVersionOptions.some(
+        (item) => item.trim() === trimmed
+      );
+      if (exists) {
+        return { ok: false, message: "该版本已存在" };
+      }
+      setPrometheusVersionOptions((prev) => [...prev, trimmed]);
+      return { ok: true };
+    },
+    [prometheusVersionOptions]
+  );
+
   const deleteInspectionItemsBatch = useCallback(
     async (ids: number[], successMessage: string) => {
       setSettingsSubmitting(true);
@@ -7631,6 +7799,7 @@ const hasManualKubeconfig = useMemo(
         render: ({ close }) => (
           <InspectionSettingsPanel
             items={sortedItems}
+            prometheusVersionOptions={prometheusVersionOptions}
             submitting={settingsSubmitting}
             notice={settingsNotice}
             error={settingsError}
@@ -7640,6 +7809,7 @@ const hasManualKubeconfig = useMemo(
             onDeleteMany={handleDeleteInspectionItemsBulk}
             onExport={handleExportInspectionItems}
             onImport={handleImportInspectionItems}
+            onAddPrometheusVersion={handleAddPrometheusVersion}
           />
         ),
       },
@@ -7668,6 +7838,8 @@ const hasManualKubeconfig = useMemo(
       handleDeleteInspectionItemsBulk,
       handleExportInspectionItems,
       handleImportInspectionItems,
+      prometheusVersionOptions,
+      handleAddPrometheusVersion,
       licenseCapabilities,
       licenseUploading,
       licenseTextUploading,
@@ -7883,6 +8055,7 @@ const hasManualKubeconfig = useMemo(
                 clusters={clusters}
                 items={sortedItems}
                 runs={runs}
+                prometheusVersionOptions={prometheusVersionOptions}
                 selectedIds={selectedItemIds}
                 setSelectedIds={setSelectedItemIds}
                 operator={operator}
@@ -7922,6 +8095,7 @@ const hasManualKubeconfig = useMemo(
                   clusters={clusters}
                   items={sortedItems}
                   runs={runs}
+                  prometheusVersionOptions={prometheusVersionOptions}
                   onDeleteRun={handleDeleteRunById}
                 onCancelRun={handleCancelRunById}
                 onPauseRun={handlePauseRunById}
