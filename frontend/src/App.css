@@ -961,17 +961,23 @@ body {
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
 }
 
 .inspection-version-hint-text {
   font-weight: 400;
   color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .inspection-version-counts {
   color: inherit;
   font-weight: 400;
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .inspection-item-group {
@@ -1048,6 +1054,20 @@ body {
   background: #f1f5f9;
   color: #475569;
   border-color: #e2e8f0;
+}
+
+@media (max-width: 720px) {
+  .inspection-version-hint {
+    flex-wrap: wrap;
+  }
+
+  .inspection-version-hint-text {
+    white-space: normal;
+  }
+
+  .inspection-version-counts {
+    margin-left: 0;
+  }
 }
 
 .item-pagination {
