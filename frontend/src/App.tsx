@@ -184,6 +184,23 @@ const normalizePrometheusVersion = (
   return trimmed;
 };
 
+const isLicenseRelatedMessage = (value?: string | null) => {
+  if (!value) {
+    return false;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return false;
+  }
+  const lower = trimmed.toLowerCase();
+  return (
+    lower.includes("license") ||
+    trimmed.includes("授权") ||
+    trimmed.includes("未生效") ||
+    trimmed.includes("未安装")
+  );
+};
+
 const isPromqlType = (value?: string | null) =>
   (value ?? "").trim() === "promql";
 
@@ -6276,6 +6293,39 @@ const [pendingRefreshTargets, setPendingRefreshTargets] = useState<
       canDownloadReports,
     ]
   );
+
+  useEffect(() => {
+    if (!licenseValid) {
+      return;
+    }
+    if (isLicenseRelatedMessage(licenseError)) {
+      setLicenseError(null);
+    }
+    if (isLicenseRelatedMessage(clusterError)) {
+      setClusterError(null);
+    }
+    if (isLicenseRelatedMessage(agentError)) {
+      setAgentError(null);
+    }
+    if (isLicenseRelatedMessage(settingsError)) {
+      setSettingsError(null);
+    }
+    if (isLicenseRelatedMessage(inspectionError)) {
+      setInspectionError(null);
+    }
+    if (isLicenseRelatedMessage(clusterNotice)) {
+      clearClusterNotice();
+    }
+  }, [
+    licenseValid,
+    licenseError,
+    clusterError,
+    agentError,
+    settingsError,
+    inspectionError,
+    clusterNotice,
+    clearClusterNotice,
+  ]);
 
   const refreshLicenseStatus = useCallback(async (): Promise<LicenseStatus | null> => {
     setLicenseLoading(true);

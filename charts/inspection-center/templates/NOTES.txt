@@ -1,14 +1,3 @@
-1. 默认访问方式：前端 Service 采用 NodePort（默认 30001）。
-   ```bash
-   kubectl get svc {{ include "inspection-center.fullname" . }}-frontend -n {{ .Release.Namespace }}
-   ```
-   然后访问 `http://<任意节点IP>:<NodePort>`。
+1. kubectl get svc {{ include "inspection-center.fullname" . }}-frontend -n {{ .Release.Namespace }}
 
-2. 若开启了 Ingress 或 LoadBalancer，请依据实际配置的地址访问。
-
-3. 后端所有运行数据均挂载在 `/app/data`，记得为 `backend-data` PVC 配置合适的存储。
-
-4. 查看安装的 values：
-   ```bash
-   helm get values {{ .Release.Name }} -n {{ .Release.Namespace }}
-   ```
+   访问 `http://<任意节点IP>:<NodePort>`。
