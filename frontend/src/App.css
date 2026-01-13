@@ -2015,6 +2015,9 @@ th {
   border: none;
   font-weight: 600;
   grid-column: 1 / -1;
+  justify-self: end;
+  padding: 6px 12px;
+  font-size: 12px;
 }
 
 .agent-token-box {
