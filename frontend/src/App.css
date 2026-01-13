@@ -964,8 +964,13 @@ body {
   flex-wrap: wrap;
 }
 
+.inspection-version-hint-text {
+  font-weight: 600;
+  color: inherit;
+}
+
 .inspection-version-counts {
-  color: #1e293b;
+  color: inherit;
   font-weight: 600;
 }
 
@@ -979,9 +984,14 @@ body {
   justify-content: space-between;
   gap: 8px;
   padding: 2px 6px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
-  color: #1e293b;
+  color: #475569;
+}
+
+.inspection-group-title-text {
+  font-weight: 600;
+  color: inherit;
 }
 
 .inspection-item-group-title .group-count {
