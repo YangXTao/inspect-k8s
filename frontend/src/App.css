@@ -958,26 +958,23 @@ body {
   background: #f8fafc;
   font-size: 13px;
   color: #64748b;
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: nowrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
+  column-gap: 10px;
 }
 
 .inspection-version-hint-text {
   font-weight: 400;
   color: inherit;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
 }
 
 .inspection-version-counts {
   color: inherit;
   font-weight: 400;
-  margin-left: auto;
   white-space: nowrap;
+  justify-self: end;
 }
 
 .inspection-item-group {
@@ -1058,7 +1055,8 @@ body {
 
 @media (max-width: 720px) {
   .inspection-version-hint {
-    flex-wrap: wrap;
+    grid-template-columns: 1fr;
+    row-gap: 6px;
   }
 
   .inspection-version-hint-text {
@@ -1066,7 +1064,7 @@ body {
   }
 
   .inspection-version-counts {
-    margin-left: 0;
+    justify-self: start;
   }
 }
 
