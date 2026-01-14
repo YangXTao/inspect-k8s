@@ -1916,24 +1916,38 @@ th {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  padding: 2px 4px;
+  border-radius: 999px;
 }
 
 .version-remove {
+  width: 22px;
+  height: 22px;
   border-radius: 999px;
   border: 1px solid #fecaca;
-  background: #fee2e2;
-  color: #b91c1c;
-  font-size: 11px;
-  padding: 2px 8px;
+  background: #fef2f2;
+  color: #dc2626;
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
+  opacity: 0;
+  transform: translateY(-1px) scale(0.92);
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease,
+    background-color 0.15s ease;
 }
 
-.version-remove:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+.version-chip:hover .version-remove,
+.version-chip:focus-within .version-remove {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
 }
 
-.version-remove:hover:not(:disabled) {
+.version-remove:hover {
   background: #fecaca;
 }
 

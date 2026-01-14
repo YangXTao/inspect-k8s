@@ -4669,21 +4669,25 @@ const PrometheusVersionSettingsPanel = ({
                     ? "默认版本不可删除"
                     : usageCount > 0
                       ? `该版本已被 ${usageCount} 个 PromQL 巡检项使用`
-                      : "删除版本";
+                      : "";
                   return (
-                    <span key={version} className="version-chip">
+                    <span
+                      key={version}
+                      className="version-chip"
+                      title={reason || undefined}
+                    >
                       <span className={`chip${isDefault ? " muted" : ""}`}>
                         {version}
                       </span>
-                      {!isDefault && (
+                      {canDelete && (
                         <button
                           type="button"
                           className="version-remove"
                           onClick={() => handleDelete(version)}
-                          disabled={!canDelete}
-                          title={reason}
+                          aria-label={`删除版本 ${version}`}
+                          title="删除版本"
                         >
-                          删除
+                          ×
                         </button>
                       )}
                     </span>
