@@ -1871,6 +1871,12 @@ th {
   flex-wrap: wrap;
 }
 
+.inspection-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .inspection-section-header h4 {
   margin: 0;
   color: #0f172a;
@@ -1915,9 +1921,35 @@ th {
 .version-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 2px 4px;
+  gap: 8px;
+  padding: 2px 6px;
   border-radius: 999px;
+}
+
+.version-chip-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.version-tag {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.version-tag.default {
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
+}
+
+.version-tag.used {
+  background: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fde68a;
 }
 
 .version-remove {
@@ -1933,18 +1965,6 @@ th {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  opacity: 0;
-  transform: translateY(-1px) scale(0.92);
-  pointer-events: none;
-  transition: opacity 0.15s ease, transform 0.15s ease,
-    background-color 0.15s ease;
-}
-
-.version-chip:hover .version-remove,
-.version-chip:focus-within .version-remove {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-  pointer-events: auto;
 }
 
 .version-remove:hover {

@@ -4584,6 +4584,7 @@ const PrometheusVersionSettingsPanel = ({
   const [versionInput, setVersionInput] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showDeleteControls, setShowDeleteControls] = useState(false);
 
   const usageMap = useMemo(() => {
     const counts = new Map<string, number>();
@@ -4651,6 +4652,15 @@ const PrometheusVersionSettingsPanel = ({
                 默认版本用于未填写 Prometheus 版本的 PromQL 巡检项
               </span>
             </div>
+            <div className="inspection-section-actions">
+              <button
+                type="button"
+                className="secondary version-manager-toggle"
+                onClick={() => setShowDeleteControls((prev) => !prev)}
+              >
+                {showDeleteControls ? "完成" : "编辑删除"}
+              </button>
+            </div>
           </div>
           <div className="version-manager">
             <div className="version-manager-row">
@@ -4665,21 +4675,23 @@ const PrometheusVersionSettingsPanel = ({
                   const isDefault = version === defaultVersion;
                   const usageCount = usageMap.get(version) ?? 0;
                   const canDelete = !isDefault && usageCount === 0;
-                  const reason = isDefault
-                    ? "默认版本不可删除"
-                    : usageCount > 0
-                      ? `该版本已被 ${usageCount} 个 PromQL 巡检项使用`
-                      : "";
+                  const showUsage = usageCount > 0;
                   return (
-                    <span
-                      key={version}
-                      className="version-chip"
-                      title={reason || undefined}
-                    >
+                    <span key={version} className="version-chip">
                       <span className={`chip${isDefault ? " muted" : ""}`}>
                         {version}
                       </span>
-                      {canDelete && (
+                      <span className="version-chip-meta">
+                        {isDefault && (
+                          <span className="version-tag default">默认</span>
+                        )}
+                        {showUsage && (
+                          <span className="version-tag used">
+                            使用中
+                          </span>
+                        )}
+                      </span>
+                      {showDeleteControls && canDelete && (
                         <button
                           type="button"
                           className="version-remove"
