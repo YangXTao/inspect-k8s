@@ -148,9 +148,14 @@ def generate_markdown_report(
     cluster_name, version_label, node_count_label = _get_cluster_meta(run)
     cluster = getattr(run, "cluster", None)
     cluster_id = getattr(cluster, "id", None) or getattr(run, "cluster_id", None)
-    cluster_label = (
-        f"{cluster_name} (ID: {cluster_id})"
+    cluster_display_id = (
+        _build_cluster_slug(cluster_id, cluster_name)
         if cluster_id is not None
+        else None
+    )
+    cluster_label = (
+        f"{cluster_name} ({cluster_display_id})"
+        if cluster_display_id
         else cluster_name
     )
 
@@ -339,9 +344,14 @@ def generate_pdf_report(
     cluster_name, version_label, node_count_label = _get_cluster_meta(run)
     cluster = getattr(run, "cluster", None)
     cluster_id = getattr(cluster, "id", None) or getattr(run, "cluster_id", None)
-    cluster_label = (
-        f"{cluster_name} (ID: {cluster_id})"
+    cluster_display_id = (
+        _build_cluster_slug(cluster_id, cluster_name)
         if cluster_id is not None
+        else None
+    )
+    cluster_label = (
+        f"{cluster_name} ({cluster_display_id})"
+        if cluster_display_id
         else cluster_name
     )
 
