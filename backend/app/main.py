@@ -1078,7 +1078,11 @@ async def register_cluster(
     "/clusters/{cluster_id}/test-connection",
     response_model=schemas.ClusterConfigOut,
 )
-def test_cluster_connection(cluster_id: int, db: Session = Depends(get_db)):
+def test_cluster_connection(
+    cluster_id: int,
+    db: Session = Depends(get_db),
+    _license_guard: None = Depends(require_license_dependency("clusters")),
+):
     cluster = crud.get_cluster(db, cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="指定的集群不存在。")
@@ -1155,7 +1159,11 @@ def get_cluster_nodes(cluster_id: int, db: Session = Depends(get_db)):
     "/clusters/{cluster_id}/nodes/refresh",
     response_model=schemas.ClusterNodesRefreshOut,
 )
-def refresh_cluster_nodes(cluster_id: int, db: Session = Depends(get_db)):
+def refresh_cluster_nodes(
+    cluster_id: int,
+    db: Session = Depends(get_db),
+    _license_guard: None = Depends(require_license_dependency("clusters")),
+):
     cluster = crud.get_cluster(db, cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="指定的集群不存在。")
@@ -1182,6 +1190,7 @@ async def update_cluster(
     name: str | None = Form(None),
     prometheus_url: str | None = Form(None),
     default_agent_id: str | None = Form(None),
+    _license_guard: None = Depends(require_license_dependency("clusters")),
 ):
     cluster = crud.get_cluster(db, cluster_id)
     if not cluster:
@@ -1243,7 +1252,6 @@ async def update_cluster(
 @app.get("/agents", response_model=List[schemas.InspectionAgentOut])
 def list_agents(
     db: Session = Depends(get_db),
-    _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
     agents = crud.list_inspection_agents(db)
     return [_serialize_agent(agent) for agent in agents]
@@ -1385,6 +1393,7 @@ def register_agent(
 @agent_router.post("/bootstrap", response_model=schemas.InspectionAgentOut)
 def agent_bootstrap(
     payload: schemas.AgentBootstrapIn,
+    _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
     token_value = (payload.registration_token or "").strip()
     if not token_value:
@@ -1768,6 +1777,7 @@ def delete_cluster(
         description="同时删除关联巡检记录及报告文件",
     ),
     db: Session = Depends(get_db),
+    _license_guard: None = Depends(require_license_dependency("clusters")),
 ):
     cluster = crud.get_cluster(db, cluster_id)
     if not cluster:
@@ -1816,7 +1826,10 @@ def list_inspection_items(db: Session = Depends(get_db)):
     "/inspection-items/export",
     response_model=schemas.InspectionItemsExportOut,
 )
-def export_inspection_items(db: Session = Depends(get_db)):
+def export_inspection_items(
+    db: Session = Depends(get_db),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
+):
     items = crud.get_inspection_items(db)
     return {
         "exported_at": datetime.utcnow(),
@@ -1825,7 +1838,10 @@ def export_inspection_items(db: Session = Depends(get_db)):
 
 
 @app.get("/inspection-items/export-yaml")
-def export_inspection_items_yaml(db: Session = Depends(get_db)):
+def export_inspection_items_yaml(
+    db: Session = Depends(get_db),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
+):
     items = crud.get_inspection_items(db)
     export_payload = schemas.InspectionItemsExportOut(
         exported_at=datetime.utcnow(),
@@ -1851,6 +1867,7 @@ def export_inspection_items_yaml(db: Session = Depends(get_db)):
 async def import_inspection_items(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
     raw_bytes = await file.read()
     if not raw_bytes:
@@ -2085,7 +2102,9 @@ async def import_inspection_items(
 
 @app.post("/inspection-items", response_model=schemas.InspectionItemOut, status_code=201)
 def create_inspection_item(
-    item_in: schemas.InspectionItemCreate, db: Session = Depends(get_db)
+    item_in: schemas.InspectionItemCreate,
+    db: Session = Depends(get_db),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
     trimmed_name = (item_in.name or "").strip()
     if not trimmed_name:
@@ -2122,6 +2141,7 @@ def update_inspection_item(
     item_id: int,
     item_in: schemas.InspectionItemUpdate,
     db: Session = Depends(get_db),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
     item = crud.get_inspection_item(db, item_id)
     if not item:
@@ -2167,7 +2187,11 @@ def update_inspection_item(
 
 
 @app.delete("/inspection-items/{item_id}", status_code=204)
-def delete_inspection_item(item_id: int, db: Session = Depends(get_db)):
+def delete_inspection_item(
+    item_id: int,
+    db: Session = Depends(get_db),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
+):
     item = crud.get_inspection_item(db, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Inspection item not found.")
@@ -2321,7 +2345,11 @@ def get_inspection_run(run_id: int, db: Session = Depends(get_db)):
     "/inspection-runs/{run_id}/pause",
     response_model=schemas.InspectionRunOut,
 )
-def pause_inspection_run(run_id: int, db: Session = Depends(get_db)):
+def pause_inspection_run(
+    run_id: int,
+    db: Session = Depends(get_db),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
+):
     run = crud.get_inspection_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
@@ -2340,7 +2368,11 @@ def pause_inspection_run(run_id: int, db: Session = Depends(get_db)):
     "/inspection-runs/{run_id}/resume",
     response_model=schemas.InspectionRunOut,
 )
-def resume_inspection_run(run_id: int, db: Session = Depends(get_db)):
+def resume_inspection_run(
+    run_id: int,
+    db: Session = Depends(get_db),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
+):
     run = crud.get_inspection_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
@@ -2359,7 +2391,11 @@ def resume_inspection_run(run_id: int, db: Session = Depends(get_db)):
     "/inspection-runs/{run_id}/cancel",
     response_model=schemas.InspectionRunOut,
 )
-def cancel_inspection_run(run_id: int, db: Session = Depends(get_db)):
+def cancel_inspection_run(
+    run_id: int,
+    db: Session = Depends(get_db),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
+):
     run = crud.get_inspection_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
@@ -2380,6 +2416,7 @@ def delete_inspection_run(
         description="同时删除本地巡检报告文件",
     ),
     db: Session = Depends(get_db),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
     run = crud.get_inspection_run(db, run_id)
     if not run:
