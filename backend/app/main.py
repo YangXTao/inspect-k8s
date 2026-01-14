@@ -33,6 +33,7 @@ _DEFAULT_INSPECTIONS_SENTINEL = Path("data/state/default_inspections_seeded.flag
 AGENT_HEARTBEAT_TIMEOUT_MINUTES = 1
 AGENT_HEARTBEAT_TIMEOUT = timedelta(minutes=AGENT_HEARTBEAT_TIMEOUT_MINUTES)
 CONNECTION_TEST_OPERATOR = "__system_connection_test__"
+MAX_CLUSTER_NAME_LENGTH = 150
 
 
 @dataclass
@@ -85,6 +86,17 @@ def _normalise_cluster_name(name: str | None) -> str:
     import re as _re
     slug = _re.sub(r"\s+", "-", name.strip().lower())
     return slug or "cluster"
+
+
+def _build_archived_cluster_name(name: str | None, cluster_id: int) -> str:
+    base = (name or "cluster").strip() or "cluster"
+    suffix = f" (已归档-{cluster_id})"
+    max_length = MAX_CLUSTER_NAME_LENGTH
+    if len(base) + len(suffix) > max_length:
+        base = base[: max_length - len(suffix)].rstrip()
+        if not base:
+            base = "cluster"
+    return f"{base}{suffix}"
 
 
 def _build_run_display_id(db: Session, run: models.InspectionRun) -> str:
@@ -1288,22 +1300,29 @@ def register_agent(
         cluster = crud.get_cluster_by_name(db, trimmed_name)
         if cluster:
             if getattr(cluster, "is_archived", False):
+                archived_name = _build_archived_cluster_name(
+                    cluster.name, cluster.id
+                )
+                if archived_name != cluster.name:
+                    cluster = crud.update_cluster(
+                        db,
+                        cluster,
+                        name=archived_name,
+                    )
                 placeholder_path = _build_agent_managed_kubeconfig_ref()
-                update_kwargs: dict[str, Any] = {
-                    "created_at": datetime.utcnow(),
-                    "kubeconfig_path": placeholder_path,
-                    "connection_status": "pending",
-                    "connection_message": "等待 Agent 注册",
-                    "last_checked_at": None,
-                    "execution_mode": "agent",
-                    "default_agent_id": None,
-                    "is_archived": False,
-                }
-                if normalized_description is not None:
-                    update_kwargs["description"] = normalized_description
-                if normalized_prometheus_url is not None:
-                    update_kwargs["prometheus_url"] = normalized_prometheus_url
-                cluster = crud.update_cluster(db, cluster, **update_kwargs)
+                cluster = crud.create_cluster(
+                    db,
+                    name=trimmed_name,
+                    kubeconfig_path=placeholder_path,
+                    contexts_json=None,
+                    prometheus_url=normalized_prometheus_url,
+                    connection_status="pending",
+                    connection_message="等待 Agent 注册",
+                    last_checked_at=None,
+                    execution_mode="agent",
+                    default_agent_id=None,
+                    description=normalized_description,
+                )
             else:
                 if cluster.connection_status != "pending":
                     raise HTTPException(
@@ -1754,6 +1773,10 @@ def delete_cluster(
     if not cluster:
         raise HTTPException(status_code=404, detail="指定的集群不存在。")
 
+    archived_name = None
+    if not delete_files:
+        archived_name = _build_archived_cluster_name(cluster.name, cluster.id)
+
     report_paths: list[str] = []
     if delete_files:
         runs = (
@@ -1766,6 +1789,8 @@ def delete_cluster(
             crud.delete_inspection_run(db, run)
 
     crud.archive_cluster(db, cluster)
+    if archived_name and cluster.name != archived_name:
+        crud.update_cluster(db, cluster, name=archived_name)
 
     if delete_files:
         for report_path in report_paths:

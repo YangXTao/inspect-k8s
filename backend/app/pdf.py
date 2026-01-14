@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 import re
@@ -146,6 +146,18 @@ def generate_markdown_report(
 
     results_list = list(results)
     cluster_name, version_label, node_count_label = _get_cluster_meta(run)
+    cluster = getattr(run, "cluster", None)
+    cluster_id = getattr(cluster, "id", None) or getattr(run, "cluster_id", None)
+    cluster_display_id = (
+        _build_cluster_slug(cluster_id, cluster_name)
+        if cluster_id is not None
+        else None
+    )
+    cluster_label = (
+        f"{cluster_name} ({cluster_display_id})"
+        if cluster_display_id
+        else cluster_name
+    )
 
     total_checks = len(results_list)
     passed_count = sum(1 for item in results_list if item.status.lower() == "passed")
@@ -172,7 +184,7 @@ def generate_markdown_report(
     lines.append("| --- | --- |")
     lines.append(f"| 巡检编号 | {display_label} |")
     lines.append(f"| 巡检人 | {run.operator or '未填写'} |")
-    lines.append(f"| 目标集群 | {cluster_name} |")
+    lines.append(f"| 目标集群 | {cluster_label} |")
     lines.append(f"| 集群版本 | {version_label} |")
     lines.append(f"| 节点数量 | {node_count_label} |")
     lines.append(f"| 巡检开始时间 | {_format_dt(run.created_at)} |")
@@ -330,6 +342,18 @@ def generate_pdf_report(
 
     results_list = list(results)
     cluster_name, version_label, node_count_label = _get_cluster_meta(run)
+    cluster = getattr(run, "cluster", None)
+    cluster_id = getattr(cluster, "id", None) or getattr(run, "cluster_id", None)
+    cluster_display_id = (
+        _build_cluster_slug(cluster_id, cluster_name)
+        if cluster_id is not None
+        else None
+    )
+    cluster_label = (
+        f"{cluster_name} ({cluster_display_id})"
+        if cluster_display_id
+        else cluster_name
+    )
 
     doc = SimpleDocTemplate(
         str(report_path),
@@ -455,7 +479,7 @@ def generate_pdf_report(
     meta_rows = [
         ("巡检编号", str(display_id or run.id)),
         ("巡检人", run.operator or "未填写"),
-        ("目标集群", cluster_name),
+        ("目标集群", cluster_label),
         ("集群版本", version_label),
         ("节点数量", node_count_label),
         ("巡检开始时间", format_dt(run.created_at)),

@@ -587,6 +587,29 @@ const getClusterDisplayId = (
 const normaliseClusterName = (name: string) =>
   name.trim().replace(/\s+/g, "-").toLowerCase() || "cluster";
 
+const ARCHIVED_CLUSTER_SUFFIX_PATTERN = /\s*\(已归档-(\d+)\)\s*$/;
+const DELETED_CLUSTER_SUFFIX_PATTERN = /\s*\(已删除-(\d+)\)\s*$/;
+
+const resolveArchivedClusterName = (name?: string | null) => {
+  const raw = (name ?? "").trim();
+  if (!raw) {
+    return { baseName: "cluster", archived: false };
+  }
+  if (ARCHIVED_CLUSTER_SUFFIX_PATTERN.test(raw)) {
+    return {
+      baseName: raw.replace(ARCHIVED_CLUSTER_SUFFIX_PATTERN, "").trim() || raw,
+      archived: true,
+    };
+  }
+  if (DELETED_CLUSTER_SUFFIX_PATTERN.test(raw)) {
+    return {
+      baseName: raw.replace(DELETED_CLUSTER_SUFFIX_PATTERN, "").trim() || raw,
+      archived: true,
+    };
+  }
+  return { baseName: raw, archived: false };
+};
+
 const createRunDisplayIdMap = (
   runs: InspectionRunListItem[],
   clusters: ClusterConfig[]
@@ -2188,6 +2211,22 @@ const HistoryView = ({
                 const runSlug = runDisplayIds[run.id] ?? `#${run.id}`;
                 const clusterSlug =
                   clusterDisplayIds[run.cluster_id] ?? `#${run.cluster_id}`;
+                const archivedInfo = resolveArchivedClusterName(
+                  run.cluster_name
+                );
+                const fallbackClusterDisplayId = createDeterministicClusterSlug(
+                  {
+                    id: run.cluster_id,
+                    name: archivedInfo.baseName,
+                  } as ClusterConfig
+                );
+                const clusterDisplayId =
+                  clusterDisplayIds[run.cluster_id] ??
+                  fallbackClusterDisplayId ??
+                  `#${run.cluster_id}`;
+                const clusterLabel = archivedInfo.archived
+                  ? `${clusterDisplayId}（已删除）`
+                  : clusterDisplayId;
                 const isSelected = selectedRunIds.includes(run.id);
                 const canDelete = run.status !== "running";
                 return (
@@ -2202,7 +2241,7 @@ const HistoryView = ({
                         <span>{runSlug}</span>
                       </label>
                     </td>
-                    <td>{clusterSlug}</td>
+                    <td>{clusterLabel}</td>
                     <td>{run.operator || "-"}</td>
                     <td>
                       <span className={statusClass(run.status)}>
@@ -5808,14 +5847,7 @@ const ClusterEditModal = ({
               {kubeconfigSummary ?? "支持上传文件或粘贴 YAML 内容"}
             </div>
           </div>
-        ) : (
-          <div className="modal-field">
-            <span className="modal-field-label">kubeconfig</span>
-            <div className="modal-kubeconfig-summary">
-              kubeconfig 由 Agent 托管，如需更新请在 Agent 端处理。
-            </div>
-          </div>
-        )}
+        ) : null}
         {fileError && <div className="feedback error">{fileError}</div>}
         {error && <div className="feedback error">{error}</div>}
         <div className="modal-actions">
