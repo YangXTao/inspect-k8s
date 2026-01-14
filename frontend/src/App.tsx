@@ -1517,6 +1517,13 @@ const OverviewView = ({
         </div>
       </header>
 
+      {!license.loading && !license.valid && (
+        <div className="feedback warning">
+          {license.reason ?? "当前 License 未生效或未安装。"}
+          请在「设置」中导入 License。
+        </div>
+      )}
+
       <section className="card cluster-panel">
         <div className="card-header">
           <h2>集群列表</h2>
