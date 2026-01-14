@@ -5847,14 +5847,7 @@ const ClusterEditModal = ({
               {kubeconfigSummary ?? "支持上传文件或粘贴 YAML 内容"}
             </div>
           </div>
-        ) : (
-          <div className="modal-field">
-            <span className="modal-field-label">kubeconfig</span>
-            <div className="modal-kubeconfig-summary">
-              kubeconfig 由 Agent 托管，如需更新请在 Agent 端处理。
-            </div>
-          </div>
-        )}
+        ) : null}
         {fileError && <div className="feedback error">{fileError}</div>}
         {error && <div className="feedback error">{error}</div>}
         <div className="modal-actions">
