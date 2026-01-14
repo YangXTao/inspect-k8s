@@ -1148,6 +1148,7 @@ const OverviewView = ({
     ClusterConnectionStatus | "all"
   >("all");
   const [clusterKeyword, setClusterKeyword] = useState("");
+  const skipPageResetRef = useRef(true);
   const enabledAgents = useMemo(
     () => agents.filter((agent) => agent.is_enabled),
     [agents]
@@ -1255,6 +1256,10 @@ const OverviewView = ({
   }, [filteredClusters.length, clusterPageSize, currentPage, updatePage]);
 
   useEffect(() => {
+    if (skipPageResetRef.current) {
+      skipPageResetRef.current = false;
+      return;
+    }
     updatePage(1, { replace: true });
   }, [clusterFilterStatus, clusterKeyword, updatePage]);
 
