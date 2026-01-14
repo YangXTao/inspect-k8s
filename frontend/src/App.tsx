@@ -20,7 +20,6 @@ import {
   useLocation,
   useNavigate,
   useParams,
-  useSearchParams,
 } from "react-router-dom";
 import { Helmet } from "react-helmet";
 import type { Location as RouterLocation } from "history";
@@ -1139,7 +1138,6 @@ const OverviewView = ({
 }: OverviewProps) => {
   const enableServerClusterUpload = false;
   const enableServerConnectionTest = true;
-  const navigate = useNavigate();
   const [clusterPageSize, setClusterPageSize] = useState(
     DEFAULT_CLUSTER_PAGE_SIZE
   );
@@ -1148,7 +1146,6 @@ const OverviewView = ({
     ClusterConnectionStatus | "all"
   >("all");
   const [clusterKeyword, setClusterKeyword] = useState("");
-  const skipPageResetRef = useRef(true);
   const enabledAgents = useMemo(
     () => agents.filter((agent) => agent.is_enabled),
     [agents]
@@ -1173,22 +1170,7 @@ const OverviewView = ({
     enabledAgents,
     setClusterDefaultAgentIdInput,
   ]);
-  const [searchParams, setSearchParams] = useSearchParams();
-
-  const pageFromSearch = useMemo(() => {
-    const raw = searchParams.get("page");
-    const parsed = Number(raw);
-    if (Number.isInteger(parsed) && parsed > 0) {
-      return parsed;
-    }
-    return 1;
-  }, [searchParams]);
-
-  const [currentPage, setCurrentPage] = useState(pageFromSearch);
-
-  useEffect(() => {
-    setCurrentPage(pageFromSearch);
-  }, [pageFromSearch]);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const filteredClusters = useMemo(() => {
     let list = clusters.slice();
@@ -1226,23 +1208,9 @@ const OverviewView = ({
     (page: number, options?: { replace?: boolean }) => {
       const boundedPage = Math.max(page, 1);
       setCurrentPage(boundedPage);
-      setSearchParams(
-        (prev) => {
-          const nextParams = new URLSearchParams(prev);
-          if (boundedPage <= 1) {
-            nextParams.delete("page");
-          } else {
-            nextParams.set("page", String(boundedPage));
-          }
-          if (nextParams.toString() === prev.toString()) {
-            return prev;
-          }
-          return nextParams;
-        },
-        { replace: options?.replace ?? false }
-      );
+      void options;
     },
-    [setSearchParams]
+    []
   );
 
   useEffect(() => {
@@ -1256,11 +1224,7 @@ const OverviewView = ({
   }, [filteredClusters.length, clusterPageSize, currentPage, updatePage]);
 
   useEffect(() => {
-    if (skipPageResetRef.current) {
-      skipPageResetRef.current = false;
-      return;
-    }
-    updatePage(1, { replace: true });
+    updatePage(1);
   }, [clusterFilterStatus, clusterKeyword, updatePage]);
 
   const effectivePage = useMemo(
