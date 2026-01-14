@@ -90,7 +90,7 @@ def _normalise_cluster_name(name: str | None) -> str:
 
 def _build_archived_cluster_name(name: str | None, cluster_id: int) -> str:
     base = (name or "cluster").strip() or "cluster"
-    suffix = f" (已删除-{cluster_id})"
+    suffix = f" (已归档-{cluster_id})"
     max_length = MAX_CLUSTER_NAME_LENGTH
     if len(base) + len(suffix) > max_length:
         base = base[: max_length - len(suffix)].rstrip()
