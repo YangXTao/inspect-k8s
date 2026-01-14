@@ -20,7 +20,6 @@ import {
   useLocation,
   useNavigate,
   useParams,
-  useSearchParams,
 } from "react-router-dom";
 import { Helmet } from "react-helmet";
 import type { Location as RouterLocation } from "history";
@@ -1139,7 +1138,6 @@ const OverviewView = ({
 }: OverviewProps) => {
   const enableServerClusterUpload = false;
   const enableServerConnectionTest = true;
-  const navigate = useNavigate();
   const [clusterPageSize, setClusterPageSize] = useState(
     DEFAULT_CLUSTER_PAGE_SIZE
   );
@@ -1172,22 +1170,7 @@ const OverviewView = ({
     enabledAgents,
     setClusterDefaultAgentIdInput,
   ]);
-  const [searchParams, setSearchParams] = useSearchParams();
-
-  const pageFromSearch = useMemo(() => {
-    const raw = searchParams.get("page");
-    const parsed = Number(raw);
-    if (Number.isInteger(parsed) && parsed > 0) {
-      return parsed;
-    }
-    return 1;
-  }, [searchParams]);
-
-  const [currentPage, setCurrentPage] = useState(pageFromSearch);
-
-  useEffect(() => {
-    setCurrentPage(pageFromSearch);
-  }, [pageFromSearch]);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const filteredClusters = useMemo(() => {
     let list = clusters.slice();
@@ -1225,18 +1208,9 @@ const OverviewView = ({
     (page: number, options?: { replace?: boolean }) => {
       const boundedPage = Math.max(page, 1);
       setCurrentPage(boundedPage);
-      const nextParams = new URLSearchParams(searchParams);
-      if (boundedPage <= 1) {
-        nextParams.delete("page");
-      } else {
-        nextParams.set("page", String(boundedPage));
-      }
-      if (nextParams.toString() === searchParams.toString()) {
-        return;
-      }
-      setSearchParams(nextParams, { replace: options?.replace ?? false });
+      void options;
     },
-    [searchParams, setSearchParams]
+    []
   );
 
   useEffect(() => {
@@ -1250,7 +1224,7 @@ const OverviewView = ({
   }, [filteredClusters.length, clusterPageSize, currentPage, updatePage]);
 
   useEffect(() => {
-    updatePage(1, { replace: true });
+    updatePage(1);
   }, [clusterFilterStatus, clusterKeyword, updatePage]);
 
   const effectivePage = useMemo(
@@ -4610,6 +4584,7 @@ const PrometheusVersionSettingsPanel = ({
   const [versionInput, setVersionInput] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showDeleteControls, setShowDeleteControls] = useState(false);
 
   const usageMap = useMemo(() => {
     const counts = new Map<string, number>();
@@ -4677,6 +4652,15 @@ const PrometheusVersionSettingsPanel = ({
                 默认版本用于未填写 Prometheus 版本的 PromQL 巡检项
               </span>
             </div>
+            <div className="inspection-section-actions">
+              <button
+                type="button"
+                className="secondary version-manager-toggle"
+                onClick={() => setShowDeleteControls((prev) => !prev)}
+              >
+                {showDeleteControls ? "完成" : "编辑删除"}
+              </button>
+            </div>
           </div>
           <div className="version-manager">
             <div className="version-manager-row">
@@ -4691,25 +4675,31 @@ const PrometheusVersionSettingsPanel = ({
                   const isDefault = version === defaultVersion;
                   const usageCount = usageMap.get(version) ?? 0;
                   const canDelete = !isDefault && usageCount === 0;
-                  const reason = isDefault
-                    ? "默认版本不可删除"
-                    : usageCount > 0
-                      ? `该版本已被 ${usageCount} 个 PromQL 巡检项使用`
-                      : "删除版本";
+                  const showUsage = usageCount > 0;
                   return (
                     <span key={version} className="version-chip">
                       <span className={`chip${isDefault ? " muted" : ""}`}>
                         {version}
                       </span>
-                      {!isDefault && (
+                      <span className="version-chip-meta">
+                        {isDefault && (
+                          <span className="version-tag default">默认</span>
+                        )}
+                        {showUsage && (
+                          <span className="version-tag used">
+                            使用中
+                          </span>
+                        )}
+                      </span>
+                      {showDeleteControls && canDelete && (
                         <button
                           type="button"
                           className="version-remove"
                           onClick={() => handleDelete(version)}
-                          disabled={!canDelete}
-                          title={reason}
+                          aria-label={`删除版本 ${version}`}
+                          title="删除版本"
                         >
-                          删除
+                          ×
                         </button>
                       )}
                     </span>

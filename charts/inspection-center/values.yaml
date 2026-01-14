@@ -28,9 +28,10 @@ backend:
       - ReadWriteOnce
     mountPath: /app/data
   service:
-    type: ClusterIP
+    type: NodePort
     port: 8000
     targetPort: 8000
+    nodePort: null
   resources: {}
   nodeSelector: {}
   tolerations: []
