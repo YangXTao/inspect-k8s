@@ -1,18 +1,23 @@
+{{- if .Values.backend.nodeportService.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
-  name: backend
+  name: backend-nodeport
   labels:
     app.kubernetes.io/name: {{ include "inspection-center.name" . }}
     app.kubernetes.io/component: backend
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
-  type: {{ .Values.backend.service.type }}
+  type: NodePort
   selector:
     app.kubernetes.io/name: {{ include "inspection-center.name" . }}
     app.kubernetes.io/component: backend
     app.kubernetes.io/instance: {{ .Release.Name }}
   ports:
     - name: http
-      port: {{ .Values.backend.service.port }}
-      targetPort: {{ .Values.backend.service.targetPort }}
+      port: {{ .Values.backend.nodeportService.port }}
+      targetPort: {{ .Values.backend.nodeportService.targetPort }}
+      {{- if .Values.backend.nodeportService.nodePort }}
+      nodePort: {{ .Values.backend.nodeportService.nodePort }}
+      {{- end }}
+{{- end }}
