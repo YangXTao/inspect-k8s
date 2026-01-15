@@ -5193,6 +5193,14 @@ const ScheduleSettingsPanel = ({
     filteredClusters.length > 0 &&
     selectedFilteredClusterCount === filteredClusters.length;
 
+  const toggleCluster = useCallback((clusterId: number) => {
+    setSelectedClusterIds((prev) =>
+      prev.includes(clusterId)
+        ? prev.filter((id) => id !== clusterId)
+        : [...prev, clusterId]
+    );
+  }, []);
+
   const toggleAllClusters = useCallback(() => {
     setSelectedClusterIds((prev) => {
       if (filteredClusters.length === 0) {
@@ -5210,21 +5218,6 @@ const ScheduleSettingsPanel = ({
       return Array.from(next);
     });
   }, [filteredClusters]);
-
-  const handleClusterSelectChange = useCallback(
-    (event: ChangeEvent<HTMLSelectElement>) => {
-      const selected = Array.from(event.currentTarget.selectedOptions).map(
-        (option) => Number(option.value)
-      );
-      setSelectedClusterIds((prev) => {
-        const filteredSet = new Set(filteredClusters.map((cluster) => cluster.id));
-        const preserved = prev.filter((id) => !filteredSet.has(id));
-        const merged = [...preserved, ...selected];
-        return Array.from(new Set(merged));
-      });
-    },
-    [filteredClusters]
-  );
 
   const filteredItems = useMemo(() => {
     const keyword = itemKeyword.trim().toLowerCase();
@@ -5826,30 +5819,33 @@ const ScheduleSettingsPanel = ({
                     ) : filteredClusters.length === 0 ? (
                       <div className="placeholder">未找到匹配的集群</div>
                     ) : (
-                      <div className="cluster-select">
-                        <select
-                          multiple
-                          className="cluster-multi-select"
-                          value={selectedClusterIds
-                            .filter((id) => filteredClusterIdSet.has(id))
-                            .map(String)}
-                          onChange={handleClusterSelectChange}
-                          disabled={submitting || readOnly}
-                        >
-                          {filteredClusters.map((cluster) => (
-                            <option key={cluster.id} value={cluster.id}>
-                              #{cluster.id} {cluster.name}
-                              {cluster.prometheus_url
-                                ? ` (Prometheus)`
-                                : " (未配置 Prometheus)"}
-                            </option>
-                          ))}
-                        </select>
-                        <div className="schedule-dropdown-hint">
-                          可按住 Ctrl / Shift 多选
-                        </div>
-                      </div>
+                      <ul className="item-list scrollable">
+                        {filteredClusters.map((cluster) => (
+                          <li key={cluster.id}>
+                            <label>
+                              <input
+                                type="checkbox"
+                                checked={selectedClusterIds.includes(cluster.id)}
+                                onChange={() => toggleCluster(cluster.id)}
+                                disabled={submitting || readOnly}
+                              />
+                              <div>
+                                <div className="item-title-row">
+                                  <div className="item-name">{cluster.name}</div>
+                                  <span className="item-tag neutral">
+                                    #{cluster.id}
+                                  </span>
+                                </div>
+                                <div className="item-desc">
+                                  Prometheus：{cluster.prometheus_url || "未配置"}
+                                </div>
+                              </div>
+                            </label>
+                          </li>
+                        ))}
+                      </ul>
                     )}
+                    <div className="schedule-dropdown-hint">勾选即可多选</div>
                   </div>
                 </details>
               </div>

@@ -2537,7 +2537,7 @@ th {
 
 .schedule-modal {
   font-size: 12px;
-  color: #475569;
+  color: #0f172a;
   max-width: 860px;
   line-height: 1.4;
 }
@@ -2554,7 +2554,7 @@ th {
 
 .schedule-modal .settings-form label {
   font-size: 12px;
-  color: #475569;
+  color: inherit;
 }
 
 .schedule-modal .settings-form input,
@@ -2570,7 +2570,7 @@ th {
 .schedule-modal .settings-header p {
   margin: 0;
   font-size: 12px;
-  color: #475569;
+  color: inherit;
 }
 
 .schedule-modal .schedule-input {
@@ -2599,7 +2599,7 @@ th {
 .schedule-modal .schedule-cron-grid label {
   align-items: flex-start;
   font-size: 12px;
-  color: #475569;
+  color: inherit;
 }
 
 .schedule-modal .schedule-cron-input {
@@ -2615,7 +2615,7 @@ th {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: #475569;
+  color: inherit;
   font-weight: 600;
   padding: 6px 10px;
   border-radius: 999px;
@@ -2640,12 +2640,12 @@ th {
 .schedule-modal .inspection-item-group-title {
   padding: 0;
   font-size: 12px;
-  color: #475569;
+  color: inherit;
 }
 
 .schedule-modal .inspection-item-group-title .group-count {
   background: #e2e8f0;
-  color: #475569;
+  color: inherit;
 }
 
 .schedule-modal .inspection-items-toolbar {
@@ -2703,7 +2703,7 @@ th {
 
 .schedule-modal .schedule-dropdown-summary {
   font-size: 12px;
-  color: #64748b;
+  color: inherit;
   font-weight: 500;
   max-width: 380px;
   overflow: hidden;
@@ -2729,22 +2729,7 @@ th {
 
 .schedule-modal .schedule-dropdown-hint {
   font-size: 12px;
-  color: #64748b;
-}
-
-.schedule-modal .cluster-select {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.schedule-modal .cluster-multi-select {
-  min-height: 140px;
-  font-size: 13px;
-  padding: 8px 10px;
-  background: #fff;
-  border: 1px solid #dbe3f4;
-  box-shadow: inset 0 1px 0 rgba(248, 250, 252, 0.8);
+  color: inherit;
 }
 
 .schedule-modal .inspection-item-columns {
@@ -2780,6 +2765,7 @@ th {
 
 .schedule-modal .item-desc {
   font-size: 11px;
+  color: inherit;
 }
 
 .schedule-modal .item-tag {
@@ -2793,6 +2779,11 @@ th {
 
 .schedule-modal .inspection-item-columns {
   gap: 12px;
+}
+
+.schedule-modal .selection-hint,
+.schedule-modal .placeholder {
+  color: inherit;
 }
 
 .schedule-modal .item-list li:hover {
