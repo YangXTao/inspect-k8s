@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PROMETHEUS_VERSION = "3.2"
 MULTI_PROMETHEUS_VERSION_LABEL = "multi"
-DEFAULT_OPERATOR = "scheduled"
+DEFAULT_OPERATOR = "定时巡检任务"
+SCHEDULE_OPERATOR_SUFFIX = "（定时巡检）"
 
 
 def _normalize_prometheus_version(value: Optional[str]) -> str:
@@ -82,6 +83,15 @@ def _normalize_operator(name: Optional[str], fallback: str) -> str:
     return trimmed or fallback
 
 
+def _format_schedule_operator(
+    name: Optional[str], fallback: str
+) -> str:
+    base = _normalize_operator(name, fallback)
+    if base.endswith(SCHEDULE_OPERATOR_SUFFIX):
+        return base
+    return f"{base}{SCHEDULE_OPERATOR_SUFFIX}"
+
+
 def _should_skip_by_minute(schedule: models.InspectionSchedule, now: datetime) -> bool:
     if not schedule.last_run_at:
         return False
@@ -112,7 +122,7 @@ def _dispatch_schedule_runs(
 
     plan_json = _build_run_plan(items)
     prometheus_version = _derive_prometheus_version(items, multi_version_label)
-    operator = _normalize_operator(schedule.name, operator_label)
+    operator = _format_schedule_operator(schedule.name, operator_label)
 
     for cluster_id in cluster_ids:
         cluster = crud.get_cluster(db, cluster_id)

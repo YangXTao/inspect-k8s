@@ -5684,7 +5684,7 @@ const ScheduleSettingsPanel = ({
               <div className="settings-actions">
                 <button
                   type="button"
-                  className="secondary"
+                  className="secondary schedule-close-button"
                   onClick={handleCloseForm}
                 >
                   关闭
@@ -5772,7 +5772,7 @@ const ScheduleSettingsPanel = ({
                   />
                 </label>
               </div>
-              <div className="inspection-item-group schedule-section">
+              <div className="inspection-item-group schedule-section schedule-section-cluster">
                 <div className="inspection-item-group-title">
                   <span className="inspection-group-title-text">选择集群</span>
                   <span className="group-count">
@@ -5848,7 +5848,7 @@ const ScheduleSettingsPanel = ({
                   </div>
                 </details>
               </div>
-              <div className="inspection-item-group schedule-section">
+              <div className="inspection-item-group schedule-section schedule-section-items">
                 <div className="inspection-item-group-title">
                   <span className="inspection-group-title-text">选择巡检项</span>
                   <span className="group-count">
@@ -9679,7 +9679,7 @@ const hasManualKubeconfig = useMemo(
         message: `确认删除定时任务(${label})？该操作不可恢复。`,
         confirmLabel: "删除",
         variant: "danger",
-        scope: "settings",
+        scope: "global",
         onConfirm: () => performDeleteSchedule(schedule),
       });
     },

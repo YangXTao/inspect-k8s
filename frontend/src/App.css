@@ -2535,6 +2535,20 @@ th {
   overflow: visible;
 }
 
+.schedule-page .settings-list table {
+  font-size: 14px;
+}
+
+.schedule-page .settings-list th,
+.schedule-page .settings-list td {
+  padding: 10px 12px;
+}
+
+.schedule-page .settings-list .table-wrapper {
+  background: transparent;
+  max-height: none;
+}
+
 .schedule-modal {
   font-size: 14px;
   color: #475569;
@@ -2649,6 +2663,16 @@ th {
   border-radius: 16px;
   padding: 12px 14px;
   box-shadow: 0 12px 24px rgba(15, 23, 42, 0.06);
+}
+
+.schedule-modal .schedule-section-cluster {
+  background: #f0f7ff;
+  border-color: #dbeafe;
+}
+
+.schedule-modal .schedule-section-items {
+  background: #fff7ed;
+  border-color: #fed7aa;
 }
 
 .schedule-modal .inspection-item-group-title {
@@ -2845,6 +2869,16 @@ th {
 .schedule-modal button {
   font-size: 14px;
   padding: 8px 14px;
+}
+
+.schedule-modal .schedule-close-button {
+  background: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 8px 16px rgba(37, 99, 235, 0.2);
+}
+
+.schedule-modal .schedule-close-button:hover {
+  background: #1d4ed8;
 }
 
 .schedule-modal .inspection-item-columns {

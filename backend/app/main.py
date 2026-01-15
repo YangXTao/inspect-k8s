@@ -37,7 +37,7 @@ AGENT_HEARTBEAT_TIMEOUT = timedelta(minutes=AGENT_HEARTBEAT_TIMEOUT_MINUTES)
 CONNECTION_TEST_OPERATOR = "__system_connection_test__"
 MAX_CLUSTER_NAME_LENGTH = 150
 inspection_scheduler = InspectionScheduler(
-    operator_label="定时巡检",
+    operator_label="定时巡检任务",
     multi_version_label="多版本",
 )
 
