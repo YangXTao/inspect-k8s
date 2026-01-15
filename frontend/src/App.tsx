@@ -5782,7 +5782,7 @@ const ScheduleSettingsPanel = ({
                 </div>
                 <details className="schedule-dropdown" open={shouldExpandClusters}>
                   <summary>
-                    <span>选择集群</span>
+                    <span>集群列表</span>
                     <span className="schedule-dropdown-summary">
                       已选 {selectedClusterIds.length}
                     </span>
@@ -5827,24 +5827,24 @@ const ScheduleSettingsPanel = ({
                             cluster
                           );
                           return (
-                          <li key={cluster.id}>
-                            <label className="schedule-cluster-option">
-                              <div className="schedule-option-info">
-                                <div className="item-title-row">
-                                  <div className="item-name">{cluster.name}</div>
-                                  <span className="item-tag neutral">
-                                    {displayId}
-                                  </span>
+                            <li key={cluster.id}>
+                              <label className="schedule-cluster-option">
+                                <div className="schedule-option-info">
+                                  <div className="item-title-row">
+                                    <div className="item-name">{cluster.name}</div>
+                                    <span className="item-tag neutral">
+                                      {displayId}
+                                    </span>
+                                  </div>
                                 </div>
-                              </div>
-                              <input
-                                type="checkbox"
-                                checked={selectedClusterIds.includes(cluster.id)}
-                                onChange={() => toggleCluster(cluster.id)}
-                                disabled={submitting || readOnly}
-                              />
-                            </label>
-                          </li>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedClusterIds.includes(cluster.id)}
+                                  onChange={() => toggleCluster(cluster.id)}
+                                  disabled={submitting || readOnly}
+                                />
+                              </label>
+                            </li>
                           );
                         })}
                       </ul>

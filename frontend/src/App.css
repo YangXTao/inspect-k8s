@@ -2735,9 +2735,10 @@ th {
 .schedule-modal .schedule-cluster-option {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
   width: 100%;
+  flex-direction: row;
 }
 
 .schedule-modal .schedule-option-info {
@@ -2746,10 +2747,12 @@ th {
   gap: 4px;
   min-width: 0;
   flex: 1;
+  align-items: flex-start;
+  text-align: left;
 }
 
 .schedule-modal .schedule-cluster-option input[type="checkbox"] {
-  margin-left: 12px;
+  margin-left: auto;
 }
 
 .schedule-modal .inspection-item-columns {
@@ -2768,6 +2771,13 @@ th {
   padding-right: 6px;
 }
 
+.schedule-modal .schedule-cluster-list {
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+}
+
 .schedule-modal .item-list li {
   padding: 8px 10px;
   background: #ffffff;
@@ -2777,6 +2787,9 @@ th {
 
 .schedule-modal .item-list label {
   gap: 8px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
 }
 
 .schedule-modal .item-name {
@@ -2811,6 +2824,17 @@ th {
   border-color: #94a3b8;
   box-shadow: 0 8px 16px rgba(15, 23, 42, 0.08);
   transform: translateY(-1px);
+}
+
+.schedule-modal .schedule-cluster-list li {
+  box-shadow: none;
+  border-color: #e5e7eb;
+}
+
+.schedule-modal .schedule-cluster-list li:hover {
+  border-color: #cbd5f5;
+  box-shadow: none;
+  transform: none;
 }
 
 .schedule-modal input[type="checkbox"] {
