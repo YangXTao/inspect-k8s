@@ -281,6 +281,46 @@ curl -sS -X DELETE "$BASE_URL/inspection-items/123"
 
 ---
 
+## Inspection Schedules
+
+### GET /inspection-schedules
+
+定时巡检列表。
+
+```bash
+curl -sS "$BASE_URL/inspection-schedules"
+```
+
+### POST /inspection-schedules
+
+创建定时巡检（需要 License: inspections）。
+
+```bash
+curl -sS -H "Content-Type: application/json" \
+  -d "{\"name\":\"每日健康巡检\",\"cron\":\"0 2 * * *\",\"cluster_ids\":[1,2],\"item_ids\":[3,4,5],\"is_enabled\":true}" \
+  "$BASE_URL/inspection-schedules"
+```
+
+### PUT /inspection-schedules/{schedule_id}
+
+更新定时巡检（需要 License: inspections）。
+
+```bash
+curl -sS -X PUT -H "Content-Type: application/json" \
+  -d "{\"name\":\"周例行巡检\",\"cron\":\"0 3 * * 1\",\"cluster_ids\":[1],\"item_ids\":[3,4],\"is_enabled\":false}" \
+  "$BASE_URL/inspection-schedules/123"
+```
+
+### DELETE /inspection-schedules/{schedule_id}
+
+删除定时巡检（需要 License: inspections）。
+
+```bash
+curl -sS -X DELETE "$BASE_URL/inspection-schedules/123"
+```
+
+---
+
 ## Inspection Runs
 
 ### POST /inspection-runs

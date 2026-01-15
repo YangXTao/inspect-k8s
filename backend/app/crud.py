@@ -840,6 +840,88 @@ def delete_inspection_run(db: Session, run: models.InspectionRun) -> None:
     )
 
 
+def list_inspection_schedules(db: Session) -> List[models.InspectionSchedule]:
+    return (
+        db.query(models.InspectionSchedule)
+        .order_by(models.InspectionSchedule.created_at.desc())
+        .all()
+    )
+
+
+def get_inspection_schedule(
+    db: Session, schedule_id: int
+) -> Optional[models.InspectionSchedule]:
+    return (
+        db.query(models.InspectionSchedule)
+        .filter(models.InspectionSchedule.id == schedule_id)
+        .first()
+    )
+
+
+def create_inspection_schedule(
+    db: Session, schedule_in: schemas.InspectionScheduleCreate
+) -> models.InspectionSchedule:
+    payload = schedule_in.model_dump()
+    cluster_ids = payload.pop("cluster_ids", [])
+    item_ids = payload.pop("item_ids", [])
+    schedule = models.InspectionSchedule(**payload)
+    schedule.set_cluster_ids(cluster_ids)
+    schedule.set_item_ids(item_ids)
+    db.add(schedule)
+    db.commit()
+    db.refresh(schedule)
+    log_action(
+        db,
+        action="create",
+        entity_type="inspection_schedule",
+        entity_id=schedule.id,
+        description=f"Created inspection schedule '{schedule.name or schedule.id}'.",
+    )
+    return schedule
+
+
+def update_inspection_schedule(
+    db: Session,
+    schedule: models.InspectionSchedule,
+    schedule_in: schemas.InspectionScheduleUpdate,
+) -> models.InspectionSchedule:
+    payload = schedule_in.model_dump(exclude_unset=True)
+    if "cluster_ids" in payload:
+        schedule.set_cluster_ids(payload.pop("cluster_ids") or [])
+    if "item_ids" in payload:
+        schedule.set_item_ids(payload.pop("item_ids") or [])
+    for key, value in payload.items():
+        setattr(schedule, key, value)
+    schedule.updated_at = datetime.utcnow()
+    db.add(schedule)
+    db.commit()
+    db.refresh(schedule)
+    log_action(
+        db,
+        action="update",
+        entity_type="inspection_schedule",
+        entity_id=schedule.id,
+        description=f"Updated inspection schedule '{schedule.name or schedule.id}'.",
+    )
+    return schedule
+
+
+def delete_inspection_schedule(
+    db: Session, schedule: models.InspectionSchedule
+) -> None:
+    schedule_id = schedule.id
+    schedule_name = schedule.name
+    db.delete(schedule)
+    db.commit()
+    log_action(
+        db,
+        action="delete",
+        entity_type="inspection_schedule",
+        entity_id=schedule_id,
+        description=f"Deleted inspection schedule '{schedule_name or schedule_id}'.",
+    )
+
+
 def list_audit_logs(db: Session, limit: int = 100) -> List[models.AuditLog]:
     return (
         db.query(models.AuditLog)

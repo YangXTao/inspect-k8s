@@ -31,6 +31,7 @@ import {
   deleteCluster as apiDeleteCluster,
   deleteInspectionItem as apiDeleteInspectionItem,
   deleteInspectionRun as apiDeleteInspectionRun,
+  deleteInspectionSchedule as apiDeleteInspectionSchedule,
   exportInspectionItems,
   exportInspectionItemsYaml,
   getAgents,
@@ -39,6 +40,7 @@ import {
   getInspectionItems,
   getInspectionRun,
   getInspectionRuns,
+  getInspectionSchedules,
   getLicenseStatus,
   getReportDownloadUrl,
   importInspectionItems,
@@ -49,6 +51,8 @@ import {
   testClusterConnection,
   updateAgent as apiUpdateAgent,
   updateCluster,
+  createInspectionSchedule as apiCreateInspectionSchedule,
+  updateInspectionSchedule as apiUpdateInspectionSchedule,
   uploadLicense,
   uploadLicenseText,
   updateInspectionItem as apiUpdateInspectionItem,
@@ -67,6 +71,7 @@ import type {
   InspectionRun,
   InspectionRunListItem,
   InspectionRunStatus,
+  InspectionSchedule,
   LicenseStatus,
 } from "./types";
 
@@ -126,6 +131,7 @@ const DEFAULT_CLUSTER_PAGE_SIZE = CLUSTER_PAGE_SIZE_OPTIONS[0];
 const RUN_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const CLUSTER_ITEM_PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
 const RESULT_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
+const SCHEDULE_REFRESH_INTERVAL = 15000;
 const DEFAULT_PROMETHEUS_VERSION = "3.2";
 const DEFAULT_PROMETHEUS_VERSION_OPTIONS = [
   "1.8",
@@ -133,6 +139,7 @@ const DEFAULT_PROMETHEUS_VERSION_OPTIONS = [
   ...Array.from({ length: 10 }, (_, index) => `3.${index}`),
 ];
 const PROMETHEUS_VERSION_STORAGE_KEY = "prometheusVersionOptions.v1";
+const DEFAULT_SCHEDULE_CRON = ["0", "0", "*", "*", "*"] as const;
 
 const loadPrometheusVersionOptions = () => {
   if (typeof window === "undefined") {
@@ -233,6 +240,7 @@ const STATUS_CIRCLE_CIRCUMFERENCE = 2 * Math.PI * STATUS_CIRCLE_RADIUS;
 const CLUSTER_HEARTBEAT_REFRESH_INTERVAL = 30000;
 const RUN_STATUS_POLL_INTERVAL = 800;
 const RUN_STATUS_POLL_RETRY_INTERVAL = 1200;
+const LICENSE_POLL_INTERVAL = 60000;
 
 const clampProgress = (value?: number) => {
   if (typeof value !== "number" || Number.isNaN(value)) {
@@ -380,6 +388,29 @@ const formatDate = (value?: string | null) => {
   }
 
   return BEIJING_TIME_FORMATTER.format(parsed);
+};
+
+const parseDateValue = (value?: string | null) => {
+  if (!value) {
+    return null;
+  }
+
+  let normalised = value.trim();
+  if (!normalised) {
+    return null;
+  }
+
+  const hasTimezoneSuffix = /([+-]\d\d:\d\d|[zZ])$/.test(normalised);
+  if (!hasTimezoneSuffix) {
+    normalised = normalised.replace(" ", "T");
+    normalised = `${normalised}Z`;
+  }
+
+  const parsed = new Date(normalised);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed;
 };
 
 const describeExecutor = (
@@ -854,6 +885,24 @@ const TopNavigation = ({ onOpenSettings }: { onOpenSettings: () => void }) => {
       </Link>
       <nav className="top-navigation-links">
         <NavLink
+          to="/schedule"
+          className={({ isActive }) =>
+            `top-navigation-link${isActive ? " active" : ""}`
+          }
+        >
+          <span className="top-navigation-link-inner">
+            <span className="top-navigation-link-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path
+                  d="M7.5 3a.75.75 0 0 1 .75.75V6h7.5V3.75a.75.75 0 0 1 1.5 0V6h1.25A2.5 2.5 0 0 1 21 8.5v10A2.5 2.5 0 0 1 18.5 21h-13A2.5 2.5 0 0 1 3 18.5v-10A2.5 2.5 0 0 1 5.5 6h1.25V3.75A.75.75 0 0 1 7.5 3Zm11 9.5h-13v6a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-6Zm0-1.5v-2.5a1 1 0 0 0-1-1h-11a1 1 0 0 0-1 1V11h13Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </span>
+            <span>定时巡检</span>
+          </span>
+        </NavLink>
+        <NavLink
           to="/history"
           className={({ isActive }) =>
             `top-navigation-link${isActive ? " active" : ""}`
@@ -1161,6 +1210,7 @@ const OverviewView = ({
 }: OverviewProps) => {
   const enableServerClusterUpload = false;
   const enableServerConnectionTest = true;
+  const canManageClusters = license.canManageClusters;
   const [clusterPageSize, setClusterPageSize] = useState(
     DEFAULT_CLUSTER_PAGE_SIZE
   );
@@ -1355,6 +1405,11 @@ const OverviewView = ({
       prev.filter((id) => clusters.some((cluster) => cluster.id === id))
     );
   }, [clusters]);
+  useEffect(() => {
+    if (!canManageClusters) {
+      setSelectedClusterIds([]);
+    }
+  }, [canManageClusters]);
 
   const filteredClusterIdSet = useMemo(
     () => new Set(filteredClusters.map((cluster) => cluster.id)),
@@ -1370,17 +1425,23 @@ const OverviewView = ({
       selectedClusterIds.includes(cluster.id)
     );
 
-  const handleToggleCluster = useCallback((clusterId: number) => {
-    setSelectedClusterIds((prev) =>
-      prev.includes(clusterId)
-        ? prev.filter((id) => id !== clusterId)
-        : [...prev, clusterId]
-    );
-  }, []);
+  const handleToggleCluster = useCallback(
+    (clusterId: number) => {
+      if (!canManageClusters) {
+        return;
+      }
+      setSelectedClusterIds((prev) =>
+        prev.includes(clusterId)
+          ? prev.filter((id) => id !== clusterId)
+          : [...prev, clusterId]
+      );
+    },
+    [canManageClusters]
+  );
 
   const handleToggleAllClusters = useCallback(() => {
     setSelectedClusterIds((prev) => {
-      if (filteredClusters.length === 0) {
+      if (!canManageClusters || filteredClusters.length === 0) {
         return prev;
       }
       const next = new Set(prev);
@@ -1394,9 +1455,12 @@ const OverviewView = ({
       filteredClusters.forEach((cluster) => next.add(cluster.id));
       return Array.from(next);
     });
-  }, [filteredClusters]);
+  }, [filteredClusters, canManageClusters]);
 
   const handleDeleteSelectedClusters = useCallback(() => {
+    if (!canManageClusters) {
+      return;
+    }
     const targetIds = selectedClusterIds.filter((id) =>
       filteredClusterIdSet.has(id)
     );
@@ -1404,7 +1468,12 @@ const OverviewView = ({
       return;
     }
     void onDeleteClustersBulk(targetIds);
-  }, [filteredClusterIdSet, onDeleteClustersBulk, selectedClusterIds]);
+  }, [
+    filteredClusterIdSet,
+    onDeleteClustersBulk,
+    selectedClusterIds,
+    canManageClusters,
+  ]);
 
   return (
     <>
@@ -1473,6 +1542,13 @@ const OverviewView = ({
         </div>
       </header>
 
+      {!license.loading && !license.valid && (
+        <div className="feedback warning">
+          {license.reason ?? "当前 License 未生效或未安装。"}
+          请在「设置」中导入 License。
+        </div>
+      )}
+
       <section className="card cluster-panel">
         <div className="card-header">
           <h2>集群列表</h2>
@@ -1506,6 +1582,7 @@ const OverviewView = ({
                 type="button"
                 className="secondary"
                 onClick={handleToggleAllClusters}
+                disabled={!canManageClusters}
               >
                 {allSelected ? "取消全选" : "全选"}
               </button>
@@ -1513,7 +1590,7 @@ const OverviewView = ({
                 type="button"
                 className="secondary danger"
                 onClick={handleDeleteSelectedClusters}
-                disabled={selectedClusterIds.length === 0}
+                disabled={selectedClusterIds.length === 0 || !canManageClusters}
               >
                 删除
               </button>
@@ -1584,6 +1661,7 @@ const OverviewView = ({
                             handleToggleCluster(cluster.id);
                           }}
                           onClick={(event) => event.stopPropagation()}
+                          disabled={!canManageClusters}
                         />
                         <span className="cluster-id-badge">{displayId}</span>
                         <div className="cluster-name">{cluster.name}</div>
@@ -1595,6 +1673,7 @@ const OverviewView = ({
                             event.stopPropagation();
                             onEditCluster(cluster);
                           }}
+                          disabled={!canManageClusters}
                         >
                           编辑
                         </button>
@@ -1604,6 +1683,7 @@ const OverviewView = ({
                             event.stopPropagation();
                             await onDeleteCluster(cluster);
                           }}
+                          disabled={!canManageClusters}
                         >
                           删除
                         </button>
@@ -1620,7 +1700,7 @@ const OverviewView = ({
                               quiet: true,
                             });
                           }}
-                          disabled={isTesting}
+                          disabled={isTesting || !canManageClusters}
                         >
                           {isTesting ? "诊断中..." : "连接测试"}
                         </button>
@@ -1915,6 +1995,8 @@ const HistoryView = ({
   const [pageSize, setPageSize] = useState<number>(RUN_PAGE_SIZE_OPTIONS[0]);
   const [page, setPage] = useState(1);
   const [pageInput, setPageInput] = useState("");
+  const canRunInspections = license.canRunInspections;
+  const canDownloadReports = license.canDownloadReports;
 
   const filteredRuns = useMemo(() => {
     const normalizedKeyword = historyKeyword.trim().toLowerCase();
@@ -1973,6 +2055,11 @@ const HistoryView = ({
       prev.filter((id) => filteredRuns.some((run) => run.id === id))
     );
   }, [filteredRuns]);
+  useEffect(() => {
+    if (!canRunInspections) {
+      setSelectedRunIds([]);
+    }
+  }, [canRunInspections]);
 
   const pagedRuns = useMemo(() => {
     const start = (page - 1) * pageSize;
@@ -1991,17 +2078,23 @@ const HistoryView = ({
     filteredRuns.length > 0 &&
     filteredRuns.every((run) => selectedRunIds.includes(run.id));
 
-  const handleToggleRun = useCallback((runId: number) => {
-    setSelectedRunIds((prev) =>
-      prev.includes(runId)
-        ? prev.filter((id) => id !== runId)
-        : [...prev, runId]
-    );
-  }, []);
+  const handleToggleRun = useCallback(
+    (runId: number) => {
+      if (!canRunInspections) {
+        return;
+      }
+      setSelectedRunIds((prev) =>
+        prev.includes(runId)
+          ? prev.filter((id) => id !== runId)
+          : [...prev, runId]
+      );
+    },
+    [canRunInspections]
+  );
 
   const handleToggleAllRuns = useCallback(() => {
     setSelectedRunIds((prev) => {
-      if (filteredRuns.length === 0) {
+      if (!canRunInspections || filteredRuns.length === 0) {
         return prev;
       }
       const visibleIds = filteredRuns.map((run) => run.id);
@@ -2013,7 +2106,7 @@ const HistoryView = ({
       visibleIds.forEach((id) => merged.add(id));
       return Array.from(merged);
     });
-  }, [filteredRuns]);
+  }, [filteredRuns, canRunInspections]);
 
   const handlePageChange = useCallback(
     (offset: number) => {
@@ -2049,11 +2142,14 @@ const HistoryView = ({
   }, [pageInput, totalPages]);
 
   const handleDeleteSelectedRuns = useCallback(() => {
+    if (!canRunInspections) {
+      return;
+    }
     if (selectedRunIds.length === 0) {
       return;
     }
     void onDeleteRunsBulk(selectedRunIds);
-  }, [onDeleteRunsBulk, selectedRunIds]);
+  }, [onDeleteRunsBulk, selectedRunIds, canRunInspections]);
 
   const handleHistoryStatusFilterChange = (
     event: ChangeEvent<HTMLSelectElement>
@@ -2117,6 +2213,7 @@ const HistoryView = ({
               type="checkbox"
               checked={allSelected}
               onChange={handleToggleAllRuns}
+              disabled={!canRunInspections}
             />
             <span>当前页全选</span>
           </label>
@@ -2127,7 +2224,7 @@ const HistoryView = ({
             type="button"
             className="secondary danger"
             onClick={handleDeleteSelectedRuns}
-            disabled={selectedRunIds.length === 0}
+            disabled={selectedRunIds.length === 0 || !canRunInspections}
           >
             删除所选
           </button>
@@ -2237,6 +2334,7 @@ const HistoryView = ({
                           type="checkbox"
                           checked={isSelected}
                           onChange={() => handleToggleRun(run.id)}
+                          disabled={!canRunInspections}
                         />
                         <span>{runSlug}</span>
                       </label>
@@ -2274,22 +2372,34 @@ const HistoryView = ({
                       </button>
                       {run.report_path && (
                         <>
-                          <a
-                            className="link-button"
-                            href={getReportDownloadUrl(run.id, "pdf")}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            下载 PDF
-                          </a>
-                          <a
-                            className="link-button"
-                            href={getReportDownloadUrl(run.id, "md")}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            下载 MD
-                          </a>
+                          {canDownloadReports ? (
+                            <a
+                              className="link-button"
+                              href={getReportDownloadUrl(run.id, "pdf")}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              下载 PDF
+                            </a>
+                          ) : (
+                            <button type="button" className="link-button" disabled>
+                              下载 PDF
+                            </button>
+                          )}
+                          {canDownloadReports ? (
+                            <a
+                              className="link-button"
+                              href={getReportDownloadUrl(run.id, "md")}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              下载 MD
+                            </a>
+                          ) : (
+                            <button type="button" className="link-button" disabled>
+                              下载 MD
+                            </button>
+                          )}
                         </>
                       )}
                       {run.status === "running" && (
@@ -2297,6 +2407,7 @@ const HistoryView = ({
                           type="button"
                           className="link-button"
                           onClick={() => void onCancelRun(run)}
+                          disabled={!canRunInspections}
                         >
                           取消
                         </button>
@@ -2305,7 +2416,7 @@ const HistoryView = ({
                         type="button"
                         className="link-button danger"
                         onClick={() => void onDeleteRun(run)}
-                        disabled={!canDelete}
+                        disabled={!canDelete || !canRunInspections}
                       >
                         删除
                       </button>
@@ -2396,6 +2507,9 @@ const ClusterDetailView = ({
   const [prometheusVersion, setPrometheusVersion] = useState(
     DEFAULT_PROMETHEUS_VERSION
   );
+  const canManageClusters = license.canManageClusters;
+  const canRunInspections = license.canRunInspections;
+  const canDownloadReports = license.canDownloadReports;
 
   const resolvedClusterId = useMemo(
     () =>
@@ -2460,6 +2574,12 @@ const ClusterDetailView = ({
       prev.filter((id) => clusterRuns.some((run) => run.id === id))
     );
   }, [clusterRuns]);
+  useEffect(() => {
+    if (!canRunInspections) {
+      setSelectedIds(() => []);
+      setSelectedRunIds([]);
+    }
+  }, [canRunInspections, setSelectedIds, setSelectedRunIds]);
 
   const totalClusterRunPages = useMemo(
     () =>
@@ -2615,18 +2735,21 @@ const ClusterDetailView = ({
 
   const handleToggleItem = useCallback(
     (itemId: number) => {
+      if (!canRunInspections) {
+        return;
+      }
       setSelectedIds((prev) =>
         prev.includes(itemId)
           ? prev.filter((id) => id !== itemId)
           : [...prev, itemId]
       );
     },
-    [setSelectedIds]
+    [setSelectedIds, canRunInspections]
   );
 
   const handleToggleAllItems = useCallback(() => {
     setSelectedIds((prev) => {
-      if (filteredInspectionItems.length === 0) {
+      if (!canRunInspections || filteredInspectionItems.length === 0) {
         return prev;
       }
       const next = new Set(prev);
@@ -2640,19 +2763,25 @@ const ClusterDetailView = ({
       filteredInspectionItems.forEach((item) => next.add(item.id));
       return Array.from(next);
     });
-  }, [filteredInspectionItems, setSelectedIds]);
+  }, [filteredInspectionItems, setSelectedIds, canRunInspections]);
 
-  const handleToggleRunSelection = useCallback((runId: number) => {
-    setSelectedRunIds((prev) =>
-      prev.includes(runId)
-        ? prev.filter((id) => id !== runId)
-        : [...prev, runId]
-    );
-  }, []);
+  const handleToggleRunSelection = useCallback(
+    (runId: number) => {
+      if (!canRunInspections) {
+        return;
+      }
+      setSelectedRunIds((prev) =>
+        prev.includes(runId)
+          ? prev.filter((id) => id !== runId)
+          : [...prev, runId]
+      );
+    },
+    [canRunInspections]
+  );
 
   const handleToggleAllRuns = useCallback(() => {
     setSelectedRunIds((prev) => {
-      if (pagedClusterRuns.length === 0) {
+      if (!canRunInspections || pagedClusterRuns.length === 0) {
         return prev;
       }
       const visibleIds = pagedClusterRuns.map((run) => run.id);
@@ -2666,9 +2795,12 @@ const ClusterDetailView = ({
       visibleIds.forEach((id) => merged.add(id));
       return Array.from(merged);
     });
-  }, [pagedClusterRuns]);
+  }, [pagedClusterRuns, canRunInspections]);
 
   const handleDeleteSelectedRuns = useCallback(() => {
+    if (!canRunInspections) {
+      return;
+    }
     if (selectedRunIds.length === 0) {
       return;
     }
@@ -2679,17 +2811,26 @@ const ClusterDetailView = ({
       return;
     }
     void onDeleteRunsBulk(targetIds);
-  }, [clusterRuns, onDeleteRunsBulk, selectedRunIds]);
+  }, [clusterRuns, onDeleteRunsBulk, selectedRunIds, canRunInspections]);
 
   const handleStart = useCallback(() => {
     if (!cluster) {
+      return;
+    }
+    if (!canRunInspections) {
       return;
     }
     void onStartInspection(
       cluster.id,
       normalizePrometheusVersion(prometheusVersion, prometheusVersionOptions)
     );
-  }, [cluster, onStartInspection, prometheusVersion, prometheusVersionOptions]);
+  }, [
+    cluster,
+    onStartInspection,
+    prometheusVersion,
+    prometheusVersionOptions,
+    canRunInspections,
+  ]);
 
   const handleClusterRunPageChange = useCallback(
     (offset: number) => {
@@ -2800,7 +2941,7 @@ const ClusterDetailView = ({
               type="button"
               className="secondary"
               onClick={() => void onTestClusterConnection(cluster.id)}
-              disabled={isTesting}
+              disabled={isTesting || !canManageClusters}
             >
               {isTesting ? "测试中..." : "连接测试"}
             </button>
@@ -2809,7 +2950,7 @@ const ClusterDetailView = ({
             type="button"
             className="secondary"
             onClick={() => onEditCluster(cluster)}
-            disabled={!license.canManageClusters}
+            disabled={!canManageClusters}
           >
             编辑集群
           </button>
@@ -2817,7 +2958,7 @@ const ClusterDetailView = ({
             type="button"
             className="secondary danger"
             onClick={() => void onDeleteCluster(cluster)}
-            disabled={!license.canManageClusters}
+            disabled={!canManageClusters}
           >
             删除集群
           </button>
@@ -2888,6 +3029,7 @@ const ClusterDetailView = ({
               placeholder="输入巡检人姓名（可选）"
               value={operator}
               onChange={(event) => setOperator(event.target.value)}
+              disabled={!canRunInspections}
             />
           </label>
           <label
@@ -2899,6 +3041,7 @@ const ClusterDetailView = ({
               id={prometheusVersionInputId}
               value={prometheusVersion}
               onChange={(event) => setPrometheusVersion(event.target.value)}
+              disabled={!canRunInspections}
             >
               {prometheusVersionOptions.map((version) => (
                 <option key={version} value={version}>
@@ -2918,11 +3061,13 @@ const ClusterDetailView = ({
                 value={itemKeyword}
                 onChange={(event) => setItemKeyword(event.target.value)}
                 placeholder="关键字筛选"
+                disabled={!canRunInspections}
               />
               <button
                 type="button"
                 className="secondary"
                 onClick={handleToggleAllItems}
+                disabled={!canRunInspections}
               >
                 {allItemsSelected ? "清除选择" : "全选"}
               </button>
@@ -2933,7 +3078,7 @@ const ClusterDetailView = ({
                 disabled={
                   inspectionLoading ||
                   selectedIds.length === 0 ||
-                  !license.canRunInspections
+                  !canRunInspections
                 }
               >
                 {inspectionLoading ? "巡检中..." : "开始巡检"}
@@ -2972,6 +3117,7 @@ const ClusterDetailView = ({
                             type="checkbox"
                             checked={selectedIds.includes(item.id)}
                             onChange={() => handleToggleItem(item.id)}
+                            disabled={!canRunInspections}
                           />
                           <div>
                             <div className="item-title-row">
@@ -3009,6 +3155,7 @@ const ClusterDetailView = ({
                             type="checkbox"
                             checked={selectedIds.includes(item.id)}
                             onChange={() => handleToggleItem(item.id)}
+                            disabled={!canRunInspections}
                           />
                           <div>
                             <div className="item-title-row">
@@ -3112,6 +3259,7 @@ const ClusterDetailView = ({
                   )
                 }
                 onChange={handleToggleAllRuns}
+                disabled={!canRunInspections}
               />
               <span>全选</span>
             </label>
@@ -3125,7 +3273,7 @@ const ClusterDetailView = ({
               type="button"
               className="secondary danger"
               onClick={handleDeleteSelectedRuns}
-              disabled={selectedRunIds.length === 0}
+              disabled={selectedRunIds.length === 0 || !canRunInspections}
             >
               删除所选
             </button>
@@ -3160,6 +3308,7 @@ const ClusterDetailView = ({
                             type="checkbox"
                             checked={isSelected}
                             onChange={() => handleToggleRunSelection(run.id)}
+                            disabled={!canRunInspections}
                           />
                           <span>{runSlug}</span>
                         </label>
@@ -3200,22 +3349,34 @@ const ClusterDetailView = ({
                         </button>
                         {run.report_path && (
                           <>
-                            <a
-                              className="link-button"
-                              href={getReportDownloadUrl(run.id, "pdf")}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              下载 PDF
-                            </a>
-                            <a
-                              className="link-button"
-                              href={getReportDownloadUrl(run.id, "md")}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              下载 MD
-                            </a>
+                            {canDownloadReports ? (
+                              <a
+                                className="link-button"
+                                href={getReportDownloadUrl(run.id, "pdf")}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                下载 PDF
+                              </a>
+                            ) : (
+                              <button type="button" className="link-button" disabled>
+                                下载 PDF
+                              </button>
+                            )}
+                            {canDownloadReports ? (
+                              <a
+                                className="link-button"
+                                href={getReportDownloadUrl(run.id, "md")}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                下载 MD
+                              </a>
+                            ) : (
+                              <button type="button" className="link-button" disabled>
+                                下载 MD
+                              </button>
+                            )}
                           </>
                         )}
                         {run.status === "running" && (
@@ -3223,6 +3384,7 @@ const ClusterDetailView = ({
                             type="button"
                             className="link-button"
                             onClick={() => void onPauseRun(run)}
+                            disabled={!canRunInspections}
                           >
                             暂停
                           </button>
@@ -3232,6 +3394,7 @@ const ClusterDetailView = ({
                             type="button"
                             className="link-button"
                             onClick={() => void onResumeRun(run)}
+                            disabled={!canRunInspections}
                           >
                             继续
                           </button>
@@ -3242,6 +3405,7 @@ const ClusterDetailView = ({
                             type="button"
                             className="link-button"
                             onClick={() => void onCancelRun(run)}
+                            disabled={!canRunInspections}
                           >
                             取消
                           </button>
@@ -3250,7 +3414,7 @@ const ClusterDetailView = ({
                           type="button"
                           className="link-button danger"
                           onClick={() => void onDeleteRun(run)}
-                          disabled={!canDelete}
+                          disabled={!canDelete || !canRunInspections}
                         >
                           删除
                         </button>
@@ -3717,6 +3881,7 @@ interface InspectionSettingsPanelProps {
   submitting: boolean;
   notice: string | null;
   error: string | null;
+  license: LicenseCapabilities;
   onClose: () => void;
   onSave: (payload: {
     id?: number;
@@ -3738,6 +3903,7 @@ const InspectionSettingsPanel = ({
   submitting,
   notice,
   error,
+  license,
   onClose,
   onSave,
   onDelete,
@@ -3745,6 +3911,7 @@ const InspectionSettingsPanel = ({
   onExport,
   onImport,
 }: InspectionSettingsPanelProps) => {
+  const readOnly = !license.canRunInspections;
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [editingItem, setEditingItem] = useState<InspectionItem | null>(null);
   const [formName, setFormName] = useState("");
@@ -3890,6 +4057,12 @@ const InspectionSettingsPanel = ({
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (readOnly) {
+      setFormError(
+        license.reason ?? "当前 License 不支持巡检项管理。"
+      );
+      return;
+    }
     if (!formName.trim()) {
       setFormError("巡检项名称不能为空");
       return;
@@ -4166,7 +4339,7 @@ const InspectionSettingsPanel = ({
             type="button"
             className="secondary"
             onClick={() => onExport("json")}
-            disabled={submitting}
+            disabled={submitting || readOnly}
           >
             导出 JSON
           </button>
@@ -4174,7 +4347,7 @@ const InspectionSettingsPanel = ({
             type="button"
             className="secondary"
             onClick={() => onExport("yaml")}
-            disabled={submitting}
+            disabled={submitting || readOnly}
           >
             导出 YAML
           </button>
@@ -4182,7 +4355,7 @@ const InspectionSettingsPanel = ({
             type="button"
             className="secondary"
             onClick={handleImportClick}
-            disabled={submitting}
+            disabled={submitting || readOnly}
           >
             导入
           </button>
@@ -4198,6 +4371,11 @@ const InspectionSettingsPanel = ({
       {notice && <div className="feedback success">{notice}</div>}
       {error && <div className="feedback error">{error}</div>}
       {formError && <div className="feedback error">{formError}</div>}
+      {readOnly && (
+        <div className="feedback warning">
+          {license.reason ?? "当前 License 不支持巡检项管理。"}
+        </div>
+      )}
       <div className="inspection-settings-body">
         <section className="inspection-section inspection-section-list">
           <div className="inspection-section-header">
@@ -4220,6 +4398,7 @@ const InspectionSettingsPanel = ({
                       selectedFilteredCount === filteredItems.length
                     }
                     onChange={toggleSelectAll}
+                    disabled={readOnly}
                   />
                   <span>全选</span>
                 </label>
@@ -4228,7 +4407,7 @@ const InspectionSettingsPanel = ({
                   type="button"
                   className="link-button danger"
                   onClick={handleDeleteSelected}
-                  disabled={selectedFilteredCount === 0}
+                  disabled={selectedFilteredCount === 0 || readOnly}
                 >
                   批量删除
                 </button>
@@ -4299,6 +4478,7 @@ const InspectionSettingsPanel = ({
                               type="checkbox"
                               checked={selectedIds.includes(item.id)}
                               onChange={() => toggleSelection(item.id)}
+                              disabled={readOnly}
                             />
                             <span>{item.name}</span>
                           </label>
@@ -4320,6 +4500,7 @@ const InspectionSettingsPanel = ({
                             type="button"
                             className="link-button"
                             onClick={() => startEdit(item)}
+                            disabled={readOnly}
                           >
                             编辑
                           </button>
@@ -4327,6 +4508,7 @@ const InspectionSettingsPanel = ({
                             type="button"
                             className="link-button danger"
                             onClick={() => onDelete(item)}
+                            disabled={readOnly}
                           >
                             删除
                           </button>
@@ -4418,7 +4600,7 @@ const InspectionSettingsPanel = ({
                 type="text"
                 value={formName}
                 onChange={(event) => setFormName(event.target.value)}
-                disabled={submitting}
+                disabled={submitting || readOnly}
                 placeholder="例如：etcd-health"
               />
             </label>
@@ -4428,7 +4610,7 @@ const InspectionSettingsPanel = ({
                 <select
                   value={prometheusVersion}
                   onChange={(event) => setPrometheusVersion(event.target.value)}
-                  disabled={submitting}
+                  disabled={submitting || readOnly}
                 >
                   {prometheusVersionOptions.map((version) => (
                     <option key={version} value={version}>
@@ -4447,7 +4629,7 @@ const InspectionSettingsPanel = ({
                     event.target.value as "command" | "promql" | "other"
                   )
                 }
-                disabled={submitting}
+                disabled={submitting || readOnly}
               >
                 <option value="command">命令行</option>
                 <option value="promql">PromQL</option>
@@ -4461,7 +4643,7 @@ const InspectionSettingsPanel = ({
                   type="text"
                   value={customCheckType}
                   onChange={(event) => setCustomCheckType(event.target.value)}
-                  disabled={submitting}
+                  disabled={submitting || readOnly}
                   placeholder="custom"
                 />
               </label>
@@ -4472,7 +4654,7 @@ const InspectionSettingsPanel = ({
                 type="text"
                 value={formDescription}
                 onChange={(event) => setFormDescription(event.target.value)}
-                disabled={submitting}
+                disabled={submitting || readOnly}
                 placeholder="可选"
               />
             </label>
@@ -4483,7 +4665,7 @@ const InspectionSettingsPanel = ({
                   type="text"
                   value={commandText}
                   onChange={(event) => setCommandText(event.target.value)}
-                  disabled={submitting}
+                  disabled={submitting || readOnly}
                   placeholder="例如：kubectl get nodes"
                 />
               </label>
@@ -4494,7 +4676,7 @@ const InspectionSettingsPanel = ({
                 <textarea
                   value={commandSuggestion}
                   onChange={(event) => setCommandSuggestion(event.target.value)}
-                  disabled={submitting}
+                  disabled={submitting || readOnly}
                   rows={3}
                   placeholder="例如：检查证书是否临近过期"
                 />
@@ -4508,7 +4690,7 @@ const InspectionSettingsPanel = ({
                     type="text"
                     value={promqlExpression}
                     onChange={(event) => setPromqlExpression(event.target.value)}
-                    disabled={submitting}
+                    disabled={submitting || readOnly}
                     placeholder="例如：sum(rate(container_cpu_usage_seconds_total[5m]))"
                   />
                 </label>
@@ -4522,7 +4704,7 @@ const InspectionSettingsPanel = ({
                           event.target.value as "warning" | "critical"
                         )
                       }
-                      disabled={submitting}
+                      disabled={submitting || readOnly}
                     >
                       <option value="warning">告警</option>
                       <option value="critical">Critical（严重）</option>
@@ -4535,7 +4717,7 @@ const InspectionSettingsPanel = ({
                       onChange={(event) =>
                         setPromqlComparison(event.target.value)
                       }
-                      disabled={submitting}
+                      disabled={submitting || readOnly}
                     >
                       {[
                         ">",
@@ -4557,7 +4739,7 @@ const InspectionSettingsPanel = ({
                       type="number"
                       value={promqlThreshold}
                       onChange={(event) => setPromqlThreshold(event.target.value)}
-                      disabled={submitting}
+                      disabled={submitting || readOnly}
                       placeholder="例如：0.8"
                     />
                   </label>
@@ -4567,7 +4749,7 @@ const InspectionSettingsPanel = ({
                   <textarea
                     value={promqlDescribe}
                     onChange={(event) => setPromqlDescribe(event.target.value)}
-                    disabled={submitting}
+                    disabled={submitting || readOnly}
                     rows={3}
                     placeholder="达到阈值时写入巡检建议，例如：检查集群负载或扩容"
                   />
@@ -4581,7 +4763,7 @@ const InspectionSettingsPanel = ({
                 value={configText}
                 onChange={(event) => setConfigText(event.target.value)}
                 rows={6}
-                disabled={submitting}
+                disabled={submitting || readOnly}
               />
             </label>
           )}
@@ -4590,11 +4772,15 @@ const InspectionSettingsPanel = ({
               type="button"
               className="secondary"
               onClick={resetForm}
-              disabled={submitting}
+              disabled={submitting || readOnly}
             >
               重置
             </button>
-            <button type="submit" className="primary" disabled={submitting}>
+            <button
+              type="submit"
+              className="primary"
+              disabled={submitting || readOnly}
+            >
               {editingItem ? "保存修改" : "新增"}
             </button>
           </div>
@@ -4609,6 +4795,7 @@ interface PrometheusVersionSettingsPanelProps {
   items: InspectionItem[];
   versions: string[];
   defaultVersion: string;
+  license: LicenseCapabilities;
   onAddVersion: (value: string) => { ok: boolean; message?: string };
   onDeleteVersion: (value: string) => { ok: boolean; message?: string };
 }
@@ -4617,9 +4804,11 @@ const PrometheusVersionSettingsPanel = ({
   items,
   versions,
   defaultVersion,
+  license,
   onAddVersion,
   onDeleteVersion,
 }: PrometheusVersionSettingsPanelProps) => {
+  const readOnly = !license.canRunInspections;
   const [versionInput, setVersionInput] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -4640,6 +4829,11 @@ const PrometheusVersionSettingsPanel = ({
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (readOnly) {
+      setError(license.reason ?? "当前 License 不支持版本管理");
+      setNotice(null);
+      return;
+    }
     const result = onAddVersion(versionInput);
     if (!result.ok) {
       setError(result.message ?? "版本添加失败");
@@ -4652,6 +4846,11 @@ const PrometheusVersionSettingsPanel = ({
   };
 
   const handleDelete = (value: string) => {
+    if (readOnly) {
+      setError(license.reason ?? "当前 License 不支持版本管理");
+      setNotice(null);
+      return;
+    }
     const result = onDeleteVersion(value);
     if (!result.ok) {
       setError(result.message ?? "版本删除失败");
@@ -4680,6 +4879,11 @@ const PrometheusVersionSettingsPanel = ({
           <p>用于 PromQL 巡检项的版本筛选与显示</p>
         </div>
       </div>
+      {readOnly && (
+        <div className="feedback warning">
+          {license.reason ?? "当前 License 不支持版本管理。"}
+        </div>
+      )}
       {notice && <div className="feedback success">{notice}</div>}
       {error && <div className="feedback error">{error}</div>}
       <div className="inspection-settings-body">
@@ -4696,6 +4900,7 @@ const PrometheusVersionSettingsPanel = ({
                 type="button"
                 className="secondary version-manager-toggle"
                 onClick={() => setShowDeleteControls((prev) => !prev)}
+                disabled={readOnly}
               >
                 {showDeleteControls ? "完成" : "编辑删除"}
               </button>
@@ -4730,7 +4935,7 @@ const PrometheusVersionSettingsPanel = ({
                           </span>
                         )}
                       </span>
-                      {showDeleteControls && canDelete && (
+                      {showDeleteControls && canDelete && !readOnly && (
                         <button
                           type="button"
                           className="version-remove"
@@ -4759,9 +4964,10 @@ const PrometheusVersionSettingsPanel = ({
                     }
                   }}
                   placeholder="例如：3.2"
+                  disabled={readOnly}
                 />
               </label>
-              <button type="submit" className="secondary">
+              <button type="submit" className="secondary" disabled={readOnly}>
                 添加版本
               </button>
             </form>
@@ -4771,6 +4977,1207 @@ const PrometheusVersionSettingsPanel = ({
     </div>
   );
 };
+
+interface ScheduleSettingsPanelProps {
+  schedules: InspectionSchedule[];
+  clusters: ClusterConfig[];
+  clusterDisplayIds: Record<number, string>;
+  items: InspectionItem[];
+  prometheusVersionOptions: string[];
+  submitting: boolean;
+  notice: string | null;
+  error: string | null;
+  license: LicenseCapabilities;
+  onSave: (payload: {
+    id?: number;
+    name?: string;
+    cron: string;
+    clusterIds: number[];
+    itemIds: number[];
+    isEnabled: boolean;
+  }) => Promise<void>;
+  onDelete: (schedule: InspectionSchedule) => void;
+  onDeleteMany: (scheduleIds: number[]) => void;
+  onToggleEnabled: (schedule: InspectionSchedule, enabled: boolean) => void;
+}
+
+const ScheduleSettingsPanel = ({
+  schedules,
+  clusters,
+  clusterDisplayIds,
+  items,
+  prometheusVersionOptions,
+  submitting,
+  notice,
+  error,
+  license,
+  onSave,
+  onDelete,
+  onDeleteMany,
+  onToggleEnabled,
+}: ScheduleSettingsPanelProps) => {
+  const readOnly = !license.canRunInspections;
+  const [editingSchedule, setEditingSchedule] =
+    useState<InspectionSchedule | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [formName, setFormName] = useState("");
+  const [cronMinute, setCronMinute] = useState(DEFAULT_SCHEDULE_CRON[0]);
+  const [cronHour, setCronHour] = useState(DEFAULT_SCHEDULE_CRON[1]);
+  const [cronDay, setCronDay] = useState(DEFAULT_SCHEDULE_CRON[2]);
+  const [cronMonth, setCronMonth] = useState(DEFAULT_SCHEDULE_CRON[3]);
+  const [cronWeek, setCronWeek] = useState(DEFAULT_SCHEDULE_CRON[4]);
+  const [formEnabled, setFormEnabled] = useState(true);
+  const [selectedClusterIds, setSelectedClusterIds] = useState<number[]>([]);
+  const [selectedItemIds, setSelectedItemIds] = useState<number[]>([]);
+  const [clusterKeyword, setClusterKeyword] = useState("");
+  const [itemKeyword, setItemKeyword] = useState("");
+  const [itemVersionFilter, setItemVersionFilter] = useState("all");
+  const [formError, setFormError] = useState<string | null>(null);
+  const [scheduleKeyword, setScheduleKeyword] = useState("");
+  const [scheduleStatusFilter, setScheduleStatusFilter] = useState<
+    "all" | "enabled" | "disabled"
+  >("all");
+  const [schedulePageSize, setSchedulePageSize] = useState(10);
+  const [schedulePage, setSchedulePage] = useState(1);
+  const [schedulePageInput, setSchedulePageInput] = useState("");
+  const [selectedScheduleIds, setSelectedScheduleIds] = useState<number[]>([]);
+
+  const scheduleClusterMap = useMemo(() => {
+    const map = new Map<number, ClusterConfig>();
+    clusters.forEach((cluster) => map.set(cluster.id, cluster));
+    return map;
+  }, [clusters]);
+  const scheduleItemMap = useMemo(() => {
+    const map = new Map<number, InspectionItem>();
+    items.forEach((item) => map.set(item.id, item));
+    return map;
+  }, [items]);
+
+  const resetForm = useCallback(() => {
+    setEditingSchedule(null);
+    setFormName("");
+    setCronMinute(DEFAULT_SCHEDULE_CRON[0]);
+    setCronHour(DEFAULT_SCHEDULE_CRON[1]);
+    setCronDay(DEFAULT_SCHEDULE_CRON[2]);
+    setCronMonth(DEFAULT_SCHEDULE_CRON[3]);
+    setCronWeek(DEFAULT_SCHEDULE_CRON[4]);
+    setFormEnabled(true);
+    setSelectedClusterIds([]);
+    setSelectedItemIds([]);
+    setClusterKeyword("");
+    setItemKeyword("");
+    setItemVersionFilter("all");
+    setFormError(null);
+  }, []);
+
+  useEffect(() => {
+    if (!editingSchedule) {
+      resetForm();
+      return;
+    }
+    const parts = editingSchedule.cron.trim().split(/\s+/);
+    const resolvedParts =
+      parts.length === 5 ? parts : [...DEFAULT_SCHEDULE_CRON];
+    setFormName(editingSchedule.name ?? "");
+    setCronMinute(resolvedParts[0]);
+    setCronHour(resolvedParts[1]);
+    setCronDay(resolvedParts[2]);
+    setCronMonth(resolvedParts[3]);
+    setCronWeek(resolvedParts[4]);
+    setFormEnabled(editingSchedule.is_enabled);
+    setSelectedClusterIds(editingSchedule.cluster_ids ?? []);
+    setSelectedItemIds(editingSchedule.item_ids ?? []);
+    setFormError(null);
+  }, [editingSchedule, resetForm]);
+
+  useEffect(() => {
+    setSelectedClusterIds((prev) =>
+      prev.filter((id) => scheduleClusterMap.has(id))
+    );
+  }, [scheduleClusterMap]);
+
+  useEffect(() => {
+    setSelectedItemIds((prev) =>
+      prev.filter((id) => scheduleItemMap.has(id))
+    );
+  }, [scheduleItemMap]);
+
+  useEffect(() => {
+    if (
+      itemVersionFilter !== "all" &&
+      !prometheusVersionOptions.includes(itemVersionFilter)
+    ) {
+      setItemVersionFilter("all");
+    }
+  }, [itemVersionFilter, prometheusVersionOptions]);
+
+  useEffect(() => {
+    setSchedulePage(1);
+    setSchedulePageInput("");
+  }, [schedulePageSize, scheduleKeyword, scheduleStatusFilter]);
+
+  useEffect(() => {
+    setSelectedScheduleIds((prev) =>
+      prev.filter((id) => schedules.some((schedule) => schedule.id === id))
+    );
+  }, [schedules]);
+
+  useEffect(() => {
+    if (!license.canRunInspections) {
+      setSelectedScheduleIds([]);
+    }
+  }, [license.canRunInspections]);
+
+  const handleOpenCreate = () => {
+    setEditingSchedule(null);
+    setFormOpen(true);
+  };
+
+  const handleOpenEdit = (schedule: InspectionSchedule) => {
+    setEditingSchedule(schedule);
+    setFormOpen(true);
+  };
+
+  const handleCloseForm = () => {
+    setFormOpen(false);
+    resetForm();
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (readOnly) {
+      setFormError(license.reason ?? "当前 License 不支持定时巡检。");
+      return;
+    }
+    const parts = [
+      cronMinute.trim(),
+      cronHour.trim(),
+      cronDay.trim(),
+      cronMonth.trim(),
+      cronWeek.trim(),
+    ];
+    if (parts.some((part) => !part)) {
+      setFormError("请完整填写分/时/日/月/周");
+      return;
+    }
+    if (selectedClusterIds.length === 0) {
+      setFormError("请至少选择一个集群");
+      return;
+    }
+    if (selectedItemIds.length === 0) {
+      setFormError("请至少选择一个巡检项");
+      return;
+    }
+    setFormError(null);
+    await onSave({
+      id: editingSchedule?.id,
+      name: formName.trim(),
+      cron: parts.join(" "),
+      clusterIds: selectedClusterIds,
+      itemIds: selectedItemIds,
+      isEnabled: formEnabled,
+    });
+    handleCloseForm();
+  };
+
+  const filteredClusters = useMemo(() => {
+    const keyword = clusterKeyword.trim().toLowerCase();
+    const list = clusters.slice().sort((a, b) => {
+      const nameA = (a.name ?? "").toLowerCase();
+      const nameB = (b.name ?? "").toLowerCase();
+      if (nameA === nameB) {
+        return a.id - b.id;
+      }
+      return nameA.localeCompare(nameB);
+    });
+    if (!keyword) {
+      return list;
+    }
+    return list.filter((cluster) =>
+      (cluster.name ?? "").toLowerCase().includes(keyword)
+    );
+  }, [clusters, clusterKeyword]);
+
+  const filteredClusterIdSet = useMemo(
+    () => new Set(filteredClusters.map((cluster) => cluster.id)),
+    [filteredClusters]
+  );
+  const selectedFilteredClusterCount = useMemo(
+    () =>
+      selectedClusterIds.filter((id) => filteredClusterIdSet.has(id)).length,
+    [selectedClusterIds, filteredClusterIdSet]
+  );
+  const allFilteredClustersSelected =
+    filteredClusters.length > 0 &&
+    selectedFilteredClusterCount === filteredClusters.length;
+
+  const toggleCluster = useCallback((clusterId: number) => {
+    setSelectedClusterIds((prev) =>
+      prev.includes(clusterId)
+        ? prev.filter((id) => id !== clusterId)
+        : [...prev, clusterId]
+    );
+  }, []);
+
+  const toggleAllClusters = useCallback(() => {
+    setSelectedClusterIds((prev) => {
+      if (filteredClusters.length === 0) {
+        return prev;
+      }
+      const next = new Set(prev);
+      const allSelected = filteredClusters.every((cluster) =>
+        next.has(cluster.id)
+      );
+      if (allSelected) {
+        filteredClusters.forEach((cluster) => next.delete(cluster.id));
+        return Array.from(next);
+      }
+      filteredClusters.forEach((cluster) => next.add(cluster.id));
+      return Array.from(next);
+    });
+  }, [filteredClusters]);
+
+  const filteredItems = useMemo(() => {
+    const keyword = itemKeyword.trim().toLowerCase();
+    const resolvedVersion =
+      itemVersionFilter === "all"
+        ? null
+        : normalizePrometheusVersion(
+            itemVersionFilter,
+            prometheusVersionOptions
+          );
+    return items.filter((item) => {
+      const name = (item.name ?? "").toLowerCase();
+      const desc = (item.description ?? "").toLowerCase();
+      const keywordMatch =
+        !keyword || name.includes(keyword) || desc.includes(keyword);
+      if (!keywordMatch) {
+        return false;
+      }
+      if (!isPromqlType(item.check_type)) {
+        return true;
+      }
+      if (!resolvedVersion) {
+        return true;
+      }
+      return (
+        normalizePrometheusVersion(
+          item.prometheus_version,
+          prometheusVersionOptions
+        ) === resolvedVersion
+      );
+    });
+  }, [
+    itemKeyword,
+    itemVersionFilter,
+    items,
+    prometheusVersionOptions,
+  ]);
+
+  const filteredItemIdSet = useMemo(
+    () => new Set(filteredItems.map((item) => item.id)),
+    [filteredItems]
+  );
+  const selectedFilteredItemCount = useMemo(
+    () => selectedItemIds.filter((id) => filteredItemIdSet.has(id)).length,
+    [selectedItemIds, filteredItemIdSet]
+  );
+  const allFilteredItemsSelected =
+    filteredItems.length > 0 &&
+    selectedFilteredItemCount === filteredItems.length;
+
+  const toggleItem = useCallback((itemId: number) => {
+    setSelectedItemIds((prev) =>
+      prev.includes(itemId)
+        ? prev.filter((id) => id !== itemId)
+        : [...prev, itemId]
+    );
+  }, []);
+
+  const toggleAllItems = useCallback(() => {
+    setSelectedItemIds((prev) => {
+      if (filteredItems.length === 0) {
+        return prev;
+      }
+      const next = new Set(prev);
+      const allSelected = filteredItems.every((item) => next.has(item.id));
+      if (allSelected) {
+        filteredItems.forEach((item) => next.delete(item.id));
+        return Array.from(next);
+      }
+      filteredItems.forEach((item) => next.add(item.id));
+      return Array.from(next);
+    });
+  }, [filteredItems]);
+
+  const filteredPromqlItems = useMemo(
+    () => filteredItems.filter((item) => isPromqlType(item.check_type)),
+    [filteredItems]
+  );
+  const filteredCommonItems = useMemo(
+    () => filteredItems.filter((item) => !isPromqlType(item.check_type)),
+    [filteredItems]
+  );
+
+  const sortedSchedules = useMemo(() => {
+    return schedules.slice().sort((a, b) => {
+      const timeA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+      const timeB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+      if (timeA === timeB) {
+        return b.id - a.id;
+      }
+      return timeB - timeA;
+    });
+  }, [schedules]);
+
+  const filteredSchedules = useMemo(() => {
+    const keyword = scheduleKeyword.trim().toLowerCase();
+    return sortedSchedules.filter((schedule) => {
+      if (scheduleStatusFilter === "enabled" && !schedule.is_enabled) {
+        return false;
+      }
+      if (scheduleStatusFilter === "disabled" && schedule.is_enabled) {
+        return false;
+      }
+      if (!keyword) {
+        return true;
+      }
+      const name = schedule.name?.trim() || `定时巡检 #${schedule.id}`;
+      const clusterNames = schedule.cluster_ids
+        .map((id) => scheduleClusterMap.get(id)?.name ?? `#${id}`)
+        .join(" ");
+      const itemNames = schedule.item_ids
+        .map((id) => scheduleItemMap.get(id)?.name ?? `#${id}`)
+        .join(" ");
+      const haystack = `${name} ${schedule.cron} ${clusterNames} ${itemNames}`.toLowerCase();
+      return haystack.includes(keyword);
+    });
+  }, [
+    scheduleKeyword,
+    scheduleStatusFilter,
+    sortedSchedules,
+    scheduleClusterMap,
+    scheduleItemMap,
+  ]);
+
+  const scheduleTotalPages = useMemo(
+    () =>
+      Math.max(
+        1,
+        Math.ceil(filteredSchedules.length / Math.max(schedulePageSize, 1))
+      ),
+    [filteredSchedules.length, schedulePageSize]
+  );
+
+  useEffect(() => {
+    setSchedulePage((prev) =>
+      Math.min(Math.max(prev, 1), scheduleTotalPages)
+    );
+  }, [scheduleTotalPages]);
+
+  const pagedSchedules = useMemo(() => {
+    const start = (schedulePage - 1) * schedulePageSize;
+    return filteredSchedules.slice(start, start + schedulePageSize);
+  }, [filteredSchedules, schedulePage, schedulePageSize]);
+
+  const visibleSelectedScheduleCount = useMemo(
+    () =>
+      selectedScheduleIds.filter((id) =>
+        filteredSchedules.some((schedule) => schedule.id === id)
+      ).length,
+    [selectedScheduleIds, filteredSchedules]
+  );
+
+  const allSchedulesSelected =
+    filteredSchedules.length > 0 &&
+    filteredSchedules.every((schedule) =>
+      selectedScheduleIds.includes(schedule.id)
+    );
+
+  const handleToggleSchedule = useCallback(
+    (scheduleId: number) => {
+      if (readOnly) {
+        return;
+      }
+      setSelectedScheduleIds((prev) =>
+        prev.includes(scheduleId)
+          ? prev.filter((id) => id !== scheduleId)
+          : [...prev, scheduleId]
+      );
+    },
+    [readOnly]
+  );
+
+  const handleToggleAllSchedules = useCallback(() => {
+    setSelectedScheduleIds((prev) => {
+      if (readOnly || filteredSchedules.length === 0) {
+        return prev;
+      }
+      const visibleIds = filteredSchedules.map((schedule) => schedule.id);
+      const allVisibleSelected = visibleIds.every((id) =>
+        prev.includes(id)
+      );
+      if (allVisibleSelected) {
+        return prev.filter((id) => !visibleIds.includes(id));
+      }
+      const merged = new Set(prev);
+      visibleIds.forEach((id) => merged.add(id));
+      return Array.from(merged);
+    });
+  }, [filteredSchedules, readOnly]);
+
+  const handleDeleteSelectedSchedules = useCallback(() => {
+    if (readOnly) {
+      return;
+    }
+    if (selectedScheduleIds.length === 0) {
+      return;
+    }
+    onDeleteMany(selectedScheduleIds);
+  }, [readOnly, selectedScheduleIds, onDeleteMany]);
+
+  const handleSchedulePageChange = useCallback(
+    (offset: number) => {
+      setSchedulePage((prev) => {
+        const next = prev + offset;
+        if (next < 1) {
+          return 1;
+        }
+        if (next > scheduleTotalPages) {
+          return scheduleTotalPages;
+        }
+        return next;
+      });
+    },
+    [scheduleTotalPages]
+  );
+
+  const handleSchedulePageJump = useCallback(() => {
+    const trimmed = schedulePageInput.trim();
+    if (!trimmed) {
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isNaN(parsed) && Number.isInteger(parsed)) {
+      const target = Math.min(Math.max(parsed, 1), scheduleTotalPages);
+      setSchedulePage(target);
+    }
+    setSchedulePageInput("");
+  }, [schedulePageInput, scheduleTotalPages]);
+
+  const summarizeNames = useCallback(
+    (ids: number[], map: Map<number, { name?: string | null }>) => {
+      const names = ids.map((id) => map.get(id)?.name || `#${id}`);
+      if (names.length === 0) {
+        return "-";
+      }
+      if (names.length <= 2) {
+        return names.join("、");
+      }
+      return `${names.slice(0, 2).join("、")} 等${names.length}个`;
+    },
+    []
+  );
+
+  const getPrometheusSummary = useCallback(
+    (schedule: InspectionSchedule) => {
+      const versions = new Set<string>();
+      schedule.item_ids.forEach((itemId) => {
+        const item = scheduleItemMap.get(itemId);
+        if (!item || !isPromqlType(item.check_type)) {
+          return;
+        }
+        versions.add(
+          normalizePrometheusVersion(
+            item.prometheus_version,
+            prometheusVersionOptions
+          )
+        );
+      });
+      if (versions.size === 0) {
+        return "-";
+      }
+      return Array.from(versions).sort().join(", ");
+    },
+    [scheduleItemMap, prometheusVersionOptions]
+  );
+
+  return (
+    <div className="inspection-settings-panel">
+      <div className="card-header history-header">
+        <div>
+          <h2>定时巡检</h2>
+          <p className="card-caption">基于 Cron 表达式定时触发巡检任务</p>
+        </div>
+        <div className="card-actions">
+          <button
+            type="button"
+            className="primary"
+            onClick={handleOpenCreate}
+            disabled={submitting || readOnly}
+          >
+            创建定时任务
+          </button>
+        </div>
+      </div>
+      {notice && <div className="feedback success">{notice}</div>}
+      {error && <div className="feedback error">{error}</div>}
+      {readOnly && (
+        <div className="feedback warning">
+          {license.reason ?? "当前 License 不支持定时巡检。"}
+        </div>
+      )}
+      <div className="inspection-settings-body">
+        <section className="inspection-section inspection-section-list">
+          <div className="inspection-section-header">
+            <div>
+              <h4>定时任务列表</h4>
+              <span className="inspection-section-hint">
+                支持启用/停用与编辑任务
+              </span>
+            </div>
+            <span className="inspection-section-count">
+              共 {filteredSchedules.length} 条
+            </span>
+          </div>
+          <div className="settings-list">
+            <div className="history-toolbar">
+              <div className="history-selection">
+                <label className="table-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={allSchedulesSelected}
+                    onChange={handleToggleAllSchedules}
+                    disabled={readOnly}
+                  />
+                  <span>当前页全选</span>
+                </label>
+                <span className="selection-hint">
+                  已选 {visibleSelectedScheduleCount} / {filteredSchedules.length}
+                </span>
+                <button
+                  type="button"
+                  className="secondary danger"
+                  onClick={handleDeleteSelectedSchedules}
+                  disabled={selectedScheduleIds.length === 0 || readOnly}
+                >
+                  删除所选
+                </button>
+              </div>
+              <div className="history-filter-row">
+                <div className="history-chip history-chip-select">
+                  <span className="history-chip-label">状态筛选</span>
+                  <select
+                    value={scheduleStatusFilter}
+                    onChange={(event) =>
+                      setScheduleStatusFilter(
+                        event.target.value as "all" | "enabled" | "disabled"
+                      )
+                    }
+                  >
+                    <option value="all">全部</option>
+                    <option value="enabled">启用</option>
+                    <option value="disabled">停用</option>
+                  </select>
+                </div>
+                <div className="history-chip history-chip-search">
+                  <span className="history-chip-label">关键字</span>
+                  <input
+                    type="text"
+                    value={scheduleKeyword}
+                    onChange={(event) => setScheduleKeyword(event.target.value)}
+                    placeholder="按名称 / Cron / 集群 / 巡检项搜索"
+                  />
+                  {scheduleKeyword && (
+                    <button
+                      type="button"
+                      className="history-search-clear"
+                      onClick={() => setScheduleKeyword("")}
+                      aria-label="清空关键字"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="table-wrapper">
+              {filteredSchedules.length === 0 ? (
+                <div className="placeholder">暂无定时巡检任务</div>
+              ) : (
+                <table>
+                  <thead>
+                    <tr>
+                      <th></th>
+                      <th>名称</th>
+                      <th>Cron</th>
+                      <th>集群</th>
+                      <th>巡检项</th>
+                      <th>状态</th>
+                      <th>最近执行</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pagedSchedules.map((schedule) => {
+                      const label =
+                        schedule.name?.trim() ||
+                        `定时巡检 #${schedule.id}`;
+                      const clusterSummary = summarizeNames(
+                        schedule.cluster_ids,
+                        scheduleClusterMap
+                      );
+                      const versionSummary = getPrometheusSummary(schedule);
+                      return (
+                        <tr key={schedule.id}>
+                          <td>
+                            <label className="table-checkbox">
+                              <input
+                                type="checkbox"
+                                checked={selectedScheduleIds.includes(schedule.id)}
+                                onChange={() => handleToggleSchedule(schedule.id)}
+                                disabled={readOnly}
+                              />
+                            </label>
+                          </td>
+                          <td>{label}</td>
+                          <td className="th-nowrap">{schedule.cron}</td>
+                          <td>
+                            <div className="schedule-cell">
+                              <span>{clusterSummary}</span>
+                              <span className="schedule-muted">
+                                {schedule.cluster_ids.length} 个集群
+                              </span>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="schedule-cell">
+                              <span>
+                                {schedule.item_ids.length} 项
+                              </span>
+                              <span className="schedule-muted">
+                                PromQL 版本：{versionSummary}
+                              </span>
+                            </div>
+                          </td>
+                          <td>
+                            <span
+                              className={`chip${
+                                schedule.is_enabled ? "" : " muted"
+                              }`}
+                            >
+                              {schedule.is_enabled ? "启用" : "停用"}
+                            </span>
+                          </td>
+                          <td>
+                            {schedule.last_run_at
+                              ? formatDate(schedule.last_run_at)
+                              : "-"}
+                          </td>
+                          <td className="actions">
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={() => handleOpenEdit(schedule)}
+                              disabled={readOnly}
+                            >
+                              编辑
+                            </button>
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={() =>
+                                onToggleEnabled(
+                                  schedule,
+                                  !schedule.is_enabled
+                                )
+                              }
+                              disabled={readOnly}
+                            >
+                              {schedule.is_enabled ? "停用" : "启用"}
+                            </button>
+                            <button
+                              type="button"
+                              className="link-button danger"
+                              onClick={() => onDelete(schedule)}
+                              disabled={readOnly}
+                            >
+                              删除
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            {filteredSchedules.length > 0 && (
+              <div className="history-pagination-controls schedule-pagination">
+                <label className="page-size-control">
+                  每页
+                  <select
+                    value={schedulePageSize}
+                    onChange={(event) =>
+                      setSchedulePageSize(Number(event.target.value))
+                    }
+                    className="page-size-select"
+                  >
+                    {[10, 20, 50].map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="history-pagination-buttons">
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => handleSchedulePageChange(-1)}
+                    disabled={schedulePage <= 1}
+                  >
+                    上一页
+                  </button>
+                  <span>
+                    第 {schedulePage} / {scheduleTotalPages} 页
+                  </span>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => handleSchedulePageChange(1)}
+                    disabled={schedulePage >= scheduleTotalPages}
+                  >
+                    下一页
+                  </button>
+                </div>
+                <label className="history-page-jump">
+                  跳转
+                  <input
+                    type="number"
+                    min={1}
+                    value={schedulePageInput}
+                    onChange={(event) =>
+                      setSchedulePageInput(event.target.value)
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        handleSchedulePageJump();
+                      }
+                    }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={handleSchedulePageJump}
+                >
+                  确定
+                </button>
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+      {formOpen && (
+        <div className="modal-backdrop" aria-modal="true">
+          <div className="modal large schedule-modal" role="dialog">
+            <div className="settings-header">
+              <div>
+                <h3>{editingSchedule ? "编辑定时任务" : "新增定时任务"}</h3>
+                <p>时间格式为 分 时 日 月 周，按服务器时间执行</p>
+              </div>
+              <div className="settings-actions">
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={handleCloseForm}
+                >
+                  关闭
+                </button>
+              </div>
+            </div>
+            {formError && <div className="feedback error">{formError}</div>}
+            <form className="settings-form" onSubmit={handleSubmit}>
+              <label>
+                任务名称
+                <input
+                  type="text"
+                  className="schedule-input"
+                  value={formName}
+                  onChange={(event) => setFormName(event.target.value)}
+                  placeholder="例如：每日健康巡检"
+                  disabled={submitting || readOnly}
+                />
+              </label>
+              <div className="schedule-cron-row">
+                <div className="schedule-cron-grid">
+                  <label>
+                    分
+                    <input
+                      type="text"
+                      className="schedule-cron-input"
+                      value={cronMinute}
+                      onChange={(event) => setCronMinute(event.target.value)}
+                      placeholder="0-59"
+                      disabled={submitting || readOnly}
+                    />
+                  </label>
+                  <label>
+                    时
+                    <input
+                      type="text"
+                      className="schedule-cron-input"
+                      value={cronHour}
+                      onChange={(event) => setCronHour(event.target.value)}
+                      placeholder="0-23"
+                      disabled={submitting || readOnly}
+                    />
+                  </label>
+                  <label>
+                    日
+                    <input
+                      type="text"
+                      className="schedule-cron-input"
+                      value={cronDay}
+                      onChange={(event) => setCronDay(event.target.value)}
+                      placeholder="1-31/*"
+                      disabled={submitting || readOnly}
+                    />
+                  </label>
+                  <label>
+                    月
+                    <input
+                      type="text"
+                      className="schedule-cron-input"
+                      value={cronMonth}
+                      onChange={(event) => setCronMonth(event.target.value)}
+                      placeholder="1-12/*"
+                      disabled={submitting || readOnly}
+                    />
+                  </label>
+                  <label>
+                    周
+                    <input
+                      type="text"
+                      className="schedule-cron-input"
+                      value={cronWeek}
+                      onChange={(event) => setCronWeek(event.target.value)}
+                      placeholder="0-6/*"
+                      disabled={submitting || readOnly}
+                    />
+                  </label>
+                </div>
+                <label className="table-checkbox schedule-enabled">
+                  <span>启用</span>
+                  <input
+                    type="checkbox"
+                    checked={formEnabled}
+                    onChange={(event) => setFormEnabled(event.target.checked)}
+                    disabled={submitting || readOnly}
+                  />
+                </label>
+              </div>
+              <div className="inspection-item-group schedule-section schedule-section-cluster">
+                <div className="inspection-item-group-title">
+                  <span className="inspection-group-title-text">选择集群</span>
+                  <span className="group-count">
+                    已选 {selectedClusterIds.length} / {filteredClusters.length}
+                  </span>
+                </div>
+                <div className="inspection-items-toolbar">
+                  <div className="inspection-items-toolbar-actions">
+                    <input
+                      type="text"
+                      className="inspection-items-filter"
+                      value={clusterKeyword}
+                      onChange={(event) =>
+                        setClusterKeyword(event.target.value)
+                      }
+                      placeholder="搜索集群"
+                      disabled={submitting || readOnly}
+                    />
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={toggleAllClusters}
+                      disabled={submitting || readOnly}
+                    >
+                      {allFilteredClustersSelected ? "清除选择" : "全选"}
+                    </button>
+                  </div>
+                </div>
+                <details className="schedule-dropdown schedule-cluster-dropdown">
+                  <summary>
+                    <span>展开集群列表</span>
+                    <span className="schedule-dropdown-summary">
+                      已选 {selectedClusterIds.length}
+                    </span>
+                  </summary>
+                  <div className="schedule-dropdown-body">
+                    {clusters.length === 0 ? (
+                      <div className="placeholder">暂无集群</div>
+                    ) : filteredClusters.length === 0 ? (
+                      <div className="placeholder">未找到匹配的集群</div>
+                    ) : (
+                      <ul className="item-list scrollable schedule-cluster-list">
+                        {filteredClusters.map((cluster) => {
+                          const displayId = getClusterDisplayId(
+                            clusterDisplayIds,
+                            cluster.id,
+                            cluster
+                          );
+                          return (
+                            <li key={cluster.id}>
+                              <label className="schedule-cluster-option">
+                                <div className="schedule-option-info">
+                                  <div className="item-title-row">
+                                    <div className="item-name">{cluster.name}</div>
+                                    <span className="item-tag neutral">
+                                      {displayId}
+                                    </span>
+                                  </div>
+                                </div>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedClusterIds.includes(cluster.id)}
+                                  onChange={() => toggleCluster(cluster.id)}
+                                  disabled={submitting || readOnly}
+                                />
+                              </label>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                    <div className="schedule-dropdown-hint">勾选即可多选</div>
+                  </div>
+                </details>
+              </div>
+              <div className="inspection-item-group schedule-section schedule-section-items">
+                <div className="inspection-item-group-title">
+                  <span className="inspection-group-title-text">选择巡检项</span>
+                  <span className="group-count">
+                    已选 {selectedItemIds.length} / {filteredItems.length}
+                  </span>
+                </div>
+                <div className="inspection-items-toolbar">
+                  <span className="selection-hint">
+                    已选 {selectedFilteredItemCount} / {filteredItems.length}
+                  </span>
+                  <div className="inspection-items-toolbar-actions">
+                    <input
+                      type="text"
+                      className="inspection-items-filter"
+                      value={itemKeyword}
+                      onChange={(event) => setItemKeyword(event.target.value)}
+                      placeholder="关键字筛选"
+                      disabled={submitting || readOnly}
+                    />
+                    <select
+                      className="inspection-items-filter"
+                      value={itemVersionFilter}
+                      onChange={(event) =>
+                        setItemVersionFilter(event.target.value)
+                      }
+                      disabled={submitting || readOnly}
+                    >
+                      <option value="all">PromQL 全部版本</option>
+                      {prometheusVersionOptions.map((version) => (
+                        <option key={version} value={version}>
+                          {version}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={toggleAllItems}
+                      disabled={submitting || readOnly}
+                    >
+                      {allFilteredItemsSelected ? "清除选择" : "全选"}
+                    </button>
+                  </div>
+                </div>
+                {items.length === 0 ? (
+                  <div className="placeholder">暂无巡检项</div>
+                ) : filteredItems.length === 0 ? (
+                  <div className="placeholder">未找到匹配的巡检项</div>
+                ) : (
+                  <div className="inspection-item-columns">
+                    <div className="inspection-item-column">
+                      <details className="schedule-dropdown">
+                        <summary>
+                          <span>PromQL 巡检项</span>
+                          <span className="schedule-dropdown-summary">
+                            {filteredPromqlItems.length} 条
+                          </span>
+                        </summary>
+                        <div className="schedule-dropdown-body">
+                          {filteredPromqlItems.length === 0 ? (
+                            <div className="placeholder">
+                              暂无 PromQL 巡检项
+                            </div>
+                          ) : (
+                            <ul className="item-list scrollable">
+                              {filteredPromqlItems.map((item) => (
+                                <li key={item.id}>
+                                  <label>
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedItemIds.includes(item.id)}
+                                      onChange={() => toggleItem(item.id)}
+                                      disabled={submitting || readOnly}
+                                    />
+                                    <div>
+                                      <div className="item-title-row">
+                                        <div className="item-name">{item.name}</div>
+                                        <span className="item-tag promql">
+                                          PromQL ·{" "}
+                                          {normalizePrometheusVersion(
+                                            item.prometheus_version,
+                                            prometheusVersionOptions
+                                          )}
+                                        </span>
+                                      </div>
+                                      <div className="item-desc">
+                                        {item.description || "未提供描述"}
+                                      </div>
+                                    </div>
+                                  </label>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      </details>
+                    </div>
+                    <div className="inspection-item-column">
+                      <details className="schedule-dropdown">
+                        <summary>
+                          <span>通用巡检项</span>
+                          <span className="schedule-dropdown-summary">
+                            {filteredCommonItems.length} 条
+                          </span>
+                        </summary>
+                        <div className="schedule-dropdown-body">
+                          {filteredCommonItems.length === 0 ? (
+                            <div className="placeholder">
+                              暂无通用巡检项
+                            </div>
+                          ) : (
+                            <ul className="item-list scrollable">
+                              {filteredCommonItems.map((item) => (
+                                <li key={item.id}>
+                                  <label>
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedItemIds.includes(item.id)}
+                                      onChange={() => toggleItem(item.id)}
+                                      disabled={submitting || readOnly}
+                                    />
+                                    <div>
+                                      <div className="item-title-row">
+                                        <div className="item-name">{item.name}</div>
+                                        <span className="item-tag neutral">通用</span>
+                                      </div>
+                                      <div className="item-desc">
+                                        {item.description || "未提供描述"}
+                                      </div>
+                                    </div>
+                                  </label>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      </details>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="settings-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={resetForm}
+                  disabled={submitting || readOnly}
+                >
+                  重置
+                </button>
+                <button
+                  type="submit"
+                  className="primary"
+                  disabled={submitting || readOnly}
+                >
+                  {editingSchedule ? "保存修改" : "新增"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface SchedulePageProps {
+  schedules: InspectionSchedule[];
+  clusters: ClusterConfig[];
+  clusterDisplayIds: Record<number, string>;
+  items: InspectionItem[];
+  prometheusVersionOptions: string[];
+  submitting: boolean;
+  notice: string | null;
+  error: string | null;
+  license: LicenseCapabilities;
+  onSave: (payload: {
+    id?: number;
+    name?: string;
+    cron: string;
+    clusterIds: number[];
+    itemIds: number[];
+    isEnabled: boolean;
+  }) => Promise<void>;
+  onDelete: (schedule: InspectionSchedule) => void;
+  onDeleteMany: (scheduleIds: number[]) => void;
+  onToggleEnabled: (schedule: InspectionSchedule, enabled: boolean) => void;
+}
+
+const SchedulePage = ({
+  schedules,
+  clusters,
+  clusterDisplayIds,
+  items,
+  prometheusVersionOptions,
+  submitting,
+  notice,
+  error,
+  license,
+  onSave,
+  onDelete,
+  onDeleteMany,
+  onToggleEnabled,
+}: SchedulePageProps) => (
+  <section className="card history history-page schedule-page">
+    <ScheduleSettingsPanel
+      schedules={schedules}
+      clusters={clusters}
+      clusterDisplayIds={clusterDisplayIds}
+      items={items}
+      prometheusVersionOptions={prometheusVersionOptions}
+      submitting={submitting}
+      notice={notice}
+      error={error}
+      license={license}
+      onSave={onSave}
+      onDelete={onDelete}
+      onDeleteMany={onDeleteMany}
+      onToggleEnabled={onToggleEnabled}
+    />
+  </section>
+);
 
 interface LicenseSettingsPanelProps {
   status: LicenseCapabilities;
@@ -5009,6 +6416,8 @@ const RunDetailView = ({
   );
   const [resultPage, setResultPage] = useState(1);
   const [resultPageInput, setResultPageInput] = useState("");
+  const canRunInspections = license.canRunInspections;
+  const canDownloadReports = license.canDownloadReports;
 
   const resolvedClusterId = useMemo(
     () =>
@@ -5267,11 +6676,19 @@ const RunDetailView = ({
     if (resolvedRunId === null) {
       return;
     }
+    if (!canRunInspections) {
+      setError(license.reason ?? "当前 License 不支持巡检功能。");
+      return;
+    }
     void onDeleteRun(resolvedRunId, backTarget);
   };
 
   const handleCancel = () => {
     if (resolvedRunId === null) {
+      return;
+    }
+    if (!canRunInspections) {
+      setError(license.reason ?? "当前 License 不支持巡检功能。");
       return;
     }
     void onCancelRun(resolvedRunId);
@@ -5281,6 +6698,10 @@ const RunDetailView = ({
     if (resolvedRunId === null) {
       return;
     }
+    if (!canRunInspections) {
+      setError(license.reason ?? "当前 License 不支持巡检功能。");
+      return;
+    }
     void onPauseRun(resolvedRunId).then(() => {
       setRefreshIndex((prev) => prev + 1);
     });
@@ -5288,6 +6709,10 @@ const RunDetailView = ({
 
   const handleResume = () => {
     if (resolvedRunId === null) {
+      return;
+    }
+    if (!canRunInspections) {
+      setError(license.reason ?? "当前 License 不支持巡检功能。");
       return;
     }
     void onResumeRun(resolvedRunId).then(() => {
@@ -5357,11 +6782,11 @@ const RunDetailView = ({
                 type="button"
                 className="secondary"
                 onClick={() => {
-                  if (license.canDownloadReports && reportPdfUrl) {
+                  if (canDownloadReports && reportPdfUrl) {
                     window.open(reportPdfUrl, "_blank", "noreferrer");
                   }
                 }}
-                disabled={!license.canDownloadReports}
+                disabled={!canDownloadReports}
               >
                 下载 PDF
               </button>
@@ -5369,11 +6794,11 @@ const RunDetailView = ({
                 type="button"
                 className="secondary"
                 onClick={() => {
-                  if (license.canDownloadReports && reportMdUrl) {
+                  if (canDownloadReports && reportMdUrl) {
                     window.open(reportMdUrl, "_blank", "noreferrer");
                   }
                 }}
-                disabled={!license.canDownloadReports}
+                disabled={!canDownloadReports}
               >
                 下载 MD
               </button>
@@ -5396,6 +6821,7 @@ const RunDetailView = ({
               type="button"
               className="secondary"
               onClick={handlePause}
+              disabled={!canRunInspections}
             >
               暂停
             </button>
@@ -5405,6 +6831,7 @@ const RunDetailView = ({
               type="button"
               className="secondary"
               onClick={handleResume}
+              disabled={!canRunInspections}
             >
               继续
             </button>
@@ -5415,6 +6842,7 @@ const RunDetailView = ({
               type="button"
               className="secondary"
               onClick={handleCancel}
+              disabled={!canRunInspections}
             >
               取消任务
             </button>
@@ -5423,7 +6851,7 @@ const RunDetailView = ({
             type="button"
             className="secondary danger"
             onClick={handleDelete}
-            disabled={!canDelete}
+            disabled={!canDelete || !canRunInspections}
           >
             删除
           </button>
@@ -5888,11 +7316,13 @@ const ClusterEditModal = ({
 interface ClusterNodesViewProps {
   clusters: ClusterConfig[];
   clusterDisplayIds: Record<number, string>;
+  license: LicenseCapabilities;
 }
 
 const ClusterNodesView = ({
   clusters,
   clusterDisplayIds,
+  license,
 }: ClusterNodesViewProps) => {
   const { clusterKey } = useParams<{ clusterKey?: string }>();
   const navigate = useNavigate();
@@ -5907,6 +7337,7 @@ const ClusterNodesView = ({
   const refreshInFlightRef = useRef(false);
   const refreshRequestRef = useRef(0);
   const refreshNoticeTimerRef = useRef<number | null>(null);
+  const canManageClusters = license.canManageClusters;
 
   const resolvedClusterId = useMemo(
     () =>
@@ -5991,6 +7422,10 @@ const ClusterNodesView = ({
   }, [cluster, clusterSlug, navigate]);
 
   const handleRefreshNodes = useCallback(async () => {
+    if (!canManageClusters) {
+      setError(license.reason ?? "当前 License 不支持集群管理。");
+      return;
+    }
     if (resolvedClusterId === null) {
       setError("集群标识无效，请返回重试。");
       return;
@@ -6081,7 +7516,7 @@ const ClusterNodesView = ({
         setRefreshing(false);
       }
     }
-  }, [output, retrievedAt, resolvedClusterId]);
+  }, [output, retrievedAt, resolvedClusterId, canManageClusters, license.reason]);
 
   const parsedNodes = useMemo(() => {
     if (!output) {
@@ -6126,7 +7561,7 @@ const ClusterNodesView = ({
               type="button"
               className="nodes-refresh-button"
               onClick={handleRefreshNodes}
-              disabled={refreshing || loading}
+              disabled={refreshing || loading || !canManageClusters}
             >
               {refreshing ? "刷新中..." : "刷新节点信息"}
             </button>
@@ -6179,6 +7614,7 @@ const App = () => {
   const [agents, setAgents] = useState<InspectionAgent[]>([]);
   const [runs, setRuns] = useState<InspectionRunListItem[]>([]);
   const [items, setItems] = useState<InspectionItem[]>([]);
+  const [schedules, setSchedules] = useState<InspectionSchedule[]>([]);
 
   const [clusterError, setClusterError] = useState<string | null>(null);
 const [clusterNotice, setClusterNotice] = useState<string | null>(null);
@@ -6215,6 +7651,9 @@ const [clusterUploading, setClusterUploading] = useState(false);
   const [inspectionNotice, setInspectionNotice] = useState<string | null>(null);
   const [inspectionError, setInspectionError] = useState<string | null>(null);
   const [inspectionLoading, setInspectionLoading] = useState(false);
+  const [scheduleNotice, setScheduleNotice] = useState<string | null>(null);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
 
   const [selectedItemIds, setSelectedItemIdsState] = useState<number[]>([]);
   const [operator, setOperator] = useState("");
@@ -6335,6 +7774,9 @@ const [pendingRefreshTargets, setPendingRefreshTargets] = useState<
     if (isLicenseRelatedMessage(inspectionError)) {
       setInspectionError(null);
     }
+    if (isLicenseRelatedMessage(scheduleError)) {
+      setScheduleError(null);
+    }
     if (isLicenseRelatedMessage(clusterNotice)) {
       clearClusterNotice();
     }
@@ -6345,6 +7787,7 @@ const [pendingRefreshTargets, setPendingRefreshTargets] = useState<
     agentError,
     settingsError,
     inspectionError,
+    scheduleError,
     clusterNotice,
     clearClusterNotice,
   ]);
@@ -6370,6 +7813,48 @@ const [pendingRefreshTargets, setPendingRefreshTargets] = useState<
   useEffect(() => {
     void refreshLicenseStatus();
   }, [refreshLicenseStatus]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const intervalId = window.setInterval(() => {
+      void refreshLicenseStatus();
+    }, LICENSE_POLL_INTERVAL);
+    return () => window.clearInterval(intervalId);
+  }, [refreshLicenseStatus]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const handleFocus = () => {
+      void refreshLicenseStatus();
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [refreshLicenseStatus]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const expiresAt = parseDateValue(licenseStatus?.expires_at);
+    if (!expiresAt) {
+      return;
+    }
+    const delay = expiresAt.getTime() - Date.now();
+    if (delay > 0 && delay > 2147483647) {
+      return;
+    }
+    const timerId = window.setTimeout(
+      () => {
+        void refreshLicenseStatus();
+      },
+      Math.max(0, delay + 1000)
+    );
+    return () => window.clearTimeout(timerId);
+  }, [licenseStatus?.expires_at, refreshLicenseStatus]);
 
   const refreshAgents = useCallback(async () => {
     try {
@@ -6617,6 +8102,20 @@ const backgroundLocation =
   }, [settingsNotice]);
 
   useEffect(() => {
+    if (!scheduleNotice || typeof window === "undefined") {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setScheduleNotice(null);
+    }, 5000);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [scheduleNotice]);
+
+  useEffect(() => {
     if (!agentNotice || typeof window === "undefined") {
       return;
     }
@@ -6655,6 +8154,19 @@ const backgroundLocation =
       options?: { quiet?: boolean }
     ) => {
       const { quiet } = options ?? {};
+      if (!licenseCapabilities.canManageClusters) {
+        const message =
+          licenseCapabilities.reason ?? "当前 License 不支持集群管理。";
+        if (!quiet) {
+          setClusterError(message);
+        }
+        showClusterNotice(
+          quiet ? "overview" : currentNoticeScope,
+          message,
+          "error"
+        );
+        return;
+      }
       if (!quiet) {
         clearClusterNotice();
         setClusterError(null);
@@ -6688,6 +8200,7 @@ const backgroundLocation =
       currentNoticeScope,
       setClusterTesting,
       showClusterNotice,
+      licenseCapabilities,
     ]
   );
 
@@ -6843,6 +8356,22 @@ const backgroundLocation =
     }
   }, []);
 
+  const refreshSchedules = useCallback(async () => {
+    try {
+      logWithTimestamp("info", "开始获取定时巡检");
+      const data = await getInspectionSchedules();
+      setSchedules(data);
+      setScheduleError(null);
+      return data;
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "获取定时巡检失败";
+      logWithTimestamp("error", "获取定时巡检失败: %s", message);
+      setScheduleError(message);
+      return null;
+    }
+  }, []);
+
   const pendingClusterIds = useMemo(
     () =>
       clusters
@@ -6900,7 +8429,8 @@ const backgroundLocation =
     void refreshClusters();
     void refreshRuns();
     void refreshItems();
-  }, [refreshClusters, refreshRuns, refreshItems]);
+    void refreshSchedules();
+  }, [refreshClusters, refreshRuns, refreshItems, refreshSchedules]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -6913,6 +8443,21 @@ const backgroundLocation =
       window.clearInterval(timer);
     };
   }, [refreshClusters]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (!location.pathname.startsWith("/schedule")) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void refreshSchedules();
+    }, SCHEDULE_REFRESH_INTERVAL);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [location.pathname, refreshSchedules]);
 
   useEffect(() => {
     if (pendingClusterIds.length === 0 || typeof window === "undefined") {
@@ -7134,13 +8679,13 @@ const backgroundLocation =
     async (clusterId: number, payload: { defaultAgentId: number | null }) => {
       if (!licenseCapabilities.canManageClusters) {
         const reason =
-          licenseCapabilities.reason ?? "?? License ????????";
+          licenseCapabilities.reason ?? "当前 License 不支持集群管理。";
         setClusterError(reason);
         throw new Error(reason);
       }
       if (!licenseCapabilities.canManageAgents) {
         const reason =
-          licenseCapabilities.reason ?? "?? License ??? Agent ???";
+          licenseCapabilities.reason ?? "当前 License 不支持 Agent 管理。";
         setClusterError(reason);
         throw new Error(reason);
       }
@@ -7266,6 +8811,13 @@ const hasManualKubeconfig = useMemo(
 
   const handleDeleteClustersBulk = useCallback(
     (clusterIds: number[]): Promise<void> => {
+      if (!licenseCapabilities.canManageClusters) {
+        const message =
+          licenseCapabilities.reason ?? "当前 License 不支持集群管理。";
+        setClusterError(message);
+        showClusterNotice("overview", message, "error");
+        return Promise.resolve();
+      }
       const targets = clusters.filter((cluster) =>
         clusterIds.includes(cluster.id)
       );
@@ -7347,11 +8899,20 @@ const hasManualKubeconfig = useMemo(
       setClusterDisplayIds,
       setClusters,
       showClusterNotice,
+      licenseCapabilities,
+      setClusterError,
     ]
   );
 
   const handleDeleteCluster = useCallback(
     (cluster: ClusterConfig): Promise<void> => {
+      if (!licenseCapabilities.canManageClusters) {
+        const message =
+          licenseCapabilities.reason ?? "当前 License 不支持集群管理。";
+        setClusterError(message);
+        showClusterNotice(currentNoticeScope, message, "error");
+        return Promise.resolve();
+      }
       setConfirmState({
         title: "删除集群",
         message: `确认删除集群(${cluster.name})？该操作不可恢复。`,
@@ -7427,11 +8988,19 @@ const hasManualKubeconfig = useMemo(
       setClusterDisplayIds,
       setClusters,
       showClusterNotice,
+      licenseCapabilities,
+      setClusterError,
     ]
   );
 
   const handleDeleteRunsBulk = useCallback(
     (runIds: number[], scope: NoticeScope): Promise<void> => {
+      if (!licenseCapabilities.canRunInspections) {
+        const message =
+          licenseCapabilities.reason ?? "当前 License 不支持巡检功能。";
+        showClusterNotice(scope, message, "error");
+        return Promise.resolve();
+      }
       const targets = runs.filter((run) => runIds.includes(run.id));
       if (targets.length === 0) {
         return Promise.resolve();
@@ -7479,11 +9048,17 @@ const hasManualKubeconfig = useMemo(
       });
       return Promise.resolve();
     },
-    [runs, refreshRuns, refreshClusters, showClusterNotice]
+    [runs, refreshRuns, refreshClusters, showClusterNotice, licenseCapabilities]
   );
 
   const handleDeleteRun = useCallback(
     (run: InspectionRunListItem): Promise<void> => {
+      if (!licenseCapabilities.canRunInspections) {
+        const message =
+          licenseCapabilities.reason ?? "当前 License 不支持巡检功能。";
+        showClusterNotice(currentNoticeScope, message, "error");
+        return Promise.resolve();
+      }
       const displayId = runDisplayIds[run.id] ?? String(run.id);
       setConfirmState({
         title: "删除巡检记录",
@@ -7515,11 +9090,24 @@ const hasManualKubeconfig = useMemo(
       });
       return Promise.resolve();
     },
-    [runDisplayIds, refreshRuns, refreshClusters, currentNoticeScope, showClusterNotice]
+    [
+      runDisplayIds,
+      refreshRuns,
+      refreshClusters,
+      currentNoticeScope,
+      showClusterNotice,
+      licenseCapabilities,
+    ]
   );
 
   const handleDeleteRunById = useCallback(
     (runId: number, redirectPath?: string): Promise<void> => {
+      if (!licenseCapabilities.canRunInspections) {
+        const message =
+          licenseCapabilities.reason ?? "当前 License 不支持巡检功能。";
+        showClusterNotice(currentNoticeScope, message, "error");
+        return Promise.resolve();
+      }
       const displayId = runDisplayIds[runId] ?? String(runId);
       setConfirmState({
         title: "删除巡检记录",
@@ -7565,11 +9153,18 @@ const hasManualKubeconfig = useMemo(
       navigate,
       currentNoticeScope,
       showClusterNotice,
+      licenseCapabilities,
     ]
   );
 
   const handleCancelRun = useCallback(
     (run: InspectionRunListItem): Promise<void> => {
+      if (!licenseCapabilities.canRunInspections) {
+        const message =
+          licenseCapabilities.reason ?? "当前 License 不支持巡检功能。";
+        showClusterNotice(currentNoticeScope, message, "error");
+        return Promise.resolve();
+      }
       const displayId = runDisplayIds[run.id] ?? String(run.id);
       setConfirmState({
         title: "取消巡检",
@@ -7594,11 +9189,24 @@ const hasManualKubeconfig = useMemo(
       });
       return Promise.resolve();
     },
-    [runDisplayIds, refreshRuns, refreshClusters, currentNoticeScope, showClusterNotice]
+    [
+      runDisplayIds,
+      refreshRuns,
+      refreshClusters,
+      currentNoticeScope,
+      showClusterNotice,
+      licenseCapabilities,
+    ]
   );
 
   const handlePauseRun = useCallback(
     async (run: InspectionRunListItem): Promise<void> => {
+      if (!licenseCapabilities.canRunInspections) {
+        const message =
+          licenseCapabilities.reason ?? "当前 License 不支持巡检功能。";
+        showClusterNotice(currentNoticeScope, message, "error");
+        return;
+      }
       try {
         logWithTimestamp("info", "暂停巡检记录: %s", run.id);
         await pauseInspectionRun(run.id);
@@ -7612,11 +9220,23 @@ const hasManualKubeconfig = useMemo(
         showClusterNotice(currentNoticeScope, message, "error");
       }
     },
-    [refreshRuns, refreshClusters, currentNoticeScope, showClusterNotice]
+    [
+      refreshRuns,
+      refreshClusters,
+      currentNoticeScope,
+      showClusterNotice,
+      licenseCapabilities,
+    ]
   );
 
   const handleResumeRun = useCallback(
     async (run: InspectionRunListItem): Promise<void> => {
+      if (!licenseCapabilities.canRunInspections) {
+        const message =
+          licenseCapabilities.reason ?? "当前 License 不支持巡检功能。";
+        showClusterNotice(currentNoticeScope, message, "error");
+        return;
+      }
       try {
         logWithTimestamp("info", "继续巡检记录: %s", run.id);
         await resumeInspectionRun(run.id);
@@ -7630,11 +9250,23 @@ const hasManualKubeconfig = useMemo(
         showClusterNotice(currentNoticeScope, message, "error");
       }
     },
-    [refreshRuns, refreshClusters, currentNoticeScope, showClusterNotice]
+    [
+      refreshRuns,
+      refreshClusters,
+      currentNoticeScope,
+      showClusterNotice,
+      licenseCapabilities,
+    ]
   );
 
   const handleCancelRunById = useCallback(
     (runId: number, redirectPath?: string): Promise<void> => {
+      if (!licenseCapabilities.canRunInspections) {
+        const message =
+          licenseCapabilities.reason ?? "当前 License 不支持巡检功能。";
+        showClusterNotice(currentNoticeScope, message, "error");
+        return Promise.resolve();
+      }
       const displayId = runDisplayIds[runId] ?? String(runId);
       setConfirmState({
         title: "取消巡检",
@@ -7672,11 +9304,18 @@ const hasManualKubeconfig = useMemo(
       navigate,
       currentNoticeScope,
       showClusterNotice,
+      licenseCapabilities,
     ]
   );
 
   const handlePauseRunById = useCallback(
     async (runId: number): Promise<void> => {
+      if (!licenseCapabilities.canRunInspections) {
+        const message =
+          licenseCapabilities.reason ?? "当前 License 不支持巡检功能。";
+        showClusterNotice(currentNoticeScope, message, "error");
+        return;
+      }
       try {
         logWithTimestamp("info", "暂停巡检记录: %s", runId);
         await pauseInspectionRun(runId);
@@ -7690,11 +9329,23 @@ const hasManualKubeconfig = useMemo(
         showClusterNotice(currentNoticeScope, message, "error");
       }
     },
-    [refreshRuns, refreshClusters, currentNoticeScope, showClusterNotice]
+    [
+      refreshRuns,
+      refreshClusters,
+      currentNoticeScope,
+      showClusterNotice,
+      licenseCapabilities,
+    ]
   );
 
   const handleResumeRunById = useCallback(
     async (runId: number): Promise<void> => {
+      if (!licenseCapabilities.canRunInspections) {
+        const message =
+          licenseCapabilities.reason ?? "当前 License 不支持巡检功能。";
+        showClusterNotice(currentNoticeScope, message, "error");
+        return;
+      }
       try {
         logWithTimestamp("info", "继续巡检记录: %s", runId);
         await resumeInspectionRun(runId);
@@ -7708,7 +9359,13 @@ const hasManualKubeconfig = useMemo(
         showClusterNotice(currentNoticeScope, message, "error");
       }
     },
-    [refreshRuns, refreshClusters, currentNoticeScope, showClusterNotice]
+    [
+      refreshRuns,
+      refreshClusters,
+      currentNoticeScope,
+      showClusterNotice,
+      licenseCapabilities,
+    ]
   );
 
   const handleEditCluster = useCallback((cluster: ClusterConfig) => {
@@ -7732,6 +9389,13 @@ const hasManualKubeconfig = useMemo(
       prometheus_version?: string;
       config: Record<string, unknown>;
     }) => {
+      if (!licenseCapabilities.canRunInspections) {
+        setSettingsError(
+          licenseCapabilities.reason ?? "当前 License 不支持巡检项管理。"
+        );
+        setSettingsNotice(null);
+        return;
+      }
       setSettingsSubmitting(true);
       try {
         if (id) {
@@ -7767,11 +9431,18 @@ const hasManualKubeconfig = useMemo(
         setSettingsSubmitting(false);
       }
     },
-    [refreshItems]
+    [refreshItems, licenseCapabilities]
   );
 
   const handleAddPrometheusVersion = useCallback(
     (value: string): { ok: boolean; message?: string } => {
+      if (!licenseCapabilities.canRunInspections) {
+        return {
+          ok: false,
+          message:
+            licenseCapabilities.reason ?? "当前 License 不支持版本管理",
+        };
+      }
       const trimmed = value.trim();
       if (!trimmed) {
         return { ok: false, message: "请输入版本号" };
@@ -7788,11 +9459,18 @@ const hasManualKubeconfig = useMemo(
       setPrometheusVersionOptions((prev) => [...prev, trimmed]);
       return { ok: true };
     },
-    [prometheusVersionOptions]
+    [prometheusVersionOptions, licenseCapabilities]
   );
 
   const handleDeletePrometheusVersion = useCallback(
     (value: string): { ok: boolean; message?: string } => {
+      if (!licenseCapabilities.canRunInspections) {
+        return {
+          ok: false,
+          message:
+            licenseCapabilities.reason ?? "当前 License 不支持版本管理",
+        };
+      }
       const trimmed = value.trim();
       if (!trimmed) {
         return { ok: false, message: "版本号无效" };
@@ -7820,11 +9498,18 @@ const hasManualKubeconfig = useMemo(
       );
       return { ok: true };
     },
-    [items]
+    [items, licenseCapabilities]
   );
 
   const deleteInspectionItemsBatch = useCallback(
     async (ids: number[], successMessage: string) => {
+      if (!licenseCapabilities.canRunInspections) {
+        setSettingsError(
+          licenseCapabilities.reason ?? "当前 License 不支持巡检项管理。"
+        );
+        setSettingsNotice(null);
+        return;
+      }
       setSettingsSubmitting(true);
       try {
         for (const itemId of ids) {
@@ -7844,7 +9529,7 @@ const hasManualKubeconfig = useMemo(
         setSettingsSubmitting(false);
       }
     },
-    [refreshItems]
+    [refreshItems, licenseCapabilities]
   );
 
   const performDeleteInspectionItem = useCallback(
@@ -7855,6 +9540,13 @@ const hasManualKubeconfig = useMemo(
 
   const handleDeleteInspectionItem = useCallback(
     (item: InspectionItem) => {
+      if (!licenseCapabilities.canRunInspections) {
+        setSettingsError(
+          licenseCapabilities.reason ?? "当前 License 不支持巡检项管理。"
+        );
+        setSettingsNotice(null);
+        return;
+      }
       setConfirmState({
         title: "删除巡检项",
         message: `确认删除巡检项(${item.name})？该操作不可恢复。`,
@@ -7864,11 +9556,18 @@ const hasManualKubeconfig = useMemo(
         onConfirm: () => performDeleteInspectionItem(item),
       });
     },
-    [performDeleteInspectionItem]
+    [performDeleteInspectionItem, licenseCapabilities]
   );
 
   const handleDeleteInspectionItemsBulk = useCallback(
     (itemIds: number[]) => {
+      if (!licenseCapabilities.canRunInspections) {
+        setSettingsError(
+          licenseCapabilities.reason ?? "当前 License 不支持巡检项管理。"
+        );
+        setSettingsNotice(null);
+        return;
+      }
       const targetIds = items
         .filter((item) => itemIds.includes(item.id))
         .map((item) => item.id);
@@ -7888,10 +9587,17 @@ const hasManualKubeconfig = useMemo(
           ),
       });
     },
-    [items, deleteInspectionItemsBatch]
+    [items, deleteInspectionItemsBatch, licenseCapabilities]
   );
 
   const handleExportInspectionItems = useCallback(async (format: "json" | "yaml") => {
+    if (!licenseCapabilities.canRunInspections) {
+      setSettingsError(
+        licenseCapabilities.reason ?? "当前 License 不支持巡检项管理。"
+      );
+      setSettingsNotice(null);
+      return;
+    }
     setSettingsSubmitting(true);
     setSettingsNotice(null);
     setSettingsError(null);
@@ -7953,10 +9659,17 @@ const hasManualKubeconfig = useMemo(
       }
       setSettingsSubmitting(false);
     }
-  }, []);
+  }, [licenseCapabilities]);
 
   const handleImportInspectionItems = useCallback(
     async (file: File) => {
+      if (!licenseCapabilities.canRunInspections) {
+        setSettingsError(
+          licenseCapabilities.reason ?? "当前 License 不支持巡检项管理。"
+        );
+        setSettingsNotice(null);
+        return;
+      }
       setSettingsSubmitting(true);
       setSettingsNotice(null);
       setSettingsError(null);
@@ -7987,7 +9700,200 @@ const hasManualKubeconfig = useMemo(
         setSettingsSubmitting(false);
       }
     },
-    [refreshItems]
+    [refreshItems, licenseCapabilities]
+  );
+
+  const handleSaveSchedule = useCallback(
+    async (payload: {
+      id?: number;
+      name?: string;
+      cron: string;
+      clusterIds: number[];
+      itemIds: number[];
+      isEnabled: boolean;
+    }) => {
+      if (!licenseCapabilities.canRunInspections) {
+        setScheduleError(
+          licenseCapabilities.reason ?? "当前 License 不支持定时巡检。"
+        );
+        setScheduleNotice(null);
+        return;
+      }
+      const trimmedName = payload.name?.trim() ?? "";
+      setScheduleSubmitting(true);
+      setScheduleNotice(null);
+      setScheduleError(null);
+      try {
+        if (payload.id) {
+          logWithTimestamp("info", "更新定时巡检: %s", payload.id);
+          await apiUpdateInspectionSchedule(payload.id, {
+            name: trimmedName ? trimmedName : null,
+            cron: payload.cron,
+            cluster_ids: payload.clusterIds,
+            item_ids: payload.itemIds,
+            is_enabled: payload.isEnabled,
+          });
+          setScheduleNotice("定时巡检已更新");
+        } else {
+          logWithTimestamp("info", "创建定时巡检");
+          await apiCreateInspectionSchedule({
+            name: trimmedName || undefined,
+            cron: payload.cron,
+            cluster_ids: payload.clusterIds,
+            item_ids: payload.itemIds,
+            is_enabled: payload.isEnabled,
+          });
+          setScheduleNotice("定时巡检已创建");
+        }
+        await refreshSchedules();
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "保存定时巡检失败";
+        logWithTimestamp("error", "保存定时巡检失败: %s", message);
+        setScheduleError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setScheduleSubmitting(false);
+      }
+    },
+    [refreshSchedules, licenseCapabilities]
+  );
+
+  const performDeleteSchedule = useCallback(
+    async (schedule: InspectionSchedule) => {
+      if (!licenseCapabilities.canRunInspections) {
+        setScheduleError(
+          licenseCapabilities.reason ?? "当前 License 不支持定时巡检。"
+        );
+        setScheduleNotice(null);
+        return;
+      }
+      setScheduleSubmitting(true);
+      setScheduleNotice(null);
+      setScheduleError(null);
+      try {
+        logWithTimestamp("info", "删除定时巡检: %s", schedule.id);
+        await apiDeleteInspectionSchedule(schedule.id);
+        await refreshSchedules();
+        setScheduleNotice("定时巡检已删除");
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "删除定时巡检失败";
+        logWithTimestamp("error", "删除定时巡检失败: %s", message);
+        setScheduleError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setScheduleSubmitting(false);
+      }
+    },
+    [refreshSchedules, licenseCapabilities]
+  );
+
+  const handleDeleteSchedule = useCallback(
+    (schedule: InspectionSchedule) => {
+      if (!licenseCapabilities.canRunInspections) {
+        setScheduleError(
+          licenseCapabilities.reason ?? "当前 License 不支持定时巡检。"
+        );
+        setScheduleNotice(null);
+        return;
+      }
+      const label = schedule.name?.trim() || `定时巡检 #${schedule.id}`;
+      setConfirmState({
+        title: "删除定时巡检",
+        message: `确认删除定时任务(${label})？该操作不可恢复。`,
+        confirmLabel: "删除",
+        variant: "danger",
+        scope: "global",
+        onConfirm: () => performDeleteSchedule(schedule),
+      });
+    },
+    [performDeleteSchedule, licenseCapabilities]
+  );
+
+  const handleDeleteSchedulesBulk = useCallback(
+    (scheduleIds: number[]): Promise<void> => {
+      if (!licenseCapabilities.canRunInspections) {
+        setScheduleError(
+          licenseCapabilities.reason ?? "当前 License 不支持定时巡检。"
+        );
+        setScheduleNotice(null);
+        return Promise.resolve();
+      }
+      const targets = schedules.filter((schedule) =>
+        scheduleIds.includes(schedule.id)
+      );
+      if (targets.length === 0) {
+        return Promise.resolve();
+      }
+      setConfirmState({
+        title: "批量删除定时巡检",
+        message: `确认删除选中的 ${targets.length} 个定时任务？该操作不可恢复。`,
+        confirmLabel: "删除",
+        variant: "danger",
+        scope: "global",
+        onConfirm: async () => {
+          setScheduleSubmitting(true);
+          setScheduleNotice(null);
+          setScheduleError(null);
+          try {
+            for (const schedule of targets) {
+              logWithTimestamp("info", "删除定时巡检: %s", schedule.id);
+              await apiDeleteInspectionSchedule(schedule.id);
+            }
+            await refreshSchedules();
+            setScheduleNotice(`已删除 ${targets.length} 个定时任务`);
+          } catch (err) {
+            const message =
+              err instanceof Error ? err.message : "删除定时巡检失败";
+            logWithTimestamp("error", "批量删除定时巡检失败: %s", message);
+            setScheduleError(message);
+            throw err instanceof Error ? err : new Error(message);
+          } finally {
+            setScheduleSubmitting(false);
+          }
+        },
+      });
+      return Promise.resolve();
+    },
+    [licenseCapabilities, schedules, refreshSchedules]
+  );
+
+  const handleToggleScheduleEnabled = useCallback(
+    async (schedule: InspectionSchedule, enabled: boolean) => {
+      if (!licenseCapabilities.canRunInspections) {
+        setScheduleError(
+          licenseCapabilities.reason ?? "当前 License 不支持定时巡检。"
+        );
+        setScheduleNotice(null);
+        return;
+      }
+      setScheduleSubmitting(true);
+      setScheduleNotice(null);
+      setScheduleError(null);
+      try {
+        logWithTimestamp(
+          "info",
+          "切换定时巡检状态: %s -> %s",
+          schedule.id,
+          enabled
+        );
+        await apiUpdateInspectionSchedule(schedule.id, {
+          is_enabled: enabled,
+        });
+        await refreshSchedules();
+        setScheduleNotice(enabled ? "定时巡检已启用" : "定时巡检已停用");
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "更新定时巡检状态失败";
+        logWithTimestamp("error", "更新定时巡检状态失败: %s", message);
+        setScheduleError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setScheduleSubmitting(false);
+      }
+    },
+    [refreshSchedules, licenseCapabilities]
   );
 
   const settingsTabs = useMemo<SettingsModalTab[]>(
@@ -8013,6 +9919,7 @@ const hasManualKubeconfig = useMemo(
             submitting={settingsSubmitting}
             notice={settingsNotice}
             error={settingsError}
+            license={licenseCapabilities}
             onClose={close}
             onSave={handleSaveInspectionItem}
             onDelete={handleDeleteInspectionItem}
@@ -8030,6 +9937,7 @@ const hasManualKubeconfig = useMemo(
             items={sortedItems}
             versions={prometheusVersionOptions}
             defaultVersion={DEFAULT_PROMETHEUS_VERSION}
+            license={licenseCapabilities}
             onAddVersion={handleAddPrometheusVersion}
             onDeleteVersion={handleDeletePrometheusVersion}
           />
@@ -8155,6 +10063,12 @@ const hasManualKubeconfig = useMemo(
       if (!clusterEditState) {
         return;
       }
+      if (!licenseCapabilities.canManageClusters) {
+        setClusterEditError(
+          licenseCapabilities.reason ?? "当前 License 不支持集群管理。"
+        );
+        return;
+      }
 
       const trimmedName = name.trim();
       if (!trimmedName) {
@@ -8194,6 +10108,7 @@ const hasManualKubeconfig = useMemo(
       refreshRuns,
       currentNoticeScope,
       showClusterNotice,
+      licenseCapabilities,
     ]
   );
 
@@ -8272,6 +10187,26 @@ const hasManualKubeconfig = useMemo(
             }
           />
           <Route
+            path="/schedule"
+            element={
+              <SchedulePage
+                schedules={schedules}
+                clusters={clusters}
+                clusterDisplayIds={clusterDisplayIds}
+                items={sortedItems}
+                prometheusVersionOptions={prometheusVersionOptions}
+                submitting={scheduleSubmitting}
+                notice={scheduleNotice}
+                error={scheduleError}
+                license={licenseCapabilities}
+                onSave={handleSaveSchedule}
+                onDelete={handleDeleteSchedule}
+                onDeleteMany={handleDeleteSchedulesBulk}
+                onToggleEnabled={handleToggleScheduleEnabled}
+              />
+            }
+          />
+          <Route
             path="/clusters/:clusterKey"
             element={
               <ClusterDetailView
@@ -8308,6 +10243,7 @@ const hasManualKubeconfig = useMemo(
               <ClusterNodesView
                 clusters={clusters}
                 clusterDisplayIds={clusterDisplayIds}
+                license={licenseCapabilities}
               />
             }
           />

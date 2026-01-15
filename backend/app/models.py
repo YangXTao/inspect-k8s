@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Iterable
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, Boolean
 from sqlalchemy.orm import relationship
@@ -130,6 +131,72 @@ class InspectionRun(Base):
     )
     cluster = relationship("ClusterConfig", back_populates="runs")
     agent = relationship("InspectionAgent", back_populates="runs")
+
+
+class InspectionSchedule(Base):
+    __tablename__ = "inspection_schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=True)
+    cron = Column(String(50), nullable=False)
+    cluster_ids_json = Column(Text, nullable=False)
+    item_ids_json = Column(Text, nullable=False)
+    is_enabled = Column(Boolean, nullable=False, default=True)
+    last_run_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    @property
+    def cluster_ids(self) -> list[int]:
+        return self._load_ids(self.cluster_ids_json)
+
+    @property
+    def item_ids(self) -> list[int]:
+        return self._load_ids(self.item_ids_json)
+
+    def set_cluster_ids(self, value: Iterable[int]) -> None:
+        self.cluster_ids_json = self._dump_ids(value)
+
+    def set_item_ids(self, value: Iterable[int]) -> None:
+        self.item_ids_json = self._dump_ids(value)
+
+    @staticmethod
+    def _normalize_ids(values: Iterable[int]) -> list[int]:
+        seen: set[int] = set()
+        results: list[int] = []
+        for value in values:
+            try:
+                parsed = int(value)
+            except (TypeError, ValueError):
+                continue
+            if parsed <= 0 or parsed in seen:
+                continue
+            seen.add(parsed)
+            results.append(parsed)
+        return results
+
+    @classmethod
+    def _dump_ids(cls, values: Iterable[int]) -> str:
+        import json
+
+        normalized = cls._normalize_ids(values)
+        return json.dumps(normalized, ensure_ascii=True)
+
+    @classmethod
+    def _load_ids(cls, raw: str | None) -> list[int]:
+        if not raw:
+            return []
+        try:
+            import json
+
+            payload = json.loads(raw)
+        except Exception:
+            return []
+        if not isinstance(payload, list):
+            return []
+        return cls._normalize_ids(payload)
 
 
 class InspectionResult(Base):
