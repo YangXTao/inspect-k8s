@@ -5302,8 +5302,6 @@ const ScheduleSettingsPanel = ({
     () => filteredItems.filter((item) => !isPromqlType(item.check_type)),
     [filteredItems]
   );
-  const shouldExpandPromql = filteredPromqlItems.length <= 8;
-  const shouldExpandCommon = filteredCommonItems.length <= 8;
 
   const sortedSchedules = useMemo(() => {
     return schedules.slice().sort((a, b) => {
@@ -5900,10 +5898,7 @@ const ScheduleSettingsPanel = ({
                 ) : (
                   <div className="inspection-item-columns">
                     <div className="inspection-item-column">
-                      <details
-                        className="schedule-dropdown"
-                        open={shouldExpandPromql}
-                      >
+                      <details className="schedule-dropdown">
                         <summary>
                           <span>PromQL 巡检项</span>
                           <span className="schedule-dropdown-summary">
@@ -5950,10 +5945,7 @@ const ScheduleSettingsPanel = ({
                       </details>
                     </div>
                     <div className="inspection-item-column">
-                      <details
-                        className="schedule-dropdown"
-                        open={shouldExpandCommon}
-                      >
+                      <details className="schedule-dropdown">
                         <summary>
                           <span>通用巡检项</span>
                           <span className="schedule-dropdown-summary">

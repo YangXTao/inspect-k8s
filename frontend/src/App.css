@@ -2638,6 +2638,8 @@ th {
 .schedule-modal .inspection-items-toolbar select {
   font-size: 12px;
   padding: 6px 10px;
+  width: auto;
+  min-width: 140px;
 }
 
 .schedule-modal .inspection-item-group.schedule-section {
@@ -2664,17 +2666,24 @@ th {
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 8px 10px;
+  flex-wrap: nowrap;
+  gap: 8px;
 }
 
 .schedule-modal .inspection-items-toolbar-actions {
-  justify-content: space-between;
-  width: 100%;
+  justify-content: flex-start;
+  width: auto;
+  flex-wrap: nowrap;
+  gap: 8px;
+  flex: 1;
 }
 
 .schedule-modal .inspection-items-filter {
   border-radius: 999px;
   border: 1px solid #dbe3f4;
   background: #f8fafc;
+  width: 160px;
+  min-width: 120px;
 }
 
 .schedule-modal .schedule-dropdown {
