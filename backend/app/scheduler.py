@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from . import crud, models
 from .cron import CronValidationError, cron_matches
 from .database import SessionLocal
+from .license import LicenseError, license_manager
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +187,11 @@ class InspectionScheduler:
 
     def _tick(self) -> None:
         now = datetime.now()
+        try:
+            license_manager.require(["inspections"])
+        except LicenseError as exc:
+            logger.info("Skip inspection schedules due to license: %s", exc)
+            return
         with SessionLocal() as db:
             schedules = crud.list_inspection_schedules(db)
             for schedule in schedules:

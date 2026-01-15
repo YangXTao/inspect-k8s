@@ -4996,6 +4996,7 @@ interface ScheduleSettingsPanelProps {
     isEnabled: boolean;
   }) => Promise<void>;
   onDelete: (schedule: InspectionSchedule) => void;
+  onDeleteMany: (scheduleIds: number[]) => void;
   onToggleEnabled: (schedule: InspectionSchedule, enabled: boolean) => void;
 }
 
@@ -5011,6 +5012,7 @@ const ScheduleSettingsPanel = ({
   license,
   onSave,
   onDelete,
+  onDeleteMany,
   onToggleEnabled,
 }: ScheduleSettingsPanelProps) => {
   const readOnly = !license.canRunInspections;
@@ -5037,6 +5039,7 @@ const ScheduleSettingsPanel = ({
   const [schedulePageSize, setSchedulePageSize] = useState(10);
   const [schedulePage, setSchedulePage] = useState(1);
   const [schedulePageInput, setSchedulePageInput] = useState("");
+  const [selectedScheduleIds, setSelectedScheduleIds] = useState<number[]>([]);
 
   const scheduleClusterMap = useMemo(() => {
     const map = new Map<number, ClusterConfig>();
@@ -5111,6 +5114,18 @@ const ScheduleSettingsPanel = ({
     setSchedulePage(1);
     setSchedulePageInput("");
   }, [schedulePageSize, scheduleKeyword, scheduleStatusFilter]);
+
+  useEffect(() => {
+    setSelectedScheduleIds((prev) =>
+      prev.filter((id) => schedules.some((schedule) => schedule.id === id))
+    );
+  }, [schedules]);
+
+  useEffect(() => {
+    if (!license.canRunInspections) {
+      setSelectedScheduleIds([]);
+    }
+  }, [license.canRunInspections]);
 
   const handleOpenCreate = () => {
     setEditingSchedule(null);
@@ -5364,6 +5379,62 @@ const ScheduleSettingsPanel = ({
     return filteredSchedules.slice(start, start + schedulePageSize);
   }, [filteredSchedules, schedulePage, schedulePageSize]);
 
+  const visibleSelectedScheduleCount = useMemo(
+    () =>
+      selectedScheduleIds.filter((id) =>
+        filteredSchedules.some((schedule) => schedule.id === id)
+      ).length,
+    [selectedScheduleIds, filteredSchedules]
+  );
+
+  const allSchedulesSelected =
+    filteredSchedules.length > 0 &&
+    filteredSchedules.every((schedule) =>
+      selectedScheduleIds.includes(schedule.id)
+    );
+
+  const handleToggleSchedule = useCallback(
+    (scheduleId: number) => {
+      if (readOnly) {
+        return;
+      }
+      setSelectedScheduleIds((prev) =>
+        prev.includes(scheduleId)
+          ? prev.filter((id) => id !== scheduleId)
+          : [...prev, scheduleId]
+      );
+    },
+    [readOnly]
+  );
+
+  const handleToggleAllSchedules = useCallback(() => {
+    setSelectedScheduleIds((prev) => {
+      if (readOnly || filteredSchedules.length === 0) {
+        return prev;
+      }
+      const visibleIds = filteredSchedules.map((schedule) => schedule.id);
+      const allVisibleSelected = visibleIds.every((id) =>
+        prev.includes(id)
+      );
+      if (allVisibleSelected) {
+        return prev.filter((id) => !visibleIds.includes(id));
+      }
+      const merged = new Set(prev);
+      visibleIds.forEach((id) => merged.add(id));
+      return Array.from(merged);
+    });
+  }, [filteredSchedules, readOnly]);
+
+  const handleDeleteSelectedSchedules = useCallback(() => {
+    if (readOnly) {
+      return;
+    }
+    if (selectedScheduleIds.length === 0) {
+      return;
+    }
+    onDeleteMany(selectedScheduleIds);
+  }, [readOnly, selectedScheduleIds, onDeleteMany]);
+
   const handleSchedulePageChange = useCallback(
     (offset: number) => {
       setSchedulePage((prev) => {
@@ -5469,6 +5540,30 @@ const ScheduleSettingsPanel = ({
             </span>
           </div>
           <div className="settings-list">
+            <div className="history-toolbar">
+              <div className="history-selection">
+                <label className="table-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={allSchedulesSelected}
+                    onChange={handleToggleAllSchedules}
+                    disabled={readOnly}
+                  />
+                  <span>当前页全选</span>
+                </label>
+                <span className="selection-hint">
+                  已选 {visibleSelectedScheduleCount} / {filteredSchedules.length}
+                </span>
+                <button
+                  type="button"
+                  className="secondary danger"
+                  onClick={handleDeleteSelectedSchedules}
+                  disabled={selectedScheduleIds.length === 0 || readOnly}
+                >
+                  删除所选
+                </button>
+              </div>
+            </div>
             <div className="history-filter-row">
               <div className="history-chip history-chip-select">
                 <span className="history-chip-label">状态筛选</span>
@@ -5512,6 +5607,7 @@ const ScheduleSettingsPanel = ({
                 <table>
                   <thead>
                     <tr>
+                      <th></th>
                       <th>名称</th>
                       <th>Cron</th>
                       <th>集群</th>
@@ -5533,6 +5629,16 @@ const ScheduleSettingsPanel = ({
                       const versionSummary = getPrometheusSummary(schedule);
                       return (
                         <tr key={schedule.id}>
+                          <td>
+                            <label className="table-checkbox">
+                              <input
+                                type="checkbox"
+                                checked={selectedScheduleIds.includes(schedule.id)}
+                                onChange={() => handleToggleSchedule(schedule.id)}
+                                disabled={readOnly}
+                              />
+                            </label>
+                          </td>
                           <td>{label}</td>
                           <td className="th-nowrap">{schedule.cron}</td>
                           <td>
@@ -6034,6 +6140,7 @@ interface SchedulePageProps {
     isEnabled: boolean;
   }) => Promise<void>;
   onDelete: (schedule: InspectionSchedule) => void;
+  onDeleteMany: (scheduleIds: number[]) => void;
   onToggleEnabled: (schedule: InspectionSchedule, enabled: boolean) => void;
 }
 
@@ -6049,6 +6156,7 @@ const SchedulePage = ({
   license,
   onSave,
   onDelete,
+  onDeleteMany,
   onToggleEnabled,
 }: SchedulePageProps) => (
   <section className="card history history-page schedule-page">
@@ -6064,6 +6172,7 @@ const SchedulePage = ({
       license={license}
       onSave={onSave}
       onDelete={onDelete}
+      onDeleteMany={onDeleteMany}
       onToggleEnabled={onToggleEnabled}
     />
   </section>
@@ -9686,6 +9795,54 @@ const hasManualKubeconfig = useMemo(
     [performDeleteSchedule, licenseCapabilities]
   );
 
+  const handleDeleteSchedulesBulk = useCallback(
+    (scheduleIds: number[]): Promise<void> => {
+      if (!licenseCapabilities.canRunInspections) {
+        setScheduleError(
+          licenseCapabilities.reason ?? "当前 License 不支持定时巡检。"
+        );
+        setScheduleNotice(null);
+        return Promise.resolve();
+      }
+      const targets = schedules.filter((schedule) =>
+        scheduleIds.includes(schedule.id)
+      );
+      if (targets.length === 0) {
+        return Promise.resolve();
+      }
+      setConfirmState({
+        title: "批量删除定时巡检",
+        message: `确认删除选中的 ${targets.length} 个定时任务？该操作不可恢复。`,
+        confirmLabel: "删除",
+        variant: "danger",
+        scope: "global",
+        onConfirm: async () => {
+          setScheduleSubmitting(true);
+          setScheduleNotice(null);
+          setScheduleError(null);
+          try {
+            for (const schedule of targets) {
+              logWithTimestamp("info", "删除定时巡检: %s", schedule.id);
+              await apiDeleteInspectionSchedule(schedule.id);
+            }
+            await refreshSchedules();
+            setScheduleNotice(`已删除 ${targets.length} 个定时任务`);
+          } catch (err) {
+            const message =
+              err instanceof Error ? err.message : "删除定时巡检失败";
+            logWithTimestamp("error", "批量删除定时巡检失败: %s", message);
+            setScheduleError(message);
+            throw err instanceof Error ? err : new Error(message);
+          } finally {
+            setScheduleSubmitting(false);
+          }
+        },
+      });
+      return Promise.resolve();
+    },
+    [licenseCapabilities, schedules, refreshSchedules]
+  );
+
   const handleToggleScheduleEnabled = useCallback(
     async (schedule: InspectionSchedule, enabled: boolean) => {
       if (!licenseCapabilities.canRunInspections) {
@@ -10028,6 +10185,7 @@ const hasManualKubeconfig = useMemo(
                 license={licenseCapabilities}
                 onSave={handleSaveSchedule}
                 onDelete={handleDeleteSchedule}
+                onDeleteMany={handleDeleteSchedulesBulk}
                 onToggleEnabled={handleToggleScheduleEnabled}
               />
             }
