@@ -2535,6 +2535,138 @@ th {
   overflow: visible;
 }
 
+.schedule-modal {
+  font-size: 13px;
+  max-width: 860px;
+}
+
+.schedule-modal .settings-form {
+  font-size: 13px;
+  gap: 10px;
+}
+
+.schedule-modal .settings-form label {
+  font-size: 13px;
+}
+
+.schedule-modal .settings-form input,
+.schedule-modal .settings-form select,
+.schedule-modal .settings-form textarea {
+  font-size: 13px;
+  padding: 8px 10px;
+}
+
+.schedule-modal .schedule-input {
+  width: 280px;
+  max-width: 100%;
+}
+
+.schedule-modal .schedule-cron-grid {
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+}
+
+.schedule-modal .schedule-cron-grid label {
+  align-items: flex-start;
+}
+
+.schedule-modal .schedule-cron-input {
+  width: 90px;
+  max-width: 100%;
+}
+
+.schedule-modal .inspection-items-toolbar input,
+.schedule-modal .inspection-items-toolbar select {
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.schedule-modal .schedule-dropdown {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 8px 12px;
+  margin-top: 10px;
+}
+
+.schedule-modal .schedule-dropdown summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.schedule-modal .schedule-dropdown-summary {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-modal .schedule-dropdown-body {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.schedule-modal .schedule-dropdown-hint {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.schedule-modal .cluster-select {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.schedule-modal .cluster-multi-select {
+  min-height: 140px;
+  font-size: 13px;
+  padding: 8px 10px;
+}
+
+.schedule-modal .inspection-item-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.schedule-modal .inspection-item-column {
+  min-width: 0;
+}
+
+.schedule-modal .item-list.scrollable {
+  max-height: 240px;
+  overflow: auto;
+  padding-right: 6px;
+}
+
+.schedule-modal .item-list li {
+  padding: 8px 10px;
+}
+
+.schedule-modal .item-list label {
+  gap: 8px;
+}
+
+@media (max-width: 900px) {
+  .schedule-modal .inspection-item-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-modal .schedule-input {
+    width: 100%;
+  }
+}
+
 .settings-form h4 {
   margin: 0;
   color: #1e293b;
