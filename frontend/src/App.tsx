@@ -5014,6 +5014,7 @@ const ScheduleSettingsPanel = ({
   const readOnly = !license.canRunInspections;
   const [editingSchedule, setEditingSchedule] =
     useState<InspectionSchedule | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
   const [formName, setFormName] = useState("");
   const [cronMinute, setCronMinute] = useState(DEFAULT_SCHEDULE_CRON[0]);
   const [cronHour, setCronHour] = useState(DEFAULT_SCHEDULE_CRON[1]);
@@ -5027,6 +5028,13 @@ const ScheduleSettingsPanel = ({
   const [itemKeyword, setItemKeyword] = useState("");
   const [itemVersionFilter, setItemVersionFilter] = useState("all");
   const [formError, setFormError] = useState<string | null>(null);
+  const [scheduleKeyword, setScheduleKeyword] = useState("");
+  const [scheduleStatusFilter, setScheduleStatusFilter] = useState<
+    "all" | "enabled" | "disabled"
+  >("all");
+  const [schedulePageSize, setSchedulePageSize] = useState(10);
+  const [schedulePage, setSchedulePage] = useState(1);
+  const [schedulePageInput, setSchedulePageInput] = useState("");
 
   const scheduleClusterMap = useMemo(() => {
     const map = new Map<number, ClusterConfig>();
@@ -5097,6 +5105,26 @@ const ScheduleSettingsPanel = ({
     }
   }, [itemVersionFilter, prometheusVersionOptions]);
 
+  useEffect(() => {
+    setSchedulePage(1);
+    setSchedulePageInput("");
+  }, [schedulePageSize, scheduleKeyword, scheduleStatusFilter]);
+
+  const handleOpenCreate = () => {
+    setEditingSchedule(null);
+    setFormOpen(true);
+  };
+
+  const handleOpenEdit = (schedule: InspectionSchedule) => {
+    setEditingSchedule(schedule);
+    setFormOpen(true);
+  };
+
+  const handleCloseForm = () => {
+    setFormOpen(false);
+    resetForm();
+  };
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (readOnly) {
@@ -5131,7 +5159,7 @@ const ScheduleSettingsPanel = ({
       itemIds: selectedItemIds,
       isEnabled: formEnabled,
     });
-    resetForm();
+    handleCloseForm();
   };
 
   const filteredClusters = useMemo(() => {
@@ -5284,6 +5312,85 @@ const ScheduleSettingsPanel = ({
     });
   }, [schedules]);
 
+  const filteredSchedules = useMemo(() => {
+    const keyword = scheduleKeyword.trim().toLowerCase();
+    return sortedSchedules.filter((schedule) => {
+      if (scheduleStatusFilter === "enabled" && !schedule.is_enabled) {
+        return false;
+      }
+      if (scheduleStatusFilter === "disabled" && schedule.is_enabled) {
+        return false;
+      }
+      if (!keyword) {
+        return true;
+      }
+      const name = schedule.name?.trim() || `定时巡检 #${schedule.id}`;
+      const clusterNames = schedule.cluster_ids
+        .map((id) => scheduleClusterMap.get(id)?.name ?? `#${id}`)
+        .join(" ");
+      const itemNames = schedule.item_ids
+        .map((id) => scheduleItemMap.get(id)?.name ?? `#${id}`)
+        .join(" ");
+      const haystack = `${name} ${schedule.cron} ${clusterNames} ${itemNames}`.toLowerCase();
+      return haystack.includes(keyword);
+    });
+  }, [
+    scheduleKeyword,
+    scheduleStatusFilter,
+    sortedSchedules,
+    scheduleClusterMap,
+    scheduleItemMap,
+  ]);
+
+  const scheduleTotalPages = useMemo(
+    () =>
+      Math.max(
+        1,
+        Math.ceil(filteredSchedules.length / Math.max(schedulePageSize, 1))
+      ),
+    [filteredSchedules.length, schedulePageSize]
+  );
+
+  useEffect(() => {
+    setSchedulePage((prev) =>
+      Math.min(Math.max(prev, 1), scheduleTotalPages)
+    );
+  }, [scheduleTotalPages]);
+
+  const pagedSchedules = useMemo(() => {
+    const start = (schedulePage - 1) * schedulePageSize;
+    return filteredSchedules.slice(start, start + schedulePageSize);
+  }, [filteredSchedules, schedulePage, schedulePageSize]);
+
+  const handleSchedulePageChange = useCallback(
+    (offset: number) => {
+      setSchedulePage((prev) => {
+        const next = prev + offset;
+        if (next < 1) {
+          return 1;
+        }
+        if (next > scheduleTotalPages) {
+          return scheduleTotalPages;
+        }
+        return next;
+      });
+    },
+    [scheduleTotalPages]
+  );
+
+  const handleSchedulePageJump = useCallback(() => {
+    const trimmed = schedulePageInput.trim();
+    if (!trimmed) {
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isNaN(parsed) && Number.isInteger(parsed)) {
+      const target = Math.min(Math.max(parsed, 1), scheduleTotalPages);
+      setSchedulePage(target);
+    }
+    setSchedulePageInput("");
+  }, [schedulePageInput, scheduleTotalPages]);
+
   const summarizeNames = useCallback(
     (ids: number[], map: Map<number, { name?: string | null }>) => {
       const names = ids.map((id) => map.get(id)?.name || `#${id}`);
@@ -5323,15 +5430,24 @@ const ScheduleSettingsPanel = ({
 
   return (
     <div className="inspection-settings-panel">
-      <div className="settings-header">
+      <div className="card-header history-header">
         <div>
-          <h3>定时巡检</h3>
-          <p>基于 Cron 表达式定时触发巡检任务</p>
+          <h2>定时巡检</h2>
+          <p className="card-caption">基于 Cron 表达式定时触发巡检任务</p>
+        </div>
+        <div className="card-actions">
+          <button
+            type="button"
+            className="primary"
+            onClick={handleOpenCreate}
+            disabled={submitting || readOnly}
+          >
+            创建定时任务
+          </button>
         </div>
       </div>
       {notice && <div className="feedback success">{notice}</div>}
       {error && <div className="feedback error">{error}</div>}
-      {formError && <div className="feedback error">{formError}</div>}
       {readOnly && (
         <div className="feedback warning">
           {license.reason ?? "当前 License 不支持定时巡检。"}
@@ -5347,12 +5463,48 @@ const ScheduleSettingsPanel = ({
               </span>
             </div>
             <span className="inspection-section-count">
-              共 {sortedSchedules.length} 条
+              共 {filteredSchedules.length} 条
             </span>
           </div>
           <div className="settings-list">
+            <div className="history-filter-row">
+              <div className="history-chip history-chip-select">
+                <span className="history-chip-label">状态筛选</span>
+                <select
+                  value={scheduleStatusFilter}
+                  onChange={(event) =>
+                    setScheduleStatusFilter(
+                      event.target.value as "all" | "enabled" | "disabled"
+                    )
+                  }
+                >
+                  <option value="all">全部</option>
+                  <option value="enabled">启用</option>
+                  <option value="disabled">停用</option>
+                </select>
+              </div>
+              <div className="history-chip history-chip-search">
+                <span className="history-chip-label">关键字</span>
+                <input
+                  type="text"
+                  value={scheduleKeyword}
+                  onChange={(event) => setScheduleKeyword(event.target.value)}
+                  placeholder="按名称 / Cron / 集群 / 巡检项搜索"
+                />
+                {scheduleKeyword && (
+                  <button
+                    type="button"
+                    className="history-search-clear"
+                    onClick={() => setScheduleKeyword("")}
+                    aria-label="清空关键字"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            </div>
             <div className="table-wrapper">
-              {sortedSchedules.length === 0 ? (
+              {filteredSchedules.length === 0 ? (
                 <div className="placeholder">暂无定时巡检任务</div>
               ) : (
                 <table>
@@ -5368,7 +5520,7 @@ const ScheduleSettingsPanel = ({
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedSchedules.map((schedule) => {
+                    {pagedSchedules.map((schedule) => {
                       const label =
                         schedule.name?.trim() ||
                         `定时巡检 #${schedule.id}`;
@@ -5417,7 +5569,7 @@ const ScheduleSettingsPanel = ({
                             <button
                               type="button"
                               className="link-button"
-                              onClick={() => setEditingSchedule(schedule)}
+                              onClick={() => handleOpenEdit(schedule)}
                               disabled={readOnly}
                             >
                               编辑
@@ -5451,310 +5603,385 @@ const ScheduleSettingsPanel = ({
                 </table>
               )}
             </div>
-          </div>
-        </section>
-        <section className="inspection-section inspection-section-form">
-          <div className="inspection-section-header">
-            <div>
-              <h4>{editingSchedule ? "编辑定时任务" : "新增定时任务"}</h4>
-              <span className="inspection-section-hint">
-                时间格式为 分 时 日 月 周，按服务器时间执行
-              </span>
-            </div>
-          </div>
-          <form className="settings-form" onSubmit={handleSubmit}>
-            <label>
-              任务名称
-              <input
-                type="text"
-                value={formName}
-                onChange={(event) => setFormName(event.target.value)}
-                placeholder="例如：每日健康巡检"
-                disabled={submitting || readOnly}
-              />
-            </label>
-            <div className="schedule-cron-grid">
-              <label>
-                分
-                <input
-                  type="text"
-                  value={cronMinute}
-                  onChange={(event) => setCronMinute(event.target.value)}
-                  placeholder="0-59"
-                  disabled={submitting || readOnly}
-                />
-              </label>
-              <label>
-                时
-                <input
-                  type="text"
-                  value={cronHour}
-                  onChange={(event) => setCronHour(event.target.value)}
-                  placeholder="0-23"
-                  disabled={submitting || readOnly}
-                />
-              </label>
-              <label>
-                日
-                <input
-                  type="text"
-                  value={cronDay}
-                  onChange={(event) => setCronDay(event.target.value)}
-                  placeholder="1-31/*"
-                  disabled={submitting || readOnly}
-                />
-              </label>
-              <label>
-                月
-                <input
-                  type="text"
-                  value={cronMonth}
-                  onChange={(event) => setCronMonth(event.target.value)}
-                  placeholder="1-12/*"
-                  disabled={submitting || readOnly}
-                />
-              </label>
-              <label>
-                周
-                <input
-                  type="text"
-                  value={cronWeek}
-                  onChange={(event) => setCronWeek(event.target.value)}
-                  placeholder="0-6/*"
-                  disabled={submitting || readOnly}
-                />
-              </label>
-            </div>
-            <label className="table-checkbox">
-              <input
-                type="checkbox"
-                checked={formEnabled}
-                onChange={(event) => setFormEnabled(event.target.checked)}
-                disabled={submitting || readOnly}
-              />
-              <span>启用该定时任务</span>
-            </label>
-            <div className="inspection-item-group">
-              <div className="inspection-item-group-title">
-                <span className="inspection-group-title-text">选择集群</span>
-                <span className="group-count">
-                  已选 {selectedClusterIds.length} / {filteredClusters.length}
-                </span>
-              </div>
-              <div className="inspection-items-toolbar">
-                <span className="selection-hint">
-                  已选 {selectedFilteredClusterCount} /{" "}
-                  {filteredClusters.length}
-                </span>
-                <div className="inspection-items-toolbar-actions">
-                  <input
-                    type="text"
-                    className="inspection-items-filter"
-                    value={clusterKeyword}
-                    onChange={(event) => setClusterKeyword(event.target.value)}
-                    placeholder="搜索集群"
-                    disabled={submitting || readOnly}
-                  />
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={toggleAllClusters}
-                    disabled={submitting || readOnly}
-                  >
-                    {allFilteredClustersSelected ? "清除选择" : "全选"}
-                  </button>
-                </div>
-              </div>
-              {clusters.length === 0 ? (
-                <ul className="item-list">
-                  <li className="placeholder">暂无集群</li>
-                </ul>
-              ) : filteredClusters.length === 0 ? (
-                <ul className="item-list">
-                  <li className="placeholder">未找到匹配的集群</li>
-                </ul>
-              ) : (
-                <ul className="item-list">
-                  {filteredClusters.map((cluster) => (
-                    <li key={cluster.id}>
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={selectedClusterIds.includes(cluster.id)}
-                          onChange={() => toggleCluster(cluster.id)}
-                          disabled={submitting || readOnly}
-                        />
-                        <div>
-                          <div className="item-title-row">
-                            <div className="item-name">{cluster.name}</div>
-                            <span className="item-tag neutral">
-                              #{cluster.id}
-                            </span>
-                          </div>
-                          <div className="item-desc">
-                            Prometheus：{cluster.prometheus_url || "未配置"}
-                          </div>
-                        </div>
-                      </label>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            <div className="inspection-item-group">
-              <div className="inspection-item-group-title">
-                <span className="inspection-group-title-text">选择巡检项</span>
-                <span className="group-count">
-                  已选 {selectedItemIds.length} / {filteredItems.length}
-                </span>
-              </div>
-              <div className="inspection-items-toolbar">
-                <span className="selection-hint">
-                  已选 {selectedFilteredItemCount} / {filteredItems.length}
-                </span>
-                <div className="inspection-items-toolbar-actions">
-                  <input
-                    type="text"
-                    className="inspection-items-filter"
-                    value={itemKeyword}
-                    onChange={(event) => setItemKeyword(event.target.value)}
-                    placeholder="关键字筛选"
-                    disabled={submitting || readOnly}
-                  />
+            {filteredSchedules.length > 0 && (
+              <div className="history-pagination-controls schedule-pagination">
+                <label className="page-size-control">
+                  每页
                   <select
-                    className="inspection-items-filter"
-                    value={itemVersionFilter}
+                    value={schedulePageSize}
                     onChange={(event) =>
-                      setItemVersionFilter(event.target.value)
+                      setSchedulePageSize(Number(event.target.value))
                     }
-                    disabled={submitting || readOnly}
+                    className="page-size-select"
                   >
-                    <option value="all">PromQL 全部版本</option>
-                    {prometheusVersionOptions.map((version) => (
-                      <option key={version} value={version}>
-                        {version}
+                    {[10, 20, 50].map((size) => (
+                      <option key={size} value={size}>
+                        {size}
                       </option>
                     ))}
                   </select>
+                </label>
+                <div className="history-pagination-buttons">
                   <button
                     type="button"
                     className="secondary"
-                    onClick={toggleAllItems}
-                    disabled={submitting || readOnly}
+                    onClick={() => handleSchedulePageChange(-1)}
+                    disabled={schedulePage <= 1}
                   >
-                    {allFilteredItemsSelected ? "清除选择" : "全选"}
+                    上一页
+                  </button>
+                  <span>
+                    第 {schedulePage} / {scheduleTotalPages} 页
+                  </span>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => handleSchedulePageChange(1)}
+                    disabled={schedulePage >= scheduleTotalPages}
+                  >
+                    下一页
                   </button>
                 </div>
+                <label className="history-page-jump">
+                  跳转
+                  <input
+                    type="number"
+                    min={1}
+                    value={schedulePageInput}
+                    onChange={(event) =>
+                      setSchedulePageInput(event.target.value)
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        handleSchedulePageJump();
+                      }
+                    }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={handleSchedulePageJump}
+                >
+                  确定
+                </button>
               </div>
-              {items.length === 0 ? (
-                <ul className="item-list">
-                  <li className="placeholder">暂无巡检项</li>
-                </ul>
-              ) : filteredItems.length === 0 ? (
-                <ul className="item-list">
-                  <li className="placeholder">未找到匹配的巡检项</li>
-                </ul>
-              ) : (
-                <>
-                  {filteredPromqlItems.length > 0 && (
-                    <div className="inspection-item-group">
-                      <div className="inspection-item-group-title">
-                        <span className="inspection-group-title-text">
-                          PromQL 巡检项
-                        </span>
-                        <span className="group-count">
-                          {filteredPromqlItems.length} 条
-                        </span>
-                      </div>
-                      <ul className="item-list">
-                        {filteredPromqlItems.map((item) => (
-                          <li key={item.id}>
-                            <label>
-                              <input
-                                type="checkbox"
-                                checked={selectedItemIds.includes(item.id)}
-                                onChange={() => toggleItem(item.id)}
-                                disabled={submitting || readOnly}
-                              />
-                              <div>
-                                <div className="item-title-row">
-                                  <div className="item-name">{item.name}</div>
-                                  <span className="item-tag promql">
-                                    PromQL ·{" "}
-                                    {normalizePrometheusVersion(
-                                      item.prometheus_version,
-                                      prometheusVersionOptions
-                                    )}
-                                  </span>
-                                </div>
-                                <div className="item-desc">
-                                  {item.description || "未提供描述"}
-                                </div>
-                              </div>
-                            </label>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  {filteredCommonItems.length > 0 && (
-                    <div className="inspection-item-group">
-                      <div className="inspection-item-group-title">
-                        <span className="inspection-group-title-text">
-                          通用巡检项
-                        </span>
-                        <span className="group-count">
-                          {filteredCommonItems.length} 条
-                        </span>
-                      </div>
-                      <ul className="item-list">
-                        {filteredCommonItems.map((item) => (
-                          <li key={item.id}>
-                            <label>
-                              <input
-                                type="checkbox"
-                                checked={selectedItemIds.includes(item.id)}
-                                onChange={() => toggleItem(item.id)}
-                                disabled={submitting || readOnly}
-                              />
-                              <div>
-                                <div className="item-title-row">
-                                  <div className="item-name">{item.name}</div>
-                                  <span className="item-tag neutral">通用</span>
-                                </div>
-                                <div className="item-desc">
-                                  {item.description || "未提供描述"}
-                                </div>
-                              </div>
-                            </label>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-            <div className="settings-actions">
-              <button
-                type="button"
-                className="secondary"
-                onClick={resetForm}
-                disabled={submitting || readOnly}
-              >
-                重置
-              </button>
-              <button
-                type="submit"
-                className="primary"
-                disabled={submitting || readOnly}
-              >
-                {editingSchedule ? "保存修改" : "新增"}
-              </button>
-            </div>
-          </form>
+            )}
+          </div>
         </section>
       </div>
+      {formOpen && (
+        <div className="modal-backdrop" aria-modal="true">
+          <div className="modal large schedule-modal" role="dialog">
+            <div className="settings-header">
+              <div>
+                <h3>{editingSchedule ? "编辑定时任务" : "新增定时任务"}</h3>
+                <p>时间格式为 分 时 日 月 周，按服务器时间执行</p>
+              </div>
+              <button
+                type="button"
+                className="link-button"
+                onClick={handleCloseForm}
+              >
+                关闭
+              </button>
+            </div>
+            {formError && <div className="feedback error">{formError}</div>}
+            <form className="settings-form" onSubmit={handleSubmit}>
+              <label>
+                任务名称
+                <input
+                  type="text"
+                  value={formName}
+                  onChange={(event) => setFormName(event.target.value)}
+                  placeholder="例如：每日健康巡检"
+                  disabled={submitting || readOnly}
+                />
+              </label>
+              <div className="schedule-cron-grid">
+                <label>
+                  分
+                  <input
+                    type="text"
+                    value={cronMinute}
+                    onChange={(event) => setCronMinute(event.target.value)}
+                    placeholder="0-59"
+                    disabled={submitting || readOnly}
+                  />
+                </label>
+                <label>
+                  时
+                  <input
+                    type="text"
+                    value={cronHour}
+                    onChange={(event) => setCronHour(event.target.value)}
+                    placeholder="0-23"
+                    disabled={submitting || readOnly}
+                  />
+                </label>
+                <label>
+                  日
+                  <input
+                    type="text"
+                    value={cronDay}
+                    onChange={(event) => setCronDay(event.target.value)}
+                    placeholder="1-31/*"
+                    disabled={submitting || readOnly}
+                  />
+                </label>
+                <label>
+                  月
+                  <input
+                    type="text"
+                    value={cronMonth}
+                    onChange={(event) => setCronMonth(event.target.value)}
+                    placeholder="1-12/*"
+                    disabled={submitting || readOnly}
+                  />
+                </label>
+                <label>
+                  周
+                  <input
+                    type="text"
+                    value={cronWeek}
+                    onChange={(event) => setCronWeek(event.target.value)}
+                    placeholder="0-6/*"
+                    disabled={submitting || readOnly}
+                  />
+                </label>
+              </div>
+              <label className="table-checkbox">
+                <input
+                  type="checkbox"
+                  checked={formEnabled}
+                  onChange={(event) => setFormEnabled(event.target.checked)}
+                  disabled={submitting || readOnly}
+                />
+                <span>启用该定时任务</span>
+              </label>
+              <div className="inspection-item-group">
+                <div className="inspection-item-group-title">
+                  <span className="inspection-group-title-text">选择集群</span>
+                  <span className="group-count">
+                    已选 {selectedClusterIds.length} / {filteredClusters.length}
+                  </span>
+                </div>
+                <div className="inspection-items-toolbar">
+                  <span className="selection-hint">
+                    已选 {selectedFilteredClusterCount} /{" "}
+                    {filteredClusters.length}
+                  </span>
+                  <div className="inspection-items-toolbar-actions">
+                    <input
+                      type="text"
+                      className="inspection-items-filter"
+                      value={clusterKeyword}
+                      onChange={(event) => setClusterKeyword(event.target.value)}
+                      placeholder="搜索集群"
+                      disabled={submitting || readOnly}
+                    />
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={toggleAllClusters}
+                      disabled={submitting || readOnly}
+                    >
+                      {allFilteredClustersSelected ? "清除选择" : "全选"}
+                    </button>
+                  </div>
+                </div>
+                {clusters.length === 0 ? (
+                  <ul className="item-list">
+                    <li className="placeholder">暂无集群</li>
+                  </ul>
+                ) : filteredClusters.length === 0 ? (
+                  <ul className="item-list">
+                    <li className="placeholder">未找到匹配的集群</li>
+                  </ul>
+                ) : (
+                  <ul className="item-list">
+                    {filteredClusters.map((cluster) => (
+                      <li key={cluster.id}>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={selectedClusterIds.includes(cluster.id)}
+                            onChange={() => toggleCluster(cluster.id)}
+                            disabled={submitting || readOnly}
+                          />
+                          <div>
+                            <div className="item-title-row">
+                              <div className="item-name">{cluster.name}</div>
+                              <span className="item-tag neutral">
+                                #{cluster.id}
+                              </span>
+                            </div>
+                            <div className="item-desc">
+                              Prometheus：{cluster.prometheus_url || "未配置"}
+                            </div>
+                          </div>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div className="inspection-item-group">
+                <div className="inspection-item-group-title">
+                  <span className="inspection-group-title-text">选择巡检项</span>
+                  <span className="group-count">
+                    已选 {selectedItemIds.length} / {filteredItems.length}
+                  </span>
+                </div>
+                <div className="inspection-items-toolbar">
+                  <span className="selection-hint">
+                    已选 {selectedFilteredItemCount} / {filteredItems.length}
+                  </span>
+                  <div className="inspection-items-toolbar-actions">
+                    <input
+                      type="text"
+                      className="inspection-items-filter"
+                      value={itemKeyword}
+                      onChange={(event) => setItemKeyword(event.target.value)}
+                      placeholder="关键字筛选"
+                      disabled={submitting || readOnly}
+                    />
+                    <select
+                      className="inspection-items-filter"
+                      value={itemVersionFilter}
+                      onChange={(event) =>
+                        setItemVersionFilter(event.target.value)
+                      }
+                      disabled={submitting || readOnly}
+                    >
+                      <option value="all">PromQL 全部版本</option>
+                      {prometheusVersionOptions.map((version) => (
+                        <option key={version} value={version}>
+                          {version}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={toggleAllItems}
+                      disabled={submitting || readOnly}
+                    >
+                      {allFilteredItemsSelected ? "清除选择" : "全选"}
+                    </button>
+                  </div>
+                </div>
+                {items.length === 0 ? (
+                  <ul className="item-list">
+                    <li className="placeholder">暂无巡检项</li>
+                  </ul>
+                ) : filteredItems.length === 0 ? (
+                  <ul className="item-list">
+                    <li className="placeholder">未找到匹配的巡检项</li>
+                  </ul>
+                ) : (
+                  <>
+                    {filteredPromqlItems.length > 0 && (
+                      <div className="inspection-item-group">
+                        <div className="inspection-item-group-title">
+                          <span className="inspection-group-title-text">
+                            PromQL 巡检项
+                          </span>
+                          <span className="group-count">
+                            {filteredPromqlItems.length} 条
+                          </span>
+                        </div>
+                        <ul className="item-list">
+                          {filteredPromqlItems.map((item) => (
+                            <li key={item.id}>
+                              <label>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedItemIds.includes(item.id)}
+                                  onChange={() => toggleItem(item.id)}
+                                  disabled={submitting || readOnly}
+                                />
+                                <div>
+                                  <div className="item-title-row">
+                                    <div className="item-name">{item.name}</div>
+                                    <span className="item-tag promql">
+                                      PromQL ·{" "}
+                                      {normalizePrometheusVersion(
+                                        item.prometheus_version,
+                                        prometheusVersionOptions
+                                      )}
+                                    </span>
+                                  </div>
+                                  <div className="item-desc">
+                                    {item.description || "未提供描述"}
+                                  </div>
+                                </div>
+                              </label>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {filteredCommonItems.length > 0 && (
+                      <div className="inspection-item-group">
+                        <div className="inspection-item-group-title">
+                          <span className="inspection-group-title-text">
+                            通用巡检项
+                          </span>
+                          <span className="group-count">
+                            {filteredCommonItems.length} 条
+                          </span>
+                        </div>
+                        <ul className="item-list">
+                          {filteredCommonItems.map((item) => (
+                            <li key={item.id}>
+                              <label>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedItemIds.includes(item.id)}
+                                  onChange={() => toggleItem(item.id)}
+                                  disabled={submitting || readOnly}
+                                />
+                                <div>
+                                  <div className="item-title-row">
+                                    <div className="item-name">{item.name}</div>
+                                    <span className="item-tag neutral">通用</span>
+                                  </div>
+                                  <div className="item-desc">
+                                    {item.description || "未提供描述"}
+                                  </div>
+                                </div>
+                              </label>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+              <div className="settings-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={resetForm}
+                  disabled={submitting || readOnly}
+                >
+                  重置
+                </button>
+                <button
+                  type="submit"
+                  className="primary"
+                  disabled={submitting || readOnly}
+                >
+                  {editingSchedule ? "保存修改" : "新增"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
