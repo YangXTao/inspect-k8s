@@ -131,6 +131,7 @@ const DEFAULT_CLUSTER_PAGE_SIZE = CLUSTER_PAGE_SIZE_OPTIONS[0];
 const RUN_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const CLUSTER_ITEM_PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
 const RESULT_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
+const SCHEDULE_REFRESH_INTERVAL = 15000;
 const DEFAULT_PROMETHEUS_VERSION = "3.2";
 const DEFAULT_PROMETHEUS_VERSION_OPTIONS = [
   "1.8",
@@ -8442,6 +8443,21 @@ const backgroundLocation =
       window.clearInterval(timer);
     };
   }, [refreshClusters]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (!location.pathname.startsWith("/schedule")) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void refreshSchedules();
+    }, SCHEDULE_REFRESH_INTERVAL);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [location.pathname, refreshSchedules]);
 
   useEffect(() => {
     if (pendingClusterIds.length === 0 || typeof window === "undefined") {
