@@ -5302,7 +5302,6 @@ const ScheduleSettingsPanel = ({
     () => filteredItems.filter((item) => !isPromqlType(item.check_type)),
     [filteredItems]
   );
-  const shouldExpandClusters = filteredClusters.length <= 6;
   const shouldExpandPromql = filteredPromqlItems.length <= 8;
   const shouldExpandCommon = filteredCommonItems.length <= 8;
 
@@ -5764,13 +5763,13 @@ const ScheduleSettingsPanel = ({
                   </label>
                 </div>
                 <label className="table-checkbox schedule-enabled">
+                  <span>启用</span>
                   <input
                     type="checkbox"
                     checked={formEnabled}
                     onChange={(event) => setFormEnabled(event.target.checked)}
                     disabled={submitting || readOnly}
                   />
-                  <span>启用该定时任务</span>
                 </label>
               </div>
               <div className="inspection-item-group schedule-section">
@@ -5780,40 +5779,36 @@ const ScheduleSettingsPanel = ({
                     已选 {selectedClusterIds.length} / {filteredClusters.length}
                   </span>
                 </div>
-                <details className="schedule-dropdown" open={shouldExpandClusters}>
+                <div className="inspection-items-toolbar">
+                  <div className="inspection-items-toolbar-actions">
+                    <input
+                      type="text"
+                      className="inspection-items-filter"
+                      value={clusterKeyword}
+                      onChange={(event) =>
+                        setClusterKeyword(event.target.value)
+                      }
+                      placeholder="搜索集群"
+                      disabled={submitting || readOnly}
+                    />
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={toggleAllClusters}
+                      disabled={submitting || readOnly}
+                    >
+                      {allFilteredClustersSelected ? "清除选择" : "全选"}
+                    </button>
+                  </div>
+                </div>
+                <details className="schedule-dropdown schedule-cluster-dropdown">
                   <summary>
-                    <span>集群列表</span>
+                    <span>展开集群列表</span>
                     <span className="schedule-dropdown-summary">
                       已选 {selectedClusterIds.length}
                     </span>
                   </summary>
                   <div className="schedule-dropdown-body">
-                    <div className="inspection-items-toolbar">
-                      <span className="selection-hint">
-                        已选 {selectedFilteredClusterCount} /{" "}
-                        {filteredClusters.length}
-                      </span>
-                      <div className="inspection-items-toolbar-actions">
-                        <input
-                          type="text"
-                          className="inspection-items-filter"
-                          value={clusterKeyword}
-                          onChange={(event) =>
-                            setClusterKeyword(event.target.value)
-                          }
-                          placeholder="搜索集群"
-                          disabled={submitting || readOnly}
-                        />
-                        <button
-                          type="button"
-                          className="secondary"
-                          onClick={toggleAllClusters}
-                          disabled={submitting || readOnly}
-                        >
-                          {allFilteredClustersSelected ? "清除选择" : "全选"}
-                        </button>
-                      </div>
-                    </div>
                     {clusters.length === 0 ? (
                       <div className="placeholder">暂无集群</div>
                     ) : filteredClusters.length === 0 ? (

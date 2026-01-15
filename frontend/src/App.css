@@ -2617,10 +2617,21 @@ th {
   font-size: 12px;
   color: inherit;
   font-weight: 600;
-  padding: 6px 10px;
+  padding: 4px 8px;
   border-radius: 999px;
-  background: #fff;
-  border: 1px solid #dbe3f4;
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.schedule-modal .schedule-enabled input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+}
+
+.schedule-modal .schedule-enabled input[type="checkbox"]::after {
+  width: 3px;
+  height: 6px;
 }
 
 .schedule-modal .inspection-items-toolbar input,
@@ -2653,6 +2664,11 @@ th {
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 8px 10px;
+}
+
+.schedule-modal .inspection-items-toolbar-actions {
+  justify-content: space-between;
+  width: 100%;
 }
 
 .schedule-modal .inspection-items-filter {
@@ -2695,6 +2711,10 @@ th {
   transform: rotate(45deg);
   margin-left: 8px;
   transition: transform 0.2s ease;
+}
+
+.schedule-modal .schedule-cluster-dropdown summary::after {
+  margin-left: auto;
 }
 
 .schedule-modal .schedule-dropdown[open] summary::after {
