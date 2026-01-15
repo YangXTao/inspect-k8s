@@ -850,7 +850,13 @@ const logWithTimestamp = (
   logger(`[${timestamp}] ${message}`, ...details);
 };
 
-const TopNavigation = ({ onOpenSettings }: { onOpenSettings: () => void }) => {
+const TopNavigation = ({
+  onOpenSettings,
+  onOpenSchedule,
+}: {
+  onOpenSettings: () => void;
+  onOpenSchedule: () => void;
+}) => {
   const handleSettingsClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
     if (
       event.metaKey ||
@@ -863,6 +869,19 @@ const TopNavigation = ({ onOpenSettings }: { onOpenSettings: () => void }) => {
     }
     event.preventDefault();
     onOpenSettings();
+  };
+  const handleScheduleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey ||
+      event.button !== 0
+    ) {
+      return;
+    }
+    event.preventDefault();
+    onOpenSchedule();
   };
 
   return (
@@ -883,6 +902,25 @@ const TopNavigation = ({ onOpenSettings }: { onOpenSettings: () => void }) => {
         <span className="top-navigation-title">Kubernetes 巡检中心</span>
       </Link>
       <nav className="top-navigation-links">
+        <NavLink
+          to={`${SETTINGS_BASE_PATH}/schedule`}
+          className={({ isActive }) =>
+            `top-navigation-link${isActive ? " active" : ""}`
+          }
+          onClick={handleScheduleClick}
+        >
+          <span className="top-navigation-link-inner">
+            <span className="top-navigation-link-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path
+                  d="M7.5 3a.75.75 0 0 1 .75.75V6h7.5V3.75a.75.75 0 0 1 1.5 0V6h1.25A2.5 2.5 0 0 1 21 8.5v10A2.5 2.5 0 0 1 18.5 21h-13A2.5 2.5 0 0 1 3 18.5v-10A2.5 2.5 0 0 1 5.5 6h1.25V3.75A.75.75 0 0 1 7.5 3Zm11 9.5h-13v6a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-6Zm0-1.5v-2.5a1 1 0 0 0-1-1h-11a1 1 0 0 0-1 1V11h13Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </span>
+            <span>定时巡检</span>
+          </span>
+        </NavLink>
         <NavLink
           to="/history"
           className={({ isActive }) =>
@@ -7948,25 +7986,51 @@ const backgroundLocation =
     [clusters]
   );
 
-  const handleOpenSettings = useCallback(() => {
-    setSettingsError(null);
-    setSettingsNotice(null);
+  const handleOpenSettingsWithTab = useCallback(
+    (tabId: string) => {
+      setSettingsError(null);
+      setSettingsNotice(null);
+      setScheduleError(null);
+      setScheduleNotice(null);
+      const normalized = (tabId || "overview").trim().toLowerCase() || "overview";
+      const targetPath =
+        normalized === "overview"
+          ? SETTINGS_BASE_PATH
+          : `${SETTINGS_BASE_PATH}/${normalized}`;
+      if (location.pathname.startsWith(SETTINGS_BASE_PATH)) {
+        setSettingsOpen(true);
+        setSettingsTabId(normalized);
+        if (location.pathname !== targetPath) {
+          const baseBackground =
+            backgroundLocation ?? backgroundLocationRef.current;
+          navigate(targetPath, {
+            replace: true,
+            state: baseBackground ? { backgroundLocation: baseBackground } : undefined,
+          });
+        }
+        return;
+      }
 
-    if (location.pathname.startsWith(SETTINGS_BASE_PATH)) {
+      const currentPath = `${location.pathname}${location.search}${location.hash}`;
+      previousSettingsPathRef.current =
+        currentPath.length > 0 ? currentPath : "/";
+      backgroundLocationRef.current = location;
+      setSettingsTabId(normalized);
       setSettingsOpen(true);
-      return;
-    }
+      navigate(targetPath, {
+        state: { backgroundLocation: location },
+      });
+    },
+    [location, navigate, backgroundLocation]
+  );
 
-    const currentPath = `${location.pathname}${location.search}${location.hash}`;
-    previousSettingsPathRef.current =
-      currentPath.length > 0 ? currentPath : "/";
-    backgroundLocationRef.current = location;
-    setSettingsTabId("overview");
-    setSettingsOpen(true);
-    navigate(SETTINGS_BASE_PATH, {
-      state: { backgroundLocation: location },
-    });
-  }, [location, navigate]);
+  const handleOpenSettings = useCallback(() => {
+    handleOpenSettingsWithTab("overview");
+  }, [handleOpenSettingsWithTab]);
+
+  const handleOpenScheduleSettings = useCallback(() => {
+    handleOpenSettingsWithTab("schedule");
+  }, [handleOpenSettingsWithTab]);
 
   const handleCloseSettings = useCallback(() => {
     const background = backgroundLocationRef.current;
@@ -9681,7 +9745,10 @@ const hasManualKubeconfig = useMemo(
         <title>K8s Inspection Center</title>
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
       </Helmet>
-      <TopNavigation onOpenSettings={handleOpenSettings} />
+      <TopNavigation
+        onOpenSettings={handleOpenSettings}
+        onOpenSchedule={handleOpenScheduleSettings}
+      />
       {globalNotices.length > 0 && (
         <div className="global-notice-bar" role="status" aria-live="polite">
           {globalNotices.map((notice) => (

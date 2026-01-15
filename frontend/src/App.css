@@ -2483,11 +2483,27 @@ th {
   gap: 12px;
 }
 
+.settings-form input,
+.settings-form select,
 .settings-form textarea {
   border-radius: 12px;
   border: 1px solid #cbd5f5;
   padding: 10px 14px;
   font-size: 14px;
+  background: #ffffff;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.settings-form input:focus,
+.settings-form select:focus,
+.settings-form textarea:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+}
+
+.settings-form textarea {
   resize: vertical;
 }
 
