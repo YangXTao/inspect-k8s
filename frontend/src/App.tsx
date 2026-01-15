@@ -5778,7 +5778,7 @@ const ScheduleSettingsPanel = ({
                   <span>启用该定时任务</span>
                 </label>
               </div>
-              <div className="inspection-item-group">
+              <div className="inspection-item-group schedule-section">
                 <div className="inspection-item-group-title">
                   <span className="inspection-group-title-text">选择集群</span>
                   <span className="group-count">
@@ -5853,7 +5853,7 @@ const ScheduleSettingsPanel = ({
                   </div>
                 </details>
               </div>
-              <div className="inspection-item-group">
+              <div className="inspection-item-group schedule-section">
                 <div className="inspection-item-group-title">
                   <span className="inspection-group-title-text">选择巡检项</span>
                   <span className="group-count">
