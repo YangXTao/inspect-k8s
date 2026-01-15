@@ -5710,72 +5710,74 @@ const ScheduleSettingsPanel = ({
                   disabled={submitting || readOnly}
                 />
               </label>
-              <div className="schedule-cron-grid">
-                <label>
-                  分
+              <div className="schedule-cron-row">
+                <div className="schedule-cron-grid">
+                  <label>
+                    分
+                    <input
+                      type="text"
+                      className="schedule-cron-input"
+                      value={cronMinute}
+                      onChange={(event) => setCronMinute(event.target.value)}
+                      placeholder="0-59"
+                      disabled={submitting || readOnly}
+                    />
+                  </label>
+                  <label>
+                    时
+                    <input
+                      type="text"
+                      className="schedule-cron-input"
+                      value={cronHour}
+                      onChange={(event) => setCronHour(event.target.value)}
+                      placeholder="0-23"
+                      disabled={submitting || readOnly}
+                    />
+                  </label>
+                  <label>
+                    日
+                    <input
+                      type="text"
+                      className="schedule-cron-input"
+                      value={cronDay}
+                      onChange={(event) => setCronDay(event.target.value)}
+                      placeholder="1-31/*"
+                      disabled={submitting || readOnly}
+                    />
+                  </label>
+                  <label>
+                    月
+                    <input
+                      type="text"
+                      className="schedule-cron-input"
+                      value={cronMonth}
+                      onChange={(event) => setCronMonth(event.target.value)}
+                      placeholder="1-12/*"
+                      disabled={submitting || readOnly}
+                    />
+                  </label>
+                  <label>
+                    周
+                    <input
+                      type="text"
+                      className="schedule-cron-input"
+                      value={cronWeek}
+                      onChange={(event) => setCronWeek(event.target.value)}
+                      placeholder="0-6/*"
+                      disabled={submitting || readOnly}
+                    />
+                  </label>
+                </div>
+                <label className="table-checkbox schedule-enabled">
                   <input
-                    type="text"
-                    className="schedule-cron-input"
-                    value={cronMinute}
-                    onChange={(event) => setCronMinute(event.target.value)}
-                    placeholder="0-59"
+                    type="checkbox"
+                    checked={formEnabled}
+                    onChange={(event) => setFormEnabled(event.target.checked)}
                     disabled={submitting || readOnly}
                   />
-                </label>
-                <label>
-                  时
-                  <input
-                    type="text"
-                    className="schedule-cron-input"
-                    value={cronHour}
-                    onChange={(event) => setCronHour(event.target.value)}
-                    placeholder="0-23"
-                    disabled={submitting || readOnly}
-                  />
-                </label>
-                <label>
-                  日
-                  <input
-                    type="text"
-                    className="schedule-cron-input"
-                    value={cronDay}
-                    onChange={(event) => setCronDay(event.target.value)}
-                    placeholder="1-31/*"
-                    disabled={submitting || readOnly}
-                  />
-                </label>
-                <label>
-                  月
-                  <input
-                    type="text"
-                    className="schedule-cron-input"
-                    value={cronMonth}
-                    onChange={(event) => setCronMonth(event.target.value)}
-                    placeholder="1-12/*"
-                    disabled={submitting || readOnly}
-                  />
-                </label>
-                <label>
-                  周
-                  <input
-                    type="text"
-                    className="schedule-cron-input"
-                    value={cronWeek}
-                    onChange={(event) => setCronWeek(event.target.value)}
-                    placeholder="0-6/*"
-                    disabled={submitting || readOnly}
-                  />
+                  <span>启用该定时任务</span>
                 </label>
               </div>
-              <label className="table-checkbox">
-                <input
-                  type="checkbox"
-                  checked={formEnabled}
-                  onChange={(event) => setFormEnabled(event.target.checked)}
-                  disabled={submitting || readOnly}
-                />
-                <span>启用该定时任务</span>
-              </label>
               <div className="inspection-item-group">
                 <div className="inspection-item-group-title">
                   <span className="inspection-group-title-text">选择集群</span>
