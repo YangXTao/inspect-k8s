@@ -2491,6 +2491,29 @@ th {
   resize: vertical;
 }
 
+.schedule-cron-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.schedule-cron-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.schedule-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.schedule-muted {
+  color: #64748b;
+  font-size: 12px;
+}
+
 .settings-form h4 {
   margin: 0;
   color: #1e293b;

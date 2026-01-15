@@ -10,6 +10,7 @@ import {
   InspectionItemsImportResult,
   InspectionRun,
   InspectionRunListItem,
+  InspectionSchedule,
   LicenseStatus,
 } from "./types";
 
@@ -249,6 +250,45 @@ export function updateInspectionItem(
 
 export function deleteInspectionItem(itemId: number): Promise<void> {
   return request<void>(`/inspection-items/${itemId}`, {
+    method: "DELETE",
+  });
+}
+
+export function getInspectionSchedules(): Promise<InspectionSchedule[]> {
+  return request<InspectionSchedule[]>("/inspection-schedules");
+}
+
+export function createInspectionSchedule(payload: {
+  name?: string;
+  cron: string;
+  cluster_ids: number[];
+  item_ids: number[];
+  is_enabled?: boolean;
+}): Promise<InspectionSchedule> {
+  return request<InspectionSchedule>("/inspection-schedules", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateInspectionSchedule(
+  scheduleId: number,
+  payload: {
+    name?: string | null;
+    cron?: string;
+    cluster_ids?: number[];
+    item_ids?: number[];
+    is_enabled?: boolean;
+  }
+): Promise<InspectionSchedule> {
+  return request<InspectionSchedule>(`/inspection-schedules/${scheduleId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteInspectionSchedule(scheduleId: number): Promise<void> {
+  return request<void>(`/inspection-schedules/${scheduleId}`, {
     method: "DELETE",
   });
 }

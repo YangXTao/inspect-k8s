@@ -102,6 +102,18 @@ export type InspectionRunListItem = {
   agent_name?: string | null;
 };
 
+export type InspectionSchedule = {
+  id: number;
+  name?: string | null;
+  cron: string;
+  cluster_ids: number[];
+  item_ids: number[];
+  is_enabled: boolean;
+  last_run_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type InspectionItemsExportPayload = {
   exported_at: string;
   items: InspectionItem[];

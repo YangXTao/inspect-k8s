@@ -304,6 +304,40 @@ class InspectionRunListOut(BaseModel):
         return mapping.get(status, "未知状态")
 
 
+class InspectionScheduleBase(BaseModel):
+    name: Optional[str] = Field(None, max_length=100)
+    cron: str = Field(..., max_length=50)
+    cluster_ids: List[int] = Field(..., min_length=1)
+    item_ids: List[int] = Field(..., min_length=1)
+    is_enabled: bool = True
+
+
+class InspectionScheduleCreate(InspectionScheduleBase):
+    pass
+
+
+class InspectionScheduleUpdate(BaseModel):
+    name: Optional[str] = Field(None, max_length=100)
+    cron: Optional[str] = Field(None, max_length=50)
+    cluster_ids: Optional[List[int]] = Field(None, min_length=1)
+    item_ids: Optional[List[int]] = Field(None, min_length=1)
+    is_enabled: Optional[bool] = None
+
+
+class InspectionScheduleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: Optional[str]
+    cron: str
+    cluster_ids: List[int]
+    item_ids: List[int]
+    is_enabled: bool
+    last_run_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
+
+
 class InspectionAgentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

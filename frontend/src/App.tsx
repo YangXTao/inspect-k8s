@@ -31,6 +31,7 @@ import {
   deleteCluster as apiDeleteCluster,
   deleteInspectionItem as apiDeleteInspectionItem,
   deleteInspectionRun as apiDeleteInspectionRun,
+  deleteInspectionSchedule as apiDeleteInspectionSchedule,
   exportInspectionItems,
   exportInspectionItemsYaml,
   getAgents,
@@ -39,6 +40,7 @@ import {
   getInspectionItems,
   getInspectionRun,
   getInspectionRuns,
+  getInspectionSchedules,
   getLicenseStatus,
   getReportDownloadUrl,
   importInspectionItems,
@@ -49,6 +51,8 @@ import {
   testClusterConnection,
   updateAgent as apiUpdateAgent,
   updateCluster,
+  createInspectionSchedule as apiCreateInspectionSchedule,
+  updateInspectionSchedule as apiUpdateInspectionSchedule,
   uploadLicense,
   uploadLicenseText,
   updateInspectionItem as apiUpdateInspectionItem,
@@ -67,6 +71,7 @@ import type {
   InspectionRun,
   InspectionRunListItem,
   InspectionRunStatus,
+  InspectionSchedule,
   LicenseStatus,
 } from "./types";
 
@@ -133,6 +138,7 @@ const DEFAULT_PROMETHEUS_VERSION_OPTIONS = [
   ...Array.from({ length: 10 }, (_, index) => `3.${index}`),
 ];
 const PROMETHEUS_VERSION_STORAGE_KEY = "prometheusVersionOptions.v1";
+const DEFAULT_SCHEDULE_CRON = ["0", "0", "*", "*", "*"] as const;
 
 const loadPrometheusVersionOptions = () => {
   if (typeof window === "undefined") {
@@ -4953,6 +4959,788 @@ const PrometheusVersionSettingsPanel = ({
   );
 };
 
+interface ScheduleSettingsPanelProps {
+  schedules: InspectionSchedule[];
+  clusters: ClusterConfig[];
+  items: InspectionItem[];
+  prometheusVersionOptions: string[];
+  submitting: boolean;
+  notice: string | null;
+  error: string | null;
+  license: LicenseCapabilities;
+  onSave: (payload: {
+    id?: number;
+    name?: string;
+    cron: string;
+    clusterIds: number[];
+    itemIds: number[];
+    isEnabled: boolean;
+  }) => Promise<void>;
+  onDelete: (schedule: InspectionSchedule) => void;
+  onToggleEnabled: (schedule: InspectionSchedule, enabled: boolean) => void;
+}
+
+const ScheduleSettingsPanel = ({
+  schedules,
+  clusters,
+  items,
+  prometheusVersionOptions,
+  submitting,
+  notice,
+  error,
+  license,
+  onSave,
+  onDelete,
+  onToggleEnabled,
+}: ScheduleSettingsPanelProps) => {
+  const readOnly = !license.canRunInspections;
+  const [editingSchedule, setEditingSchedule] =
+    useState<InspectionSchedule | null>(null);
+  const [formName, setFormName] = useState("");
+  const [cronMinute, setCronMinute] = useState(DEFAULT_SCHEDULE_CRON[0]);
+  const [cronHour, setCronHour] = useState(DEFAULT_SCHEDULE_CRON[1]);
+  const [cronDay, setCronDay] = useState(DEFAULT_SCHEDULE_CRON[2]);
+  const [cronMonth, setCronMonth] = useState(DEFAULT_SCHEDULE_CRON[3]);
+  const [cronWeek, setCronWeek] = useState(DEFAULT_SCHEDULE_CRON[4]);
+  const [formEnabled, setFormEnabled] = useState(true);
+  const [selectedClusterIds, setSelectedClusterIds] = useState<number[]>([]);
+  const [selectedItemIds, setSelectedItemIds] = useState<number[]>([]);
+  const [clusterKeyword, setClusterKeyword] = useState("");
+  const [itemKeyword, setItemKeyword] = useState("");
+  const [itemVersionFilter, setItemVersionFilter] = useState("all");
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const scheduleClusterMap = useMemo(() => {
+    const map = new Map<number, ClusterConfig>();
+    clusters.forEach((cluster) => map.set(cluster.id, cluster));
+    return map;
+  }, [clusters]);
+  const scheduleItemMap = useMemo(() => {
+    const map = new Map<number, InspectionItem>();
+    items.forEach((item) => map.set(item.id, item));
+    return map;
+  }, [items]);
+
+  const resetForm = useCallback(() => {
+    setEditingSchedule(null);
+    setFormName("");
+    setCronMinute(DEFAULT_SCHEDULE_CRON[0]);
+    setCronHour(DEFAULT_SCHEDULE_CRON[1]);
+    setCronDay(DEFAULT_SCHEDULE_CRON[2]);
+    setCronMonth(DEFAULT_SCHEDULE_CRON[3]);
+    setCronWeek(DEFAULT_SCHEDULE_CRON[4]);
+    setFormEnabled(true);
+    setSelectedClusterIds([]);
+    setSelectedItemIds([]);
+    setClusterKeyword("");
+    setItemKeyword("");
+    setItemVersionFilter("all");
+    setFormError(null);
+  }, []);
+
+  useEffect(() => {
+    if (!editingSchedule) {
+      resetForm();
+      return;
+    }
+    const parts = editingSchedule.cron.trim().split(/\s+/);
+    const resolvedParts =
+      parts.length === 5 ? parts : [...DEFAULT_SCHEDULE_CRON];
+    setFormName(editingSchedule.name ?? "");
+    setCronMinute(resolvedParts[0]);
+    setCronHour(resolvedParts[1]);
+    setCronDay(resolvedParts[2]);
+    setCronMonth(resolvedParts[3]);
+    setCronWeek(resolvedParts[4]);
+    setFormEnabled(editingSchedule.is_enabled);
+    setSelectedClusterIds(editingSchedule.cluster_ids ?? []);
+    setSelectedItemIds(editingSchedule.item_ids ?? []);
+    setFormError(null);
+  }, [editingSchedule, resetForm]);
+
+  useEffect(() => {
+    setSelectedClusterIds((prev) =>
+      prev.filter((id) => scheduleClusterMap.has(id))
+    );
+  }, [scheduleClusterMap]);
+
+  useEffect(() => {
+    setSelectedItemIds((prev) =>
+      prev.filter((id) => scheduleItemMap.has(id))
+    );
+  }, [scheduleItemMap]);
+
+  useEffect(() => {
+    if (
+      itemVersionFilter !== "all" &&
+      !prometheusVersionOptions.includes(itemVersionFilter)
+    ) {
+      setItemVersionFilter("all");
+    }
+  }, [itemVersionFilter, prometheusVersionOptions]);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (readOnly) {
+      setFormError(license.reason ?? "当前 License 不支持定时巡检。");
+      return;
+    }
+    const parts = [
+      cronMinute.trim(),
+      cronHour.trim(),
+      cronDay.trim(),
+      cronMonth.trim(),
+      cronWeek.trim(),
+    ];
+    if (parts.some((part) => !part)) {
+      setFormError("请完整填写分/时/日/月/周");
+      return;
+    }
+    if (selectedClusterIds.length === 0) {
+      setFormError("请至少选择一个集群");
+      return;
+    }
+    if (selectedItemIds.length === 0) {
+      setFormError("请至少选择一个巡检项");
+      return;
+    }
+    setFormError(null);
+    await onSave({
+      id: editingSchedule?.id,
+      name: formName.trim(),
+      cron: parts.join(" "),
+      clusterIds: selectedClusterIds,
+      itemIds: selectedItemIds,
+      isEnabled: formEnabled,
+    });
+    resetForm();
+  };
+
+  const filteredClusters = useMemo(() => {
+    const keyword = clusterKeyword.trim().toLowerCase();
+    const list = clusters.slice().sort((a, b) => {
+      const nameA = (a.name ?? "").toLowerCase();
+      const nameB = (b.name ?? "").toLowerCase();
+      if (nameA === nameB) {
+        return a.id - b.id;
+      }
+      return nameA.localeCompare(nameB);
+    });
+    if (!keyword) {
+      return list;
+    }
+    return list.filter((cluster) =>
+      (cluster.name ?? "").toLowerCase().includes(keyword)
+    );
+  }, [clusters, clusterKeyword]);
+
+  const filteredClusterIdSet = useMemo(
+    () => new Set(filteredClusters.map((cluster) => cluster.id)),
+    [filteredClusters]
+  );
+  const selectedFilteredClusterCount = useMemo(
+    () =>
+      selectedClusterIds.filter((id) => filteredClusterIdSet.has(id)).length,
+    [selectedClusterIds, filteredClusterIdSet]
+  );
+  const allFilteredClustersSelected =
+    filteredClusters.length > 0 &&
+    selectedFilteredClusterCount === filteredClusters.length;
+
+  const toggleCluster = useCallback((clusterId: number) => {
+    setSelectedClusterIds((prev) =>
+      prev.includes(clusterId)
+        ? prev.filter((id) => id !== clusterId)
+        : [...prev, clusterId]
+    );
+  }, []);
+
+  const toggleAllClusters = useCallback(() => {
+    setSelectedClusterIds((prev) => {
+      if (filteredClusters.length === 0) {
+        return prev;
+      }
+      const next = new Set(prev);
+      const allSelected = filteredClusters.every((cluster) =>
+        next.has(cluster.id)
+      );
+      if (allSelected) {
+        filteredClusters.forEach((cluster) => next.delete(cluster.id));
+        return Array.from(next);
+      }
+      filteredClusters.forEach((cluster) => next.add(cluster.id));
+      return Array.from(next);
+    });
+  }, [filteredClusters]);
+
+  const filteredItems = useMemo(() => {
+    const keyword = itemKeyword.trim().toLowerCase();
+    const resolvedVersion =
+      itemVersionFilter === "all"
+        ? null
+        : normalizePrometheusVersion(
+            itemVersionFilter,
+            prometheusVersionOptions
+          );
+    return items.filter((item) => {
+      const name = (item.name ?? "").toLowerCase();
+      const desc = (item.description ?? "").toLowerCase();
+      const keywordMatch =
+        !keyword || name.includes(keyword) || desc.includes(keyword);
+      if (!keywordMatch) {
+        return false;
+      }
+      if (!isPromqlType(item.check_type)) {
+        return true;
+      }
+      if (!resolvedVersion) {
+        return true;
+      }
+      return (
+        normalizePrometheusVersion(
+          item.prometheus_version,
+          prometheusVersionOptions
+        ) === resolvedVersion
+      );
+    });
+  }, [
+    itemKeyword,
+    itemVersionFilter,
+    items,
+    prometheusVersionOptions,
+  ]);
+
+  const filteredItemIdSet = useMemo(
+    () => new Set(filteredItems.map((item) => item.id)),
+    [filteredItems]
+  );
+  const selectedFilteredItemCount = useMemo(
+    () => selectedItemIds.filter((id) => filteredItemIdSet.has(id)).length,
+    [selectedItemIds, filteredItemIdSet]
+  );
+  const allFilteredItemsSelected =
+    filteredItems.length > 0 &&
+    selectedFilteredItemCount === filteredItems.length;
+
+  const toggleItem = useCallback((itemId: number) => {
+    setSelectedItemIds((prev) =>
+      prev.includes(itemId)
+        ? prev.filter((id) => id !== itemId)
+        : [...prev, itemId]
+    );
+  }, []);
+
+  const toggleAllItems = useCallback(() => {
+    setSelectedItemIds((prev) => {
+      if (filteredItems.length === 0) {
+        return prev;
+      }
+      const next = new Set(prev);
+      const allSelected = filteredItems.every((item) => next.has(item.id));
+      if (allSelected) {
+        filteredItems.forEach((item) => next.delete(item.id));
+        return Array.from(next);
+      }
+      filteredItems.forEach((item) => next.add(item.id));
+      return Array.from(next);
+    });
+  }, [filteredItems]);
+
+  const filteredPromqlItems = useMemo(
+    () => filteredItems.filter((item) => isPromqlType(item.check_type)),
+    [filteredItems]
+  );
+  const filteredCommonItems = useMemo(
+    () => filteredItems.filter((item) => !isPromqlType(item.check_type)),
+    [filteredItems]
+  );
+
+  const sortedSchedules = useMemo(() => {
+    return schedules.slice().sort((a, b) => {
+      const timeA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+      const timeB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+      if (timeA === timeB) {
+        return b.id - a.id;
+      }
+      return timeB - timeA;
+    });
+  }, [schedules]);
+
+  const summarizeNames = useCallback(
+    (ids: number[], map: Map<number, { name?: string | null }>) => {
+      const names = ids.map((id) => map.get(id)?.name || `#${id}`);
+      if (names.length === 0) {
+        return "-";
+      }
+      if (names.length <= 2) {
+        return names.join("、");
+      }
+      return `${names.slice(0, 2).join("、")} 等${names.length}个`;
+    },
+    []
+  );
+
+  const getPrometheusSummary = useCallback(
+    (schedule: InspectionSchedule) => {
+      const versions = new Set<string>();
+      schedule.item_ids.forEach((itemId) => {
+        const item = scheduleItemMap.get(itemId);
+        if (!item || !isPromqlType(item.check_type)) {
+          return;
+        }
+        versions.add(
+          normalizePrometheusVersion(
+            item.prometheus_version,
+            prometheusVersionOptions
+          )
+        );
+      });
+      if (versions.size === 0) {
+        return "-";
+      }
+      return Array.from(versions).sort().join(", ");
+    },
+    [scheduleItemMap, prometheusVersionOptions]
+  );
+
+  return (
+    <div className="inspection-settings-panel">
+      <div className="settings-header">
+        <div>
+          <h3>定时巡检</h3>
+          <p>基于 Cron 表达式定时触发巡检任务</p>
+        </div>
+      </div>
+      {notice && <div className="feedback success">{notice}</div>}
+      {error && <div className="feedback error">{error}</div>}
+      {formError && <div className="feedback error">{formError}</div>}
+      {readOnly && (
+        <div className="feedback warning">
+          {license.reason ?? "当前 License 不支持定时巡检。"}
+        </div>
+      )}
+      <div className="inspection-settings-body">
+        <section className="inspection-section inspection-section-list">
+          <div className="inspection-section-header">
+            <div>
+              <h4>定时任务列表</h4>
+              <span className="inspection-section-hint">
+                支持启用/停用与编辑任务
+              </span>
+            </div>
+            <span className="inspection-section-count">
+              共 {sortedSchedules.length} 条
+            </span>
+          </div>
+          <div className="settings-list">
+            <div className="table-wrapper">
+              {sortedSchedules.length === 0 ? (
+                <div className="placeholder">暂无定时巡检任务</div>
+              ) : (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>名称</th>
+                      <th>Cron</th>
+                      <th>集群</th>
+                      <th>巡检项</th>
+                      <th>状态</th>
+                      <th>最近执行</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedSchedules.map((schedule) => {
+                      const label =
+                        schedule.name?.trim() ||
+                        `定时巡检 #${schedule.id}`;
+                      const clusterSummary = summarizeNames(
+                        schedule.cluster_ids,
+                        scheduleClusterMap
+                      );
+                      const versionSummary = getPrometheusSummary(schedule);
+                      return (
+                        <tr key={schedule.id}>
+                          <td>{label}</td>
+                          <td className="th-nowrap">{schedule.cron}</td>
+                          <td>
+                            <div className="schedule-cell">
+                              <span>{clusterSummary}</span>
+                              <span className="schedule-muted">
+                                {schedule.cluster_ids.length} 个集群
+                              </span>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="schedule-cell">
+                              <span>
+                                {schedule.item_ids.length} 项
+                              </span>
+                              <span className="schedule-muted">
+                                PromQL 版本：{versionSummary}
+                              </span>
+                            </div>
+                          </td>
+                          <td>
+                            <span
+                              className={`chip${
+                                schedule.is_enabled ? "" : " muted"
+                              }`}
+                            >
+                              {schedule.is_enabled ? "启用" : "停用"}
+                            </span>
+                          </td>
+                          <td>
+                            {schedule.last_run_at
+                              ? formatDate(schedule.last_run_at)
+                              : "-"}
+                          </td>
+                          <td className="actions">
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={() => setEditingSchedule(schedule)}
+                              disabled={readOnly}
+                            >
+                              编辑
+                            </button>
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={() =>
+                                onToggleEnabled(
+                                  schedule,
+                                  !schedule.is_enabled
+                                )
+                              }
+                              disabled={readOnly}
+                            >
+                              {schedule.is_enabled ? "停用" : "启用"}
+                            </button>
+                            <button
+                              type="button"
+                              className="link-button danger"
+                              onClick={() => onDelete(schedule)}
+                              disabled={readOnly}
+                            >
+                              删除
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </section>
+        <section className="inspection-section inspection-section-form">
+          <div className="inspection-section-header">
+            <div>
+              <h4>{editingSchedule ? "编辑定时任务" : "新增定时任务"}</h4>
+              <span className="inspection-section-hint">
+                时间格式为 分 时 日 月 周，按服务器时间执行
+              </span>
+            </div>
+          </div>
+          <form className="settings-form" onSubmit={handleSubmit}>
+            <label>
+              任务名称
+              <input
+                type="text"
+                value={formName}
+                onChange={(event) => setFormName(event.target.value)}
+                placeholder="例如：每日健康巡检"
+                disabled={submitting || readOnly}
+              />
+            </label>
+            <div className="schedule-cron-grid">
+              <label>
+                分
+                <input
+                  type="text"
+                  value={cronMinute}
+                  onChange={(event) => setCronMinute(event.target.value)}
+                  placeholder="0-59"
+                  disabled={submitting || readOnly}
+                />
+              </label>
+              <label>
+                时
+                <input
+                  type="text"
+                  value={cronHour}
+                  onChange={(event) => setCronHour(event.target.value)}
+                  placeholder="0-23"
+                  disabled={submitting || readOnly}
+                />
+              </label>
+              <label>
+                日
+                <input
+                  type="text"
+                  value={cronDay}
+                  onChange={(event) => setCronDay(event.target.value)}
+                  placeholder="1-31/*"
+                  disabled={submitting || readOnly}
+                />
+              </label>
+              <label>
+                月
+                <input
+                  type="text"
+                  value={cronMonth}
+                  onChange={(event) => setCronMonth(event.target.value)}
+                  placeholder="1-12/*"
+                  disabled={submitting || readOnly}
+                />
+              </label>
+              <label>
+                周
+                <input
+                  type="text"
+                  value={cronWeek}
+                  onChange={(event) => setCronWeek(event.target.value)}
+                  placeholder="0-6/*"
+                  disabled={submitting || readOnly}
+                />
+              </label>
+            </div>
+            <label className="table-checkbox">
+              <input
+                type="checkbox"
+                checked={formEnabled}
+                onChange={(event) => setFormEnabled(event.target.checked)}
+                disabled={submitting || readOnly}
+              />
+              <span>启用该定时任务</span>
+            </label>
+            <div className="inspection-item-group">
+              <div className="inspection-item-group-title">
+                <span className="inspection-group-title-text">选择集群</span>
+                <span className="group-count">
+                  已选 {selectedClusterIds.length} / {filteredClusters.length}
+                </span>
+              </div>
+              <div className="inspection-items-toolbar">
+                <span className="selection-hint">
+                  已选 {selectedFilteredClusterCount} /{" "}
+                  {filteredClusters.length}
+                </span>
+                <div className="inspection-items-toolbar-actions">
+                  <input
+                    type="text"
+                    className="inspection-items-filter"
+                    value={clusterKeyword}
+                    onChange={(event) => setClusterKeyword(event.target.value)}
+                    placeholder="搜索集群"
+                    disabled={submitting || readOnly}
+                  />
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={toggleAllClusters}
+                    disabled={submitting || readOnly}
+                  >
+                    {allFilteredClustersSelected ? "清除选择" : "全选"}
+                  </button>
+                </div>
+              </div>
+              {clusters.length === 0 ? (
+                <ul className="item-list">
+                  <li className="placeholder">暂无集群</li>
+                </ul>
+              ) : filteredClusters.length === 0 ? (
+                <ul className="item-list">
+                  <li className="placeholder">未找到匹配的集群</li>
+                </ul>
+              ) : (
+                <ul className="item-list">
+                  {filteredClusters.map((cluster) => (
+                    <li key={cluster.id}>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={selectedClusterIds.includes(cluster.id)}
+                          onChange={() => toggleCluster(cluster.id)}
+                          disabled={submitting || readOnly}
+                        />
+                        <div>
+                          <div className="item-title-row">
+                            <div className="item-name">{cluster.name}</div>
+                            <span className="item-tag neutral">
+                              #{cluster.id}
+                            </span>
+                          </div>
+                          <div className="item-desc">
+                            Prometheus：{cluster.prometheus_url || "未配置"}
+                          </div>
+                        </div>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="inspection-item-group">
+              <div className="inspection-item-group-title">
+                <span className="inspection-group-title-text">选择巡检项</span>
+                <span className="group-count">
+                  已选 {selectedItemIds.length} / {filteredItems.length}
+                </span>
+              </div>
+              <div className="inspection-items-toolbar">
+                <span className="selection-hint">
+                  已选 {selectedFilteredItemCount} / {filteredItems.length}
+                </span>
+                <div className="inspection-items-toolbar-actions">
+                  <input
+                    type="text"
+                    className="inspection-items-filter"
+                    value={itemKeyword}
+                    onChange={(event) => setItemKeyword(event.target.value)}
+                    placeholder="关键字筛选"
+                    disabled={submitting || readOnly}
+                  />
+                  <select
+                    className="inspection-items-filter"
+                    value={itemVersionFilter}
+                    onChange={(event) =>
+                      setItemVersionFilter(event.target.value)
+                    }
+                    disabled={submitting || readOnly}
+                  >
+                    <option value="all">PromQL 全部版本</option>
+                    {prometheusVersionOptions.map((version) => (
+                      <option key={version} value={version}>
+                        {version}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={toggleAllItems}
+                    disabled={submitting || readOnly}
+                  >
+                    {allFilteredItemsSelected ? "清除选择" : "全选"}
+                  </button>
+                </div>
+              </div>
+              {items.length === 0 ? (
+                <ul className="item-list">
+                  <li className="placeholder">暂无巡检项</li>
+                </ul>
+              ) : filteredItems.length === 0 ? (
+                <ul className="item-list">
+                  <li className="placeholder">未找到匹配的巡检项</li>
+                </ul>
+              ) : (
+                <>
+                  {filteredPromqlItems.length > 0 && (
+                    <div className="inspection-item-group">
+                      <div className="inspection-item-group-title">
+                        <span className="inspection-group-title-text">
+                          PromQL 巡检项
+                        </span>
+                        <span className="group-count">
+                          {filteredPromqlItems.length} 条
+                        </span>
+                      </div>
+                      <ul className="item-list">
+                        {filteredPromqlItems.map((item) => (
+                          <li key={item.id}>
+                            <label>
+                              <input
+                                type="checkbox"
+                                checked={selectedItemIds.includes(item.id)}
+                                onChange={() => toggleItem(item.id)}
+                                disabled={submitting || readOnly}
+                              />
+                              <div>
+                                <div className="item-title-row">
+                                  <div className="item-name">{item.name}</div>
+                                  <span className="item-tag promql">
+                                    PromQL ·{" "}
+                                    {normalizePrometheusVersion(
+                                      item.prometheus_version,
+                                      prometheusVersionOptions
+                                    )}
+                                  </span>
+                                </div>
+                                <div className="item-desc">
+                                  {item.description || "未提供描述"}
+                                </div>
+                              </div>
+                            </label>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {filteredCommonItems.length > 0 && (
+                    <div className="inspection-item-group">
+                      <div className="inspection-item-group-title">
+                        <span className="inspection-group-title-text">
+                          通用巡检项
+                        </span>
+                        <span className="group-count">
+                          {filteredCommonItems.length} 条
+                        </span>
+                      </div>
+                      <ul className="item-list">
+                        {filteredCommonItems.map((item) => (
+                          <li key={item.id}>
+                            <label>
+                              <input
+                                type="checkbox"
+                                checked={selectedItemIds.includes(item.id)}
+                                onChange={() => toggleItem(item.id)}
+                                disabled={submitting || readOnly}
+                              />
+                              <div>
+                                <div className="item-title-row">
+                                  <div className="item-name">{item.name}</div>
+                                  <span className="item-tag neutral">通用</span>
+                                </div>
+                                <div className="item-desc">
+                                  {item.description || "未提供描述"}
+                                </div>
+                              </div>
+                            </label>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="settings-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={resetForm}
+                disabled={submitting || readOnly}
+              >
+                重置
+              </button>
+              <button
+                type="submit"
+                className="primary"
+                disabled={submitting || readOnly}
+              >
+                {editingSchedule ? "保存修改" : "新增"}
+              </button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </div>
+  );
+};
+
 interface LicenseSettingsPanelProps {
   status: LicenseCapabilities;
   uploading: boolean;
@@ -6388,6 +7176,7 @@ const App = () => {
   const [agents, setAgents] = useState<InspectionAgent[]>([]);
   const [runs, setRuns] = useState<InspectionRunListItem[]>([]);
   const [items, setItems] = useState<InspectionItem[]>([]);
+  const [schedules, setSchedules] = useState<InspectionSchedule[]>([]);
 
   const [clusterError, setClusterError] = useState<string | null>(null);
 const [clusterNotice, setClusterNotice] = useState<string | null>(null);
@@ -6424,6 +7213,9 @@ const [clusterUploading, setClusterUploading] = useState(false);
   const [inspectionNotice, setInspectionNotice] = useState<string | null>(null);
   const [inspectionError, setInspectionError] = useState<string | null>(null);
   const [inspectionLoading, setInspectionLoading] = useState(false);
+  const [scheduleNotice, setScheduleNotice] = useState<string | null>(null);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
 
   const [selectedItemIds, setSelectedItemIdsState] = useState<number[]>([]);
   const [operator, setOperator] = useState("");
@@ -6544,6 +7336,9 @@ const [pendingRefreshTargets, setPendingRefreshTargets] = useState<
     if (isLicenseRelatedMessage(inspectionError)) {
       setInspectionError(null);
     }
+    if (isLicenseRelatedMessage(scheduleError)) {
+      setScheduleError(null);
+    }
     if (isLicenseRelatedMessage(clusterNotice)) {
       clearClusterNotice();
     }
@@ -6554,6 +7349,7 @@ const [pendingRefreshTargets, setPendingRefreshTargets] = useState<
     agentError,
     settingsError,
     inspectionError,
+    scheduleError,
     clusterNotice,
     clearClusterNotice,
   ]);
@@ -6868,6 +7664,20 @@ const backgroundLocation =
   }, [settingsNotice]);
 
   useEffect(() => {
+    if (!scheduleNotice || typeof window === "undefined") {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setScheduleNotice(null);
+    }, 5000);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [scheduleNotice]);
+
+  useEffect(() => {
     if (!agentNotice || typeof window === "undefined") {
       return;
     }
@@ -7108,6 +7918,22 @@ const backgroundLocation =
     }
   }, []);
 
+  const refreshSchedules = useCallback(async () => {
+    try {
+      logWithTimestamp("info", "开始获取定时巡检");
+      const data = await getInspectionSchedules();
+      setSchedules(data);
+      setScheduleError(null);
+      return data;
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "获取定时巡检失败";
+      logWithTimestamp("error", "获取定时巡检失败: %s", message);
+      setScheduleError(message);
+      return null;
+    }
+  }, []);
+
   const pendingClusterIds = useMemo(
     () =>
       clusters
@@ -7165,7 +7991,8 @@ const backgroundLocation =
     void refreshClusters();
     void refreshRuns();
     void refreshItems();
-  }, [refreshClusters, refreshRuns, refreshItems]);
+    void refreshSchedules();
+  }, [refreshClusters, refreshRuns, refreshItems, refreshSchedules]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -8423,6 +9250,151 @@ const hasManualKubeconfig = useMemo(
     [refreshItems, licenseCapabilities]
   );
 
+  const handleSaveSchedule = useCallback(
+    async (payload: {
+      id?: number;
+      name?: string;
+      cron: string;
+      clusterIds: number[];
+      itemIds: number[];
+      isEnabled: boolean;
+    }) => {
+      if (!licenseCapabilities.canRunInspections) {
+        setScheduleError(
+          licenseCapabilities.reason ?? "当前 License 不支持定时巡检。"
+        );
+        setScheduleNotice(null);
+        return;
+      }
+      const trimmedName = payload.name?.trim() ?? "";
+      setScheduleSubmitting(true);
+      setScheduleNotice(null);
+      setScheduleError(null);
+      try {
+        if (payload.id) {
+          logWithTimestamp("info", "更新定时巡检: %s", payload.id);
+          await apiUpdateInspectionSchedule(payload.id, {
+            name: trimmedName ? trimmedName : null,
+            cron: payload.cron,
+            cluster_ids: payload.clusterIds,
+            item_ids: payload.itemIds,
+            is_enabled: payload.isEnabled,
+          });
+          setScheduleNotice("定时巡检已更新");
+        } else {
+          logWithTimestamp("info", "创建定时巡检");
+          await apiCreateInspectionSchedule({
+            name: trimmedName || undefined,
+            cron: payload.cron,
+            cluster_ids: payload.clusterIds,
+            item_ids: payload.itemIds,
+            is_enabled: payload.isEnabled,
+          });
+          setScheduleNotice("定时巡检已创建");
+        }
+        await refreshSchedules();
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "保存定时巡检失败";
+        logWithTimestamp("error", "保存定时巡检失败: %s", message);
+        setScheduleError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setScheduleSubmitting(false);
+      }
+    },
+    [refreshSchedules, licenseCapabilities]
+  );
+
+  const performDeleteSchedule = useCallback(
+    async (schedule: InspectionSchedule) => {
+      if (!licenseCapabilities.canRunInspections) {
+        setScheduleError(
+          licenseCapabilities.reason ?? "当前 License 不支持定时巡检。"
+        );
+        setScheduleNotice(null);
+        return;
+      }
+      setScheduleSubmitting(true);
+      setScheduleNotice(null);
+      setScheduleError(null);
+      try {
+        logWithTimestamp("info", "删除定时巡检: %s", schedule.id);
+        await apiDeleteInspectionSchedule(schedule.id);
+        await refreshSchedules();
+        setScheduleNotice("定时巡检已删除");
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "删除定时巡检失败";
+        logWithTimestamp("error", "删除定时巡检失败: %s", message);
+        setScheduleError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setScheduleSubmitting(false);
+      }
+    },
+    [refreshSchedules, licenseCapabilities]
+  );
+
+  const handleDeleteSchedule = useCallback(
+    (schedule: InspectionSchedule) => {
+      if (!licenseCapabilities.canRunInspections) {
+        setScheduleError(
+          licenseCapabilities.reason ?? "当前 License 不支持定时巡检。"
+        );
+        setScheduleNotice(null);
+        return;
+      }
+      const label = schedule.name?.trim() || `定时巡检 #${schedule.id}`;
+      setConfirmState({
+        title: "删除定时巡检",
+        message: `确认删除定时任务(${label})？该操作不可恢复。`,
+        confirmLabel: "删除",
+        variant: "danger",
+        scope: "settings",
+        onConfirm: () => performDeleteSchedule(schedule),
+      });
+    },
+    [performDeleteSchedule, licenseCapabilities]
+  );
+
+  const handleToggleScheduleEnabled = useCallback(
+    async (schedule: InspectionSchedule, enabled: boolean) => {
+      if (!licenseCapabilities.canRunInspections) {
+        setScheduleError(
+          licenseCapabilities.reason ?? "当前 License 不支持定时巡检。"
+        );
+        setScheduleNotice(null);
+        return;
+      }
+      setScheduleSubmitting(true);
+      setScheduleNotice(null);
+      setScheduleError(null);
+      try {
+        logWithTimestamp(
+          "info",
+          "切换定时巡检状态: %s -> %s",
+          schedule.id,
+          enabled
+        );
+        await apiUpdateInspectionSchedule(schedule.id, {
+          is_enabled: enabled,
+        });
+        await refreshSchedules();
+        setScheduleNotice(enabled ? "定时巡检已启用" : "定时巡检已停用");
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "更新定时巡检状态失败";
+        logWithTimestamp("error", "更新定时巡检状态失败: %s", message);
+        setScheduleError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setScheduleSubmitting(false);
+      }
+    },
+    [refreshSchedules, licenseCapabilities]
+  );
+
   const settingsTabs = useMemo<SettingsModalTab[]>(
     () => [
       {
@@ -8457,6 +9429,25 @@ const hasManualKubeconfig = useMemo(
         ),
       },
       {
+        id: "schedule",
+        label: "定时巡检",
+        render: () => (
+          <ScheduleSettingsPanel
+            schedules={schedules}
+            clusters={clusters}
+            items={sortedItems}
+            prometheusVersionOptions={prometheusVersionOptions}
+            submitting={scheduleSubmitting}
+            notice={scheduleNotice}
+            error={scheduleError}
+            license={licenseCapabilities}
+            onSave={handleSaveSchedule}
+            onDelete={handleDeleteSchedule}
+            onToggleEnabled={handleToggleScheduleEnabled}
+          />
+        ),
+      },
+      {
         id: "prometheus-version",
         label: "Prometheus 版本",
         render: () => (
@@ -8487,14 +9478,22 @@ const hasManualKubeconfig = useMemo(
     ],
     [
       sortedItems,
+      schedules,
+      clusters,
       settingsSubmitting,
       settingsNotice,
       settingsError,
+      scheduleSubmitting,
+      scheduleNotice,
+      scheduleError,
       handleSaveInspectionItem,
       handleDeleteInspectionItem,
       handleDeleteInspectionItemsBulk,
       handleExportInspectionItems,
       handleImportInspectionItems,
+      handleSaveSchedule,
+      handleDeleteSchedule,
+      handleToggleScheduleEnabled,
       prometheusVersionOptions,
       handleAddPrometheusVersion,
       handleDeletePrometheusVersion,
