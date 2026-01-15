@@ -4980,6 +4980,7 @@ const PrometheusVersionSettingsPanel = ({
 interface ScheduleSettingsPanelProps {
   schedules: InspectionSchedule[];
   clusters: ClusterConfig[];
+  clusterDisplayIds: Record<number, string>;
   items: InspectionItem[];
   prometheusVersionOptions: string[];
   submitting: boolean;
@@ -5001,6 +5002,7 @@ interface ScheduleSettingsPanelProps {
 const ScheduleSettingsPanel = ({
   schedules,
   clusters,
+  clusterDisplayIds,
   items,
   prometheusVersionOptions,
   submitting,
@@ -5780,11 +5782,9 @@ const ScheduleSettingsPanel = ({
                 </div>
                 <details className="schedule-dropdown" open={shouldExpandClusters}>
                   <summary>
-                    <span>
-                      已选 {selectedClusterIds.length} 个集群
-                    </span>
+                    <span>选择集群</span>
                     <span className="schedule-dropdown-summary">
-                      {summarizeNames(selectedClusterIds, scheduleClusterMap)}
+                      已选 {selectedClusterIds.length}
                     </span>
                   </summary>
                   <div className="schedule-dropdown-body">
@@ -5819,30 +5819,34 @@ const ScheduleSettingsPanel = ({
                     ) : filteredClusters.length === 0 ? (
                       <div className="placeholder">未找到匹配的集群</div>
                     ) : (
-                      <ul className="item-list scrollable">
-                        {filteredClusters.map((cluster) => (
+                      <ul className="item-list scrollable schedule-cluster-list">
+                        {filteredClusters.map((cluster) => {
+                          const displayId = getClusterDisplayId(
+                            clusterDisplayIds,
+                            cluster.id,
+                            cluster
+                          );
+                          return (
                           <li key={cluster.id}>
-                            <label>
+                            <label className="schedule-cluster-option">
+                              <div className="schedule-option-info">
+                                <div className="item-title-row">
+                                  <div className="item-name">{cluster.name}</div>
+                                  <span className="item-tag neutral">
+                                    {displayId}
+                                  </span>
+                                </div>
+                              </div>
                               <input
                                 type="checkbox"
                                 checked={selectedClusterIds.includes(cluster.id)}
                                 onChange={() => toggleCluster(cluster.id)}
                                 disabled={submitting || readOnly}
                               />
-                              <div>
-                                <div className="item-title-row">
-                                  <div className="item-name">{cluster.name}</div>
-                                  <span className="item-tag neutral">
-                                    #{cluster.id}
-                                  </span>
-                                </div>
-                                <div className="item-desc">
-                                  Prometheus：{cluster.prometheus_url || "未配置"}
-                                </div>
-                              </div>
                             </label>
                           </li>
-                        ))}
+                          );
+                        })}
                       </ul>
                     )}
                     <div className="schedule-dropdown-hint">勾选即可多选</div>
@@ -6025,6 +6029,7 @@ const ScheduleSettingsPanel = ({
 interface SchedulePageProps {
   schedules: InspectionSchedule[];
   clusters: ClusterConfig[];
+  clusterDisplayIds: Record<number, string>;
   items: InspectionItem[];
   prometheusVersionOptions: string[];
   submitting: boolean;
@@ -6046,6 +6051,7 @@ interface SchedulePageProps {
 const SchedulePage = ({
   schedules,
   clusters,
+  clusterDisplayIds,
   items,
   prometheusVersionOptions,
   submitting,
@@ -6060,6 +6066,7 @@ const SchedulePage = ({
     <ScheduleSettingsPanel
       schedules={schedules}
       clusters={clusters}
+      clusterDisplayIds={clusterDisplayIds}
       items={items}
       prometheusVersionOptions={prometheusVersionOptions}
       submitting={submitting}
@@ -10023,6 +10030,7 @@ const hasManualKubeconfig = useMemo(
               <SchedulePage
                 schedules={schedules}
                 clusters={clusters}
+                clusterDisplayIds={clusterDisplayIds}
                 items={sortedItems}
                 prometheusVersionOptions={prometheusVersionOptions}
                 submitting={scheduleSubmitting}

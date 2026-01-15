@@ -2677,7 +2677,7 @@ th {
   gap: 10px;
   flex-wrap: wrap;
   font-weight: 600;
-  color: #1e293b;
+  color: inherit;
   padding: 8px 10px;
   border-radius: 10px;
   border: 1px solid #e2e8f0;
@@ -2732,6 +2732,26 @@ th {
   color: inherit;
 }
 
+.schedule-modal .schedule-cluster-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.schedule-modal .schedule-option-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.schedule-modal .schedule-cluster-option input[type="checkbox"] {
+  margin-left: 12px;
+}
+
 .schedule-modal .inspection-item-columns {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2761,6 +2781,7 @@ th {
 
 .schedule-modal .item-name {
   font-size: 12px;
+  color: inherit;
 }
 
 .schedule-modal .item-desc {
