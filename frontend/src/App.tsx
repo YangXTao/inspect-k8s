@@ -5563,41 +5563,41 @@ const ScheduleSettingsPanel = ({
                   删除所选
                 </button>
               </div>
-            </div>
-            <div className="history-filter-row">
-              <div className="history-chip history-chip-select">
-                <span className="history-chip-label">状态筛选</span>
-                <select
-                  value={scheduleStatusFilter}
-                  onChange={(event) =>
-                    setScheduleStatusFilter(
-                      event.target.value as "all" | "enabled" | "disabled"
-                    )
-                  }
-                >
-                  <option value="all">全部</option>
-                  <option value="enabled">启用</option>
-                  <option value="disabled">停用</option>
-                </select>
-              </div>
-              <div className="history-chip history-chip-search">
-                <span className="history-chip-label">关键字</span>
-                <input
-                  type="text"
-                  value={scheduleKeyword}
-                  onChange={(event) => setScheduleKeyword(event.target.value)}
-                  placeholder="按名称 / Cron / 集群 / 巡检项搜索"
-                />
-                {scheduleKeyword && (
-                  <button
-                    type="button"
-                    className="history-search-clear"
-                    onClick={() => setScheduleKeyword("")}
-                    aria-label="清空关键字"
+              <div className="history-filter-row">
+                <div className="history-chip history-chip-select">
+                  <span className="history-chip-label">状态筛选</span>
+                  <select
+                    value={scheduleStatusFilter}
+                    onChange={(event) =>
+                      setScheduleStatusFilter(
+                        event.target.value as "all" | "enabled" | "disabled"
+                      )
+                    }
                   >
-                    ×
-                  </button>
-                )}
+                    <option value="all">全部</option>
+                    <option value="enabled">启用</option>
+                    <option value="disabled">停用</option>
+                  </select>
+                </div>
+                <div className="history-chip history-chip-search">
+                  <span className="history-chip-label">关键字</span>
+                  <input
+                    type="text"
+                    value={scheduleKeyword}
+                    onChange={(event) => setScheduleKeyword(event.target.value)}
+                    placeholder="按名称 / Cron / 集群 / 巡检项搜索"
+                  />
+                  {scheduleKeyword && (
+                    <button
+                      type="button"
+                      className="history-search-clear"
+                      onClick={() => setScheduleKeyword("")}
+                      aria-label="清空关键字"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
             <div className="table-wrapper">
