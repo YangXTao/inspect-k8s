@@ -850,13 +850,7 @@ const logWithTimestamp = (
   logger(`[${timestamp}] ${message}`, ...details);
 };
 
-const TopNavigation = ({
-  onOpenSettings,
-  onOpenSchedule,
-}: {
-  onOpenSettings: () => void;
-  onOpenSchedule: () => void;
-}) => {
+const TopNavigation = ({ onOpenSettings }: { onOpenSettings: () => void }) => {
   const handleSettingsClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
     if (
       event.metaKey ||
@@ -869,19 +863,6 @@ const TopNavigation = ({
     }
     event.preventDefault();
     onOpenSettings();
-  };
-  const handleScheduleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (
-      event.metaKey ||
-      event.ctrlKey ||
-      event.shiftKey ||
-      event.altKey ||
-      event.button !== 0
-    ) {
-      return;
-    }
-    event.preventDefault();
-    onOpenSchedule();
   };
 
   return (
@@ -903,11 +884,10 @@ const TopNavigation = ({
       </Link>
       <nav className="top-navigation-links">
         <NavLink
-          to={`${SETTINGS_BASE_PATH}/schedule`}
+          to="/schedule"
           className={({ isActive }) =>
             `top-navigation-link${isActive ? " active" : ""}`
           }
-          onClick={handleScheduleClick}
         >
           <span className="top-navigation-link-inner">
             <span className="top-navigation-link-icon" aria-hidden="true">
@@ -5779,6 +5759,57 @@ const ScheduleSettingsPanel = ({
   );
 };
 
+interface SchedulePageProps {
+  schedules: InspectionSchedule[];
+  clusters: ClusterConfig[];
+  items: InspectionItem[];
+  prometheusVersionOptions: string[];
+  submitting: boolean;
+  notice: string | null;
+  error: string | null;
+  license: LicenseCapabilities;
+  onSave: (payload: {
+    id?: number;
+    name?: string;
+    cron: string;
+    clusterIds: number[];
+    itemIds: number[];
+    isEnabled: boolean;
+  }) => Promise<void>;
+  onDelete: (schedule: InspectionSchedule) => void;
+  onToggleEnabled: (schedule: InspectionSchedule, enabled: boolean) => void;
+}
+
+const SchedulePage = ({
+  schedules,
+  clusters,
+  items,
+  prometheusVersionOptions,
+  submitting,
+  notice,
+  error,
+  license,
+  onSave,
+  onDelete,
+  onToggleEnabled,
+}: SchedulePageProps) => (
+  <section className="card history history-page schedule-page">
+    <ScheduleSettingsPanel
+      schedules={schedules}
+      clusters={clusters}
+      items={items}
+      prometheusVersionOptions={prometheusVersionOptions}
+      submitting={submitting}
+      notice={notice}
+      error={error}
+      license={license}
+      onSave={onSave}
+      onDelete={onDelete}
+      onToggleEnabled={onToggleEnabled}
+    />
+  </section>
+);
+
 interface LicenseSettingsPanelProps {
   status: LicenseCapabilities;
   uploading: boolean;
@@ -7986,51 +8017,25 @@ const backgroundLocation =
     [clusters]
   );
 
-  const handleOpenSettingsWithTab = useCallback(
-    (tabId: string) => {
-      setSettingsError(null);
-      setSettingsNotice(null);
-      setScheduleError(null);
-      setScheduleNotice(null);
-      const normalized = (tabId || "overview").trim().toLowerCase() || "overview";
-      const targetPath =
-        normalized === "overview"
-          ? SETTINGS_BASE_PATH
-          : `${SETTINGS_BASE_PATH}/${normalized}`;
-      if (location.pathname.startsWith(SETTINGS_BASE_PATH)) {
-        setSettingsOpen(true);
-        setSettingsTabId(normalized);
-        if (location.pathname !== targetPath) {
-          const baseBackground =
-            backgroundLocation ?? backgroundLocationRef.current;
-          navigate(targetPath, {
-            replace: true,
-            state: baseBackground ? { backgroundLocation: baseBackground } : undefined,
-          });
-        }
-        return;
-      }
-
-      const currentPath = `${location.pathname}${location.search}${location.hash}`;
-      previousSettingsPathRef.current =
-        currentPath.length > 0 ? currentPath : "/";
-      backgroundLocationRef.current = location;
-      setSettingsTabId(normalized);
-      setSettingsOpen(true);
-      navigate(targetPath, {
-        state: { backgroundLocation: location },
-      });
-    },
-    [location, navigate, backgroundLocation]
-  );
-
   const handleOpenSettings = useCallback(() => {
-    handleOpenSettingsWithTab("overview");
-  }, [handleOpenSettingsWithTab]);
+    setSettingsError(null);
+    setSettingsNotice(null);
 
-  const handleOpenScheduleSettings = useCallback(() => {
-    handleOpenSettingsWithTab("schedule");
-  }, [handleOpenSettingsWithTab]);
+    if (location.pathname.startsWith(SETTINGS_BASE_PATH)) {
+      setSettingsOpen(true);
+      return;
+    }
+
+    const currentPath = `${location.pathname}${location.search}${location.hash}`;
+    previousSettingsPathRef.current =
+      currentPath.length > 0 ? currentPath : "/";
+    backgroundLocationRef.current = location;
+    setSettingsTabId("overview");
+    setSettingsOpen(true);
+    navigate(SETTINGS_BASE_PATH, {
+      state: { backgroundLocation: location },
+    });
+  }, [location, navigate]);
 
   const handleCloseSettings = useCallback(() => {
     const background = backgroundLocationRef.current;
@@ -9493,25 +9498,6 @@ const hasManualKubeconfig = useMemo(
         ),
       },
       {
-        id: "schedule",
-        label: "定时巡检",
-        render: () => (
-          <ScheduleSettingsPanel
-            schedules={schedules}
-            clusters={clusters}
-            items={sortedItems}
-            prometheusVersionOptions={prometheusVersionOptions}
-            submitting={scheduleSubmitting}
-            notice={scheduleNotice}
-            error={scheduleError}
-            license={licenseCapabilities}
-            onSave={handleSaveSchedule}
-            onDelete={handleDeleteSchedule}
-            onToggleEnabled={handleToggleScheduleEnabled}
-          />
-        ),
-      },
-      {
         id: "prometheus-version",
         label: "Prometheus 版本",
         render: () => (
@@ -9542,22 +9528,14 @@ const hasManualKubeconfig = useMemo(
     ],
     [
       sortedItems,
-      schedules,
-      clusters,
       settingsSubmitting,
       settingsNotice,
       settingsError,
-      scheduleSubmitting,
-      scheduleNotice,
-      scheduleError,
       handleSaveInspectionItem,
       handleDeleteInspectionItem,
       handleDeleteInspectionItemsBulk,
       handleExportInspectionItems,
       handleImportInspectionItems,
-      handleSaveSchedule,
-      handleDeleteSchedule,
-      handleToggleScheduleEnabled,
       prometheusVersionOptions,
       handleAddPrometheusVersion,
       handleDeletePrometheusVersion,
@@ -9745,10 +9723,7 @@ const hasManualKubeconfig = useMemo(
         <title>K8s Inspection Center</title>
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
       </Helmet>
-      <TopNavigation
-        onOpenSettings={handleOpenSettings}
-        onOpenSchedule={handleOpenScheduleSettings}
-      />
+      <TopNavigation onOpenSettings={handleOpenSettings} />
       {globalNotices.length > 0 && (
         <div className="global-notice-bar" role="status" aria-live="polite">
           {globalNotices.map((notice) => (
@@ -9776,6 +9751,24 @@ const hasManualKubeconfig = useMemo(
                 clusterDisplayIds={clusterDisplayIds}
                 runDisplayIds={runDisplayIds}
                 license={licenseCapabilities}
+              />
+            }
+          />
+          <Route
+            path="/schedule"
+            element={
+              <SchedulePage
+                schedules={schedules}
+                clusters={clusters}
+                items={sortedItems}
+                prometheusVersionOptions={prometheusVersionOptions}
+                submitting={scheduleSubmitting}
+                notice={scheduleNotice}
+                error={scheduleError}
+                license={licenseCapabilities}
+                onSave={handleSaveSchedule}
+                onDelete={handleDeleteSchedule}
+                onToggleEnabled={handleToggleScheduleEnabled}
               />
             }
           />

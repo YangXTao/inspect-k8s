@@ -2530,6 +2530,11 @@ th {
   font-size: 12px;
 }
 
+.schedule-page .inspection-settings-panel,
+.schedule-page .inspection-settings-body {
+  overflow: visible;
+}
+
 .settings-form h4 {
   margin: 0;
   color: #1e293b;
