@@ -5681,13 +5681,15 @@ const ScheduleSettingsPanel = ({
                 <h3>{editingSchedule ? "编辑定时任务" : "新增定时任务"}</h3>
                 <p>时间格式为 分 时 日 月 周，按服务器时间执行</p>
               </div>
-              <button
-                type="button"
-                className="link-button"
-                onClick={handleCloseForm}
-              >
-                关闭
-              </button>
+              <div className="settings-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={handleCloseForm}
+                >
+                  关闭
+                </button>
+              </div>
             </div>
             {formError && <div className="feedback error">{formError}</div>}
             <form className="settings-form" onSubmit={handleSubmit}>
