@@ -2549,6 +2549,52 @@ th {
   max-height: none;
 }
 
+.history-page .history-filter-row,
+.schedule-page .history-filter-row {
+  align-items: center;
+  gap: 10px;
+}
+
+.history-page .history-chip,
+.schedule-page .history-chip {
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.history-page .history-chip-label,
+.schedule-page .history-chip-label {
+  font-size: 13px;
+  color: #475569;
+  font-weight: 500;
+}
+
+.history-page .history-chip select,
+.history-page .history-chip input,
+.schedule-page .history-chip select,
+.schedule-page .history-chip input {
+  border: 1px solid #cbd5f5;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  background: #fff;
+  color: #0f172a;
+}
+
+.history-page .history-chip input,
+.schedule-page .history-chip input {
+  min-width: 220px;
+}
+
+.history-page .history-search-clear,
+.schedule-page .history-search-clear {
+  background: #e2e8f0;
+  color: #475569;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
 .schedule-modal {
   font-size: 14px;
   color: #475569;
@@ -2871,15 +2917,6 @@ th {
   padding: 8px 14px;
 }
 
-.schedule-modal .schedule-close-button {
-  background: #2563eb;
-  color: #ffffff;
-  box-shadow: 0 8px 16px rgba(37, 99, 235, 0.2);
-}
-
-.schedule-modal .schedule-close-button:hover {
-  background: #1d4ed8;
-}
 
 .schedule-modal .inspection-item-columns {
   gap: 12px;

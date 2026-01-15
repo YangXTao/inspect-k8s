@@ -5684,7 +5684,7 @@ const ScheduleSettingsPanel = ({
               <div className="settings-actions">
                 <button
                   type="button"
-                  className="secondary schedule-close-button"
+                  className="link-button"
                   onClick={handleCloseForm}
                 >
                   关闭
