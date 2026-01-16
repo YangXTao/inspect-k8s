@@ -140,6 +140,7 @@ class InspectionSchedule(Base):
     name = Column(String(100), nullable=True)
     cron = Column(String(50), nullable=False)
     cluster_ids_json = Column(Text, nullable=False)
+    cluster_names_json = Column(Text, nullable=True)
     item_ids_json = Column(Text, nullable=False)
     is_enabled = Column(Boolean, nullable=False, default=True)
     last_run_at = Column(DateTime, nullable=True)
@@ -156,8 +157,40 @@ class InspectionSchedule(Base):
     def item_ids(self) -> list[int]:
         return self._load_ids(self.item_ids_json)
 
+    @property
+    def cluster_name_map(self) -> dict[int, str]:
+        if not self.cluster_names_json:
+            return {}
+        try:
+            import json
+
+            raw = json.loads(self.cluster_names_json)
+        except Exception:
+            return {}
+        if not isinstance(raw, dict):
+            return {}
+        result: dict[int, str] = {}
+        for key, value in raw.items():
+            try:
+                cluster_id = int(key)
+            except Exception:
+                continue
+            if isinstance(value, str) and value.strip():
+                result[cluster_id] = value
+        return result
+
     def set_cluster_ids(self, value: Iterable[int]) -> None:
         self.cluster_ids_json = self._dump_ids(value)
+
+    def set_cluster_name_map(self, value: dict[int, str]) -> None:
+        import json
+
+        normalized = {
+            str(cluster_id): name
+            for cluster_id, name in value.items()
+            if isinstance(name, str) and name.strip()
+        }
+        self.cluster_names_json = json.dumps(normalized, ensure_ascii=False)
 
     def set_item_ids(self, value: Iterable[int]) -> None:
         self.item_ids_json = self._dump_ids(value)
