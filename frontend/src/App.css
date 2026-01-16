@@ -11,6 +11,15 @@ body {
   margin: 0;
 }
 
+html,
+body {
+  height: 100%;
+}
+
+body.login-lock {
+  overflow: hidden;
+}
+
 .login-page {
   min-height: 100vh;
   display: flex;
@@ -18,6 +27,7 @@ body {
   justify-content: center;
   padding: 32px 20px;
   background: radial-gradient(circle at top, #e0e7ff 0%, #f8fafc 55%);
+  overflow: hidden;
 }
 
 .login-card {
@@ -1832,11 +1842,19 @@ th {
   min-height: 0;
 }
 
+.settings-modal-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 168px;
+  align-self: stretch;
+}
+
 .settings-modal-nav {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-width: 168px;
+  min-width: 0;
   align-self: stretch;
   padding: 16px 14px;
   border-radius: 18px;
@@ -2361,6 +2379,10 @@ th {
     flex-direction: column;
   }
 
+  .settings-modal-sidebar {
+    width: 100%;
+  }
+
   .settings-modal-nav {
     flex-direction: row;
     flex-wrap: wrap;
@@ -2369,6 +2391,10 @@ th {
   .settings-nav-button {
     flex: 1 1 140px;
     text-align: center;
+  }
+
+  .settings-user-card {
+    margin-top: 12px;
   }
 
   .settings-overview {

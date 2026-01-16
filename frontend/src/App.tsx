@@ -3717,19 +3717,21 @@ const SettingsModal = ({
           </button>
         </div>
         <div className="settings-modal-shell">
-          <nav className="settings-modal-nav">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                className={`settings-nav-button${
-                  tab.id === effectiveTabId ? " active" : ""
-                }`}
-                onClick={() => selectTab(tab.id)}
-              >
-                {tab.label}
-              </button>
-            ))}
+          <div className="settings-modal-sidebar">
+            <nav className="settings-modal-nav">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  className={`settings-nav-button${
+                    tab.id === effectiveTabId ? " active" : ""
+                  }`}
+                  onClick={() => selectTab(tab.id)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </nav>
             {user && (
               <div className="settings-user-card">
                 <div className="settings-user-avatar">
@@ -3761,7 +3763,7 @@ const SettingsModal = ({
                 </div>
               </div>
             )}
-          </nav>
+          </div>
           <section className="settings-modal-main">
             {currentTab.render({
               close: onClose,
@@ -8018,6 +8020,20 @@ const App = () => {
     },
     []
   );
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+    if (!authUser || !authChecked) {
+      document.body.classList.add("login-lock");
+    } else {
+      document.body.classList.remove("login-lock");
+    }
+    return () => {
+      document.body.classList.remove("login-lock");
+    };
+  }, [authUser, authChecked]);
   const [clusterNameInput, setClusterNameInput] = useState("");
   const [clusterPromInput, setClusterPromInput] = useState("");
   const [clusterDefaultAgentIdInput, setClusterDefaultAgentIdInput] =
