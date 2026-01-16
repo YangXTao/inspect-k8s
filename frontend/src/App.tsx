@@ -7815,8 +7815,8 @@ const PasswordModal = ({
   };
 
   return (
-    <div className="modal-backdrop" aria-modal="true">
-      <div className="modal" role="dialog" aria-label="修改密码">
+    <div className="modal-backdrop password-modal-backdrop" aria-modal="true">
+      <div className="modal password-modal" role="dialog" aria-label="修改密码">
         <h3>修改密码</h3>
         {(localError || error) && (
           <div className="feedback error">{localError ?? error}</div>
