@@ -6,6 +6,11 @@ set -e
 : "${SSL_KEY_PATH:=/etc/nginx/certs/tls.key}"
 : "${SSL_CN:=inspect.local}"
 
+export API_SERVER
+export SSL_CERT_PATH
+export SSL_KEY_PATH
+export SSL_CN
+
 if [ ! -f "$SSL_CERT_PATH" ] || [ ! -f "$SSL_KEY_PATH" ]; then
   cert_dir="$(dirname "$SSL_CERT_PATH")"
   mkdir -p "$cert_dir"
