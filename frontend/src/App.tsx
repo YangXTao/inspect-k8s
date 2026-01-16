@@ -5623,6 +5623,9 @@ const ScheduleSettingsPanel = ({
                       const label =
                         schedule.name?.trim() ||
                         `定时巡检 #${schedule.id}`;
+                      const missingClusterCount = schedule.cluster_ids.filter(
+                        (id) => !scheduleClusterMap.has(id)
+                      ).length;
                       const clusterSummary = summarizeNames(
                         schedule.cluster_ids,
                         scheduleClusterMap
@@ -5648,6 +5651,11 @@ const ScheduleSettingsPanel = ({
                               <span className="schedule-muted">
                                 {schedule.cluster_ids.length} 个集群
                               </span>
+                              {missingClusterCount > 0 && (
+                                <span className="schedule-warning">
+                                  已删除/不可用 {missingClusterCount} 个集群
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td>
