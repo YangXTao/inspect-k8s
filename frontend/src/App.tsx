@@ -5047,6 +5047,14 @@ const ScheduleSettingsPanel = ({
     clusters.forEach((cluster) => map.set(cluster.id, cluster));
     return map;
   }, [clusters]);
+  const availableClusters = useMemo(
+    () => clusters.filter((cluster) => cluster.connection_status === "connected"),
+    [clusters]
+  );
+  const availableClusterIdSet = useMemo(
+    () => new Set(availableClusters.map((cluster) => cluster.id)),
+    [availableClusters]
+  );
   const scheduleItemMap = useMemo(() => {
     const map = new Map<number, InspectionItem>();
     items.forEach((item) => map.set(item.id, item));
@@ -5092,9 +5100,9 @@ const ScheduleSettingsPanel = ({
 
   useEffect(() => {
     setSelectedClusterIds((prev) =>
-      prev.filter((id) => scheduleClusterMap.has(id))
+      prev.filter((id) => availableClusterIdSet.has(id))
     );
-  }, [scheduleClusterMap]);
+  }, [availableClusterIdSet]);
 
   useEffect(() => {
     setSelectedItemIds((prev) =>
@@ -5182,7 +5190,7 @@ const ScheduleSettingsPanel = ({
 
   const filteredClusters = useMemo(() => {
     const keyword = clusterKeyword.trim().toLowerCase();
-    const list = clusters.slice().sort((a, b) => {
+    const list = availableClusters.slice().sort((a, b) => {
       const nameA = (a.name ?? "").toLowerCase();
       const nameB = (b.name ?? "").toLowerCase();
       if (nameA === nameB) {
@@ -5196,7 +5204,7 @@ const ScheduleSettingsPanel = ({
     return list.filter((cluster) =>
       (cluster.name ?? "").toLowerCase().includes(keyword)
     );
-  }, [clusters, clusterKeyword]);
+  }, [availableClusters, clusterKeyword]);
 
   const filteredClusterIdSet = useMemo(
     () => new Set(filteredClusters.map((cluster) => cluster.id)),
@@ -5351,7 +5359,8 @@ const ScheduleSettingsPanel = ({
   const getScheduleClusterLabel = useCallback(
     (schedule: InspectionSchedule, clusterId: number) => {
       const baseName = getScheduleClusterName(schedule, clusterId);
-      if (scheduleClusterMap.has(clusterId)) {
+      const cluster = scheduleClusterMap.get(clusterId);
+      if (cluster && cluster.connection_status === "connected") {
         return baseName;
       }
       return `${baseName}（已删除/不可用）`;
@@ -5942,8 +5951,8 @@ const ScheduleSettingsPanel = ({
                     </span>
                   </summary>
                   <div className="schedule-dropdown-body">
-                    {clusters.length === 0 ? (
-                      <div className="placeholder">暂无集群</div>
+                    {availableClusters.length === 0 ? (
+                      <div className="placeholder">暂无可用集群</div>
                     ) : filteredClusters.length === 0 ? (
                       <div className="placeholder">未找到匹配的集群</div>
                     ) : (
