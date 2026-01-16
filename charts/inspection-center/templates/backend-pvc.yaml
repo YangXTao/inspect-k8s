@@ -3,6 +3,8 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: {{ default (printf "%s-backend-data" (include "inspection-center.fullname" .)) .Values.backend.persistence.name }}
+  annotations:
+    "helm.sh/resource-policy": keep
   labels:
     app.kubernetes.io/name: {{ include "inspection-center.name" . }}
     app.kubernetes.io/component: backend

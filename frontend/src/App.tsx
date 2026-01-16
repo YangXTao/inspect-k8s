@@ -5047,6 +5047,18 @@ const ScheduleSettingsPanel = ({
     clusters.forEach((cluster) => map.set(cluster.id, cluster));
     return map;
   }, [clusters]);
+  const availableClusters = useMemo(
+    () => clusters.filter((cluster) => cluster.connection_status === "connected"),
+    [clusters]
+  );
+  const availableClusterIdSet = useMemo(
+    () => new Set(availableClusters.map((cluster) => cluster.id)),
+    [availableClusters]
+  );
+  const selectedAvailableClusterIds = useMemo(
+    () => selectedClusterIds.filter((id) => availableClusterIdSet.has(id)),
+    [availableClusterIdSet, selectedClusterIds]
+  );
   const scheduleItemMap = useMemo(() => {
     const map = new Map<number, InspectionItem>();
     items.forEach((item) => map.set(item.id, item));
@@ -5092,9 +5104,9 @@ const ScheduleSettingsPanel = ({
 
   useEffect(() => {
     setSelectedClusterIds((prev) =>
-      prev.filter((id) => scheduleClusterMap.has(id))
+      prev.filter((id) => availableClusterIdSet.has(id))
     );
-  }, [scheduleClusterMap]);
+  }, [availableClusterIdSet, editingSchedule]);
 
   useEffect(() => {
     setSelectedItemIds((prev) =>
@@ -5160,7 +5172,7 @@ const ScheduleSettingsPanel = ({
       setFormError("请完整填写分/时/日/月/周");
       return;
     }
-    if (selectedClusterIds.length === 0) {
+    if (selectedAvailableClusterIds.length === 0) {
       setFormError("请至少选择一个集群");
       return;
     }
@@ -5169,20 +5181,26 @@ const ScheduleSettingsPanel = ({
       return;
     }
     setFormError(null);
-    await onSave({
-      id: editingSchedule?.id,
-      name: formName.trim(),
-      cron: parts.join(" "),
-      clusterIds: selectedClusterIds,
-      itemIds: selectedItemIds,
-      isEnabled: formEnabled,
-    });
-    handleCloseForm();
+    try {
+      await onSave({
+        id: editingSchedule?.id,
+        name: formName.trim(),
+        cron: parts.join(" "),
+        clusterIds: selectedAvailableClusterIds,
+        itemIds: selectedItemIds,
+        isEnabled: formEnabled,
+      });
+      handleCloseForm();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "保存定时巡检失败";
+      setFormError(message);
+    }
   };
 
   const filteredClusters = useMemo(() => {
     const keyword = clusterKeyword.trim().toLowerCase();
-    const list = clusters.slice().sort((a, b) => {
+    const list = availableClusters.slice().sort((a, b) => {
       const nameA = (a.name ?? "").toLowerCase();
       const nameB = (b.name ?? "").toLowerCase();
       if (nameA === nameB) {
@@ -5196,7 +5214,7 @@ const ScheduleSettingsPanel = ({
     return list.filter((cluster) =>
       (cluster.name ?? "").toLowerCase().includes(keyword)
     );
-  }, [clusters, clusterKeyword]);
+  }, [availableClusters, clusterKeyword]);
 
   const filteredClusterIdSet = useMemo(
     () => new Set(filteredClusters.map((cluster) => cluster.id)),
@@ -5204,8 +5222,9 @@ const ScheduleSettingsPanel = ({
   );
   const selectedFilteredClusterCount = useMemo(
     () =>
-      selectedClusterIds.filter((id) => filteredClusterIdSet.has(id)).length,
-    [selectedClusterIds, filteredClusterIdSet]
+      selectedAvailableClusterIds.filter((id) => filteredClusterIdSet.has(id))
+        .length,
+    [selectedAvailableClusterIds, filteredClusterIdSet]
   );
   const allFilteredClustersSelected =
     filteredClusters.length > 0 &&
@@ -5330,6 +5349,36 @@ const ScheduleSettingsPanel = ({
     });
   }, [schedules]);
 
+  const getScheduleClusterName = useCallback(
+    (schedule: InspectionSchedule, clusterId: number) => {
+      const cluster = scheduleClusterMap.get(clusterId);
+      if (cluster?.name) {
+        return cluster.name;
+      }
+      const fallbackMap = schedule.cluster_name_map ?? {};
+      const fallbackName =
+        fallbackMap[String(clusterId)] ?? fallbackMap[clusterId];
+      if (fallbackName) {
+        return fallbackName;
+      }
+      const displayId = clusterDisplayIds[clusterId];
+      return displayId || `集群${clusterId}`;
+    },
+    [scheduleClusterMap, clusterDisplayIds]
+  );
+
+  const getScheduleClusterLabel = useCallback(
+    (schedule: InspectionSchedule, clusterId: number) => {
+      const baseName = getScheduleClusterName(schedule, clusterId);
+      const cluster = scheduleClusterMap.get(clusterId);
+      if (cluster && cluster.connection_status === "connected") {
+        return baseName;
+      }
+      return `${baseName}（已删除/不可用）`;
+    },
+    [getScheduleClusterName, scheduleClusterMap]
+  );
+
   const filteredSchedules = useMemo(() => {
     const keyword = scheduleKeyword.trim().toLowerCase();
     return sortedSchedules.filter((schedule) => {
@@ -5344,7 +5393,7 @@ const ScheduleSettingsPanel = ({
       }
       const name = schedule.name?.trim() || `定时巡检 #${schedule.id}`;
       const clusterNames = schedule.cluster_ids
-        .map((id) => scheduleClusterMap.get(id)?.name ?? `#${id}`)
+        .map((id) => getScheduleClusterName(schedule, id))
         .join(" ");
       const itemNames = schedule.item_ids
         .map((id) => scheduleItemMap.get(id)?.name ?? `#${id}`)
@@ -5356,8 +5405,8 @@ const ScheduleSettingsPanel = ({
     scheduleKeyword,
     scheduleStatusFilter,
     sortedSchedules,
-    scheduleClusterMap,
     scheduleItemMap,
+    getScheduleClusterName,
   ]);
 
   const scheduleTotalPages = useMemo(
@@ -5465,9 +5514,7 @@ const ScheduleSettingsPanel = ({
     setSchedulePageInput("");
   }, [schedulePageInput, scheduleTotalPages]);
 
-  const summarizeNames = useCallback(
-    (ids: number[], map: Map<number, { name?: string | null }>) => {
-      const names = ids.map((id) => map.get(id)?.name || `#${id}`);
+  const summarizeNames = useCallback((names: string[]) => {
       if (names.length === 0) {
         return "-";
       }
@@ -5475,9 +5522,7 @@ const ScheduleSettingsPanel = ({
         return names.join("、");
       }
       return `${names.slice(0, 2).join("、")} 等${names.length}个`;
-    },
-    []
-  );
+  }, []);
 
   const getPrometheusSummary = useCallback(
     (schedule: InspectionSchedule) => {
@@ -5624,8 +5669,9 @@ const ScheduleSettingsPanel = ({
                         schedule.name?.trim() ||
                         `定时巡检 #${schedule.id}`;
                       const clusterSummary = summarizeNames(
-                        schedule.cluster_ids,
-                        scheduleClusterMap
+                        schedule.cluster_ids.map((id) =>
+                          getScheduleClusterLabel(schedule, id)
+                        )
                       );
                       const versionSummary = getPrometheusSummary(schedule);
                       return (
@@ -5883,7 +5929,7 @@ const ScheduleSettingsPanel = ({
                 <div className="inspection-item-group-title">
                   <span className="inspection-group-title-text">选择集群</span>
                   <span className="group-count">
-                    已选 {selectedClusterIds.length} / {filteredClusters.length}
+                    已选 {selectedAvailableClusterIds.length} / {filteredClusters.length}
                   </span>
                 </div>
                 <div className="inspection-items-toolbar">
@@ -5912,12 +5958,12 @@ const ScheduleSettingsPanel = ({
                   <summary>
                     <span>展开集群列表</span>
                     <span className="schedule-dropdown-summary">
-                      已选 {selectedClusterIds.length}
+                      已选 {selectedAvailableClusterIds.length}
                     </span>
                   </summary>
                   <div className="schedule-dropdown-body">
-                    {clusters.length === 0 ? (
-                      <div className="placeholder">暂无集群</div>
+                    {availableClusters.length === 0 ? (
+                      <div className="placeholder">暂无可用集群</div>
                     ) : filteredClusters.length === 0 ? (
                       <div className="placeholder">未找到匹配的集群</div>
                     ) : (

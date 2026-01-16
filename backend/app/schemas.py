@@ -331,6 +331,7 @@ class InspectionScheduleOut(BaseModel):
     name: Optional[str]
     cron: str
     cluster_ids: List[int]
+    cluster_name_map: Dict[int, str] = Field(default_factory=dict)
     item_ids: List[int]
     is_enabled: bool
     last_run_at: Optional[datetime]

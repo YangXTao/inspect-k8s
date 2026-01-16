@@ -107,6 +107,7 @@ export type InspectionSchedule = {
   name?: string | null;
   cron: string;
   cluster_ids: number[];
+  cluster_name_map?: Record<string, string>;
   item_ids: number[];
   is_enabled: boolean;
   last_run_at?: string | null;
