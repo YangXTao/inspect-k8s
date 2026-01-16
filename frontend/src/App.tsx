@@ -5055,6 +5055,10 @@ const ScheduleSettingsPanel = ({
     () => new Set(availableClusters.map((cluster) => cluster.id)),
     [availableClusters]
   );
+  const selectedAvailableClusterIds = useMemo(
+    () => selectedClusterIds.filter((id) => availableClusterIdSet.has(id)),
+    [availableClusterIdSet, selectedClusterIds]
+  );
   const scheduleItemMap = useMemo(() => {
     const map = new Map<number, InspectionItem>();
     items.forEach((item) => map.set(item.id, item));
@@ -5102,7 +5106,7 @@ const ScheduleSettingsPanel = ({
     setSelectedClusterIds((prev) =>
       prev.filter((id) => availableClusterIdSet.has(id))
     );
-  }, [availableClusterIdSet]);
+  }, [availableClusterIdSet, editingSchedule]);
 
   useEffect(() => {
     setSelectedItemIds((prev) =>
@@ -5168,7 +5172,7 @@ const ScheduleSettingsPanel = ({
       setFormError("请完整填写分/时/日/月/周");
       return;
     }
-    if (selectedClusterIds.length === 0) {
+    if (selectedAvailableClusterIds.length === 0) {
       setFormError("请至少选择一个集群");
       return;
     }
@@ -5177,15 +5181,21 @@ const ScheduleSettingsPanel = ({
       return;
     }
     setFormError(null);
-    await onSave({
-      id: editingSchedule?.id,
-      name: formName.trim(),
-      cron: parts.join(" "),
-      clusterIds: selectedClusterIds,
-      itemIds: selectedItemIds,
-      isEnabled: formEnabled,
-    });
-    handleCloseForm();
+    try {
+      await onSave({
+        id: editingSchedule?.id,
+        name: formName.trim(),
+        cron: parts.join(" "),
+        clusterIds: selectedAvailableClusterIds,
+        itemIds: selectedItemIds,
+        isEnabled: formEnabled,
+      });
+      handleCloseForm();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "保存定时巡检失败";
+      setFormError(message);
+    }
   };
 
   const filteredClusters = useMemo(() => {
@@ -5212,8 +5222,9 @@ const ScheduleSettingsPanel = ({
   );
   const selectedFilteredClusterCount = useMemo(
     () =>
-      selectedClusterIds.filter((id) => filteredClusterIdSet.has(id)).length,
-    [selectedClusterIds, filteredClusterIdSet]
+      selectedAvailableClusterIds.filter((id) => filteredClusterIdSet.has(id))
+        .length,
+    [selectedAvailableClusterIds, filteredClusterIdSet]
   );
   const allFilteredClustersSelected =
     filteredClusters.length > 0 &&
@@ -5918,7 +5929,7 @@ const ScheduleSettingsPanel = ({
                 <div className="inspection-item-group-title">
                   <span className="inspection-group-title-text">选择集群</span>
                   <span className="group-count">
-                    已选 {selectedClusterIds.length} / {filteredClusters.length}
+                    已选 {selectedAvailableClusterIds.length} / {filteredClusters.length}
                   </span>
                 </div>
                 <div className="inspection-items-toolbar">
@@ -5947,7 +5958,7 @@ const ScheduleSettingsPanel = ({
                   <summary>
                     <span>展开集群列表</span>
                     <span className="schedule-dropdown-summary">
-                      已选 {selectedClusterIds.length}
+                      已选 {selectedAvailableClusterIds.length}
                     </span>
                   </summary>
                   <div className="schedule-dropdown-body">
