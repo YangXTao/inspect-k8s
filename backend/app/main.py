@@ -773,15 +773,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-PUBLIC_AUTH_PREFIXES = (
+PUBLIC_AUTH_PATHS = {
     "/auth/login",
-    "/agent",
     "/health",
     "/system-agent-install.sh",
     "/openapi.json",
-    "/docs",
-    "/redoc",
-)
+}
+
+
+def _is_public_path(path: str) -> bool:
+    if path in PUBLIC_AUTH_PATHS:
+        return True
+    if path == "/agent" or path.startswith("/agent/"):
+        return True
+    if path == "/docs" or path.startswith("/docs/"):
+        return True
+    if path == "/redoc" or path.startswith("/redoc/"):
+        return True
+    return False
 
 
 @app.middleware("http")
@@ -789,7 +798,7 @@ async def require_authentication(request: Request, call_next):
     if request.method == "OPTIONS":
         return await call_next(request)
     path = request.url.path
-    if any(path.startswith(prefix) for prefix in PUBLIC_AUTH_PREFIXES):
+    if _is_public_path(path):
         return await call_next(request)
     with SessionLocal() as db:
         user = get_user_from_session(db, request.cookies.get(AUTH_COOKIE_NAME))
@@ -1153,7 +1162,6 @@ def login(
         AUTH_COOKIE_NAME,
         session.id,
         max_age=max_age,
-        expires=session.expires_at,
         httponly=True,
         samesite=cookie_samesite,
         secure=COOKIE_SECURE,

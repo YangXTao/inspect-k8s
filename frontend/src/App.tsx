@@ -7923,7 +7923,12 @@ const App = () => {
         }
         const message =
           err instanceof Error ? err.message : "获取登录状态失败";
-        if (message === "未登录") {
+        const normalized = message.replace(/\s+/g, "");
+        if (
+          message === "未登录" ||
+          normalized.includes("未登录") ||
+          normalized.startsWith("{\"detail\"")
+        ) {
           setAuthUser(null);
           setAuthError(null);
         } else {
@@ -8253,8 +8258,11 @@ const App = () => {
   }, []);
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
     void refreshAgents();
-  }, [refreshAgents]);
+  }, [isAuthenticated, refreshAgents]);
 
   const handleUploadLicenseFile = useCallback(
     async (file: File) => {
