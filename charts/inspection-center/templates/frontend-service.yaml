@@ -17,3 +17,15 @@ spec:
       port: {{ .Values.frontend.service.port }}
       targetPort: {{ .Values.frontend.service.targetPort }}
       protocol: TCP
+      {{- if .Values.frontend.service.nodePort }}
+      nodePort: {{ .Values.frontend.service.nodePort }}
+      {{- end }}
+    {{- if .Values.frontend.service.httpsEnabled }}
+    - name: https
+      port: {{ .Values.frontend.service.httpsPort | default 443 }}
+      targetPort: {{ .Values.frontend.service.httpsTargetPort | default 443 }}
+      protocol: TCP
+      {{- if .Values.frontend.service.httpsNodePort }}
+      nodePort: {{ .Values.frontend.service.httpsNodePort }}
+      {{- end }}
+    {{- end }}

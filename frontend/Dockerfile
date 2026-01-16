@@ -8,9 +8,10 @@ RUN npm install react-helmet@6.1.0 && npm run build
 FROM 192.168.10.51/base/nginx:1.27-alpine
 WORKDIR /etc/nginx
 ENV API_SERVER=http://inspect-backend:8000
+RUN apk add --no-cache openssl
 COPY docker/default.conf.template ./templates/default.conf.template
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 COPY --from=build /frontend/dist /usr/share/nginx/html
-EXPOSE 80
+EXPOSE 80 443
 CMD ["/entrypoint.sh"]

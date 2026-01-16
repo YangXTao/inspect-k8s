@@ -10715,15 +10715,6 @@ const hasManualKubeconfig = useMemo(
         onClear={handleKubeconfigClear}
       />
 
-      <PasswordModal
-        open={passwordModalOpen}
-        submitting={passwordSubmitting}
-        error={passwordError}
-        notice={passwordNotice}
-        onClose={handleClosePasswordModal}
-        onSubmit={handleChangePassword}
-      />
-
       <ConfirmationModal
         state={confirmState && confirmState.scope !== "settings" ? confirmState : null}
         onClose={() => setConfirmState(null)}
@@ -10745,6 +10736,15 @@ const hasManualKubeconfig = useMemo(
         onConfirmClose={() => setConfirmState(null)}
         activeTabId={settingsTabId}
         onTabChange={handleSelectSettingsTab}
+      />
+
+      <PasswordModal
+        open={passwordModalOpen}
+        submitting={passwordSubmitting}
+        error={passwordError}
+        notice={passwordNotice}
+        onClose={handleClosePasswordModal}
+        onSubmit={handleChangePassword}
       />
 
       {clusterEditState && (

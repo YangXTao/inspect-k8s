@@ -17,10 +17,15 @@ spec:
         - env:
             - name: API_SERVER
               value: <API_SERVER>
+            - name: SSL_CN
+              value: <SSL_CN>
           image: <NAME>:<image-tag>
           imagePullPolicy: Always
           name: frontend
           ports:
             - containerPort: 80
               name: http
+              protocol: TCP
+            - containerPort: 443
+              name: https
               protocol: TCP

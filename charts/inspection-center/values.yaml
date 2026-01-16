@@ -49,10 +49,16 @@ frontend:
     pullPolicy: Always
   env:
     API_SERVER: http://backend:8000
+    SSL_CN: inspect.local
   service:
     type: NodePort
     port: 80
     targetPort: 80
+    nodePort: null
+    httpsEnabled: true
+    httpsPort: 443
+    httpsTargetPort: 443
+    httpsNodePort: null
   resources: {}
   nodeSelector: {}
   tolerations: []

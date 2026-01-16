@@ -34,6 +34,11 @@ spec:
             - containerPort: {{ .Values.frontend.service.targetPort }}
               name: http
               protocol: TCP
+            {{- if .Values.frontend.service.httpsEnabled }}
+            - containerPort: {{ .Values.frontend.service.httpsTargetPort | default 443 }}
+              name: https
+              protocol: TCP
+            {{- end }}
           env:
             {{- range $name, $value := .Values.frontend.env }}
             - name: {{ $name }}
