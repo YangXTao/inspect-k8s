@@ -12,6 +12,7 @@ import {
   InspectionRunListItem,
   InspectionSchedule,
   LicenseStatus,
+  AuthUser,
 } from "./types";
 
 const API_BASE = appConfig.apiBaseUrl.replace(/\/$/, "");
@@ -50,6 +51,7 @@ async function request<T>(
         ...headers,
         ...(init?.headers || {}),
       },
+      credentials: "include",
     });
   } catch (err) {
     if (
@@ -78,6 +80,34 @@ async function request<T>(
   return (await response.json()) as T;
 }
 
+export function getCurrentUser(): Promise<AuthUser> {
+  return request<AuthUser>("/auth/me");
+}
+
+export function login(username: string, password: string): Promise<AuthUser> {
+  return request<AuthUser>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export function logout(): Promise<Record<string, string>> {
+  return request<Record<string, string>>("/auth/logout", { method: "POST" });
+}
+
+export function changePassword(
+  oldPassword: string,
+  newPassword: string
+): Promise<Record<string, string>> {
+  return request<Record<string, string>>("/auth/password", {
+    method: "POST",
+    body: JSON.stringify({
+      old_password: oldPassword,
+      new_password: newPassword,
+    }),
+  });
+}
+
 export function getInspectionItems(): Promise<InspectionItem[]> {
   return request<InspectionItem[]>("/inspection-items");
 }
@@ -89,6 +119,7 @@ export function exportInspectionItems(): Promise<InspectionItemsExportPayload> {
 export async function exportInspectionItemsYaml(): Promise<string> {
   const response = await fetch(`${API_BASE}/inspection-items/export-yaml`, {
     headers: { Accept: "text/yaml" },
+    credentials: "include",
   });
   if (!response.ok) {
     const message = await response.text();

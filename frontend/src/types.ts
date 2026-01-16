@@ -11,6 +11,13 @@
 
 export type ExecutionMode = "server" | "agent";
 
+export type AuthUser = {
+  id: number;
+  username: string;
+  display_name?: string | null;
+  role: string;
+};
+
 export type ClusterConfig = {
   id: number;
   name: string;

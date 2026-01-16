@@ -14,14 +14,37 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Any, Generator, Iterable
 from uuid import uuid4
 import yaml
-from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, UploadFile, Query, Header
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    Query,
+    Header,
+    Request,
+    Response,
+)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
 from . import crud, models, schemas
 from .cron import CronValidationError, parse_cron_expression
+from .auth import (
+    AUTH_COOKIE_NAME,
+    COOKIE_SAMESITE,
+    COOKIE_SECURE,
+    SESSION_TTL_HOURS,
+    create_session,
+    ensure_default_admin,
+    get_user_from_session,
+    hash_password,
+    verify_password,
+)
 from .database import SessionLocal, ensure_runtime_directories, init_db
 from .inspections import CheckContext, DEFAULT_CHECKS, dispatch_checks
 from .license import LicenseError, license_manager
@@ -750,6 +773,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+PUBLIC_AUTH_PREFIXES = (
+    "/auth/login",
+    "/agent",
+    "/health",
+    "/system-agent-install.sh",
+    "/openapi.json",
+    "/docs",
+    "/redoc",
+)
+
+
+@app.middleware("http")
+async def require_authentication(request: Request, call_next):
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    path = request.url.path
+    if any(path.startswith(prefix) for prefix in PUBLIC_AUTH_PREFIXES):
+        return await call_next(request)
+    with SessionLocal() as db:
+        user = get_user_from_session(db, request.cookies.get(AUTH_COOKIE_NAME))
+        if not user:
+            return JSONResponse(status_code=401, content={"detail": "未登录"})
+        request.state.user = user
+    return await call_next(request)
+
 
 def get_db() -> Session:
     db = SessionLocal()
@@ -757,6 +805,15 @@ def get_db() -> Session:
         yield db
     finally:
         db.close()
+
+
+def get_current_user(
+    request: Request, db: Session = Depends(get_db)
+) -> models.AuthUser:
+    user = get_user_from_session(db, request.cookies.get(AUTH_COOKIE_NAME))
+    if not user:
+        raise HTTPException(status_code=401, detail="未登录")
+    return user
 
 
 def _seed_defaults(db: Session) -> None:
@@ -1052,6 +1109,7 @@ def on_startup() -> None:
     init_db()
     with SessionLocal() as db:
         _seed_defaults(db)
+        ensure_default_admin(db)
     inspection_scheduler.start()
 
 
@@ -1062,6 +1120,97 @@ def on_shutdown() -> None:
 
 @app.get("/health")
 def health_check() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.post("/auth/login", response_model=schemas.AuthUserOut)
+def login(
+    payload: schemas.AuthLoginIn,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> schemas.AuthUserOut:
+    user = (
+        db.query(models.AuthUser)
+        .filter(models.AuthUser.username == payload.username.strip())
+        .first()
+    )
+    if not user or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="账号已停用")
+    session = create_session(db, user)
+    user.last_login_at = datetime.utcnow()
+    db.add(user)
+    db.add(session)
+    db.commit()
+    max_age = SESSION_TTL_HOURS * 3600
+    cookie_samesite = (
+        COOKIE_SAMESITE
+        if COOKIE_SAMESITE in {"lax", "strict", "none"}
+        else "lax"
+    )
+    response.set_cookie(
+        AUTH_COOKIE_NAME,
+        session.id,
+        max_age=max_age,
+        expires=session.expires_at,
+        httponly=True,
+        samesite=cookie_samesite,
+        secure=COOKIE_SECURE,
+    )
+    return schemas.AuthUserOut.model_validate(user)
+
+
+@app.post("/auth/logout")
+def logout(
+    response: Response,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    session_id = request.cookies.get(AUTH_COOKIE_NAME)
+    if session_id:
+        session = (
+            db.query(models.AuthSession)
+            .filter(models.AuthSession.id == session_id)
+            .first()
+        )
+        if session:
+            db.delete(session)
+            db.commit()
+    response.delete_cookie(AUTH_COOKIE_NAME)
+    return {"status": "ok"}
+
+
+@app.get("/auth/me", response_model=schemas.AuthUserOut)
+def me(current_user: models.AuthUser = Depends(get_current_user)) -> schemas.AuthUserOut:
+    return schemas.AuthUserOut.model_validate(current_user)
+
+
+@app.post("/auth/password")
+def change_password(
+    payload: schemas.AuthPasswordChangeIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+) -> dict[str, str]:
+    if not verify_password(payload.old_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="当前密码不正确")
+    if payload.old_password == payload.new_password:
+        raise HTTPException(status_code=400, detail="新密码不能与当前密码相同")
+    current_user.password_hash = hash_password(payload.new_password)
+    current_user.updated_at = datetime.utcnow()
+    session_id = request.cookies.get(AUTH_COOKIE_NAME)
+    if session_id:
+        (
+            db.query(models.AuthSession)
+            .filter(
+                models.AuthSession.user_id == current_user.id,
+                models.AuthSession.id != session_id,
+            )
+            .delete(synchronize_session=False)
+        )
+    db.add(current_user)
+    db.commit()
     return {"status": "ok"}
 
 

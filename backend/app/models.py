@@ -283,3 +283,43 @@ class InspectionAgent(Base):
 
     cluster = relationship("ClusterConfig", back_populates="agents", foreign_keys=[cluster_id])
     runs = relationship("InspectionRun", back_populates="agent")
+
+
+class AuthUser(Base):
+    __tablename__ = "auth_users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(100), unique=True, nullable=False)
+    display_name = Column(String(100), nullable=False, default="")
+    password_hash = Column(String(255), nullable=False)
+    role = Column(String(50), nullable=False, default="admin")
+    is_active = Column(Boolean, nullable=False, default=True)
+    auth_provider = Column(String(20), nullable=False, default="local")
+    external_id = Column(String(150), nullable=True)
+    last_login_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    sessions = relationship(
+        "AuthSession",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+
+    id = Column(String(64), primary_key=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("auth_users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_seen_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime, nullable=False)
+
+    user = relationship("AuthUser", back_populates="sessions")

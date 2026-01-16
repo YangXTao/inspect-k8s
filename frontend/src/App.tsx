@@ -43,6 +43,10 @@ import {
   getInspectionSchedules,
   getLicenseStatus,
   getReportDownloadUrl,
+  getCurrentUser,
+  logout,
+  changePassword,
+  login,
   importInspectionItems,
   pauseInspectionRun,
   refreshClusterNodes,
@@ -73,6 +77,7 @@ import type {
   InspectionRunStatus,
   InspectionSchedule,
   LicenseStatus,
+  AuthUser,
 } from "./types";
 
 type NoticeType = "success" | "warning" | "error" | null;
@@ -3614,6 +3619,9 @@ interface SettingsModalProps {
   activeTabId: string;
   onTabChange: (tabId: string) => void;
   onClose: () => void;
+  user?: AuthUser | null;
+  onLogout?: () => void;
+  onChangePassword?: () => void;
   confirmState?: ConfirmDialogState | null;
   onConfirmClose?: () => void;
 }
@@ -3625,6 +3633,9 @@ const SettingsModal = ({
   activeTabId,
   onTabChange,
   onClose,
+  user,
+  onLogout,
+  onChangePassword,
   confirmState,
   onConfirmClose,
 }: SettingsModalProps) => {
@@ -3719,6 +3730,37 @@ const SettingsModal = ({
                 {tab.label}
               </button>
             ))}
+            {user && (
+              <div className="settings-user-card">
+                <div className="settings-user-avatar">
+                  {(user.display_name || user.username || "A")[0]?.toUpperCase()}
+                </div>
+                <div className="settings-user-info">
+                  <div className="settings-user-name">
+                    {user.display_name || user.username}
+                  </div>
+                  <div className="settings-user-meta">
+                    账号：{user.username}
+                  </div>
+                  <div className="settings-user-actions">
+                    <button
+                      type="button"
+                      className="secondary ghost"
+                      onClick={onChangePassword}
+                    >
+                      修改密码
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary danger"
+                      onClick={onLogout}
+                    >
+                      退出登录
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </nav>
           <section className="settings-modal-main">
             {currentTab.render({
@@ -7655,33 +7697,322 @@ const ClusterNodesView = ({
     );
   };
 
+interface LoginViewProps {
+  loading: boolean;
+  error: string | null;
+  onSubmit: (username: string, password: string) => Promise<void>;
+}
+
+const LoginView = ({ loading, error, onSubmit }: LoginViewProps) => {
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("");
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!username.trim() || !password) {
+      setLocalError("请输入账号和密码");
+      return;
+    }
+    setLocalError(null);
+    await onSubmit(username.trim(), password);
+  };
+
+  return (
+    <div className="login-page">
+      <div className="login-card">
+        <div className="login-header">
+          <h1>Kubernetes 巡检中心</h1>
+          <p>请先登录以继续使用系统</p>
+        </div>
+        {(localError || error) && (
+          <div className="feedback error">{localError ?? error}</div>
+        )}
+        <form className="login-form" onSubmit={handleSubmit}>
+          <label>
+            账号
+            <input
+              type="text"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              placeholder="请输入账号"
+              disabled={loading}
+              autoFocus
+            />
+          </label>
+          <label>
+            密码
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="请输入密码"
+              disabled={loading}
+            />
+          </label>
+          <button type="submit" className="primary" disabled={loading}>
+            {loading ? "登录中..." : "登录"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+interface PasswordModalProps {
+  open: boolean;
+  submitting: boolean;
+  error: string | null;
+  notice: string | null;
+  onClose: () => void;
+  onSubmit: (oldPassword: string, newPassword: string) => Promise<void>;
+}
+
+const PasswordModal = ({
+  open,
+  submitting,
+  error,
+  notice,
+  onClose,
+  onSubmit,
+}: PasswordModalProps) => {
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setOldPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setLocalError(null);
+    }
+  }, [open]);
+
+  if (!open) {
+    return null;
+  }
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!oldPassword || !newPassword) {
+      setLocalError("请完整填写当前密码和新密码");
+      return;
+    }
+    if (newPassword.length < 6) {
+      setLocalError("新密码至少 6 位");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setLocalError("两次输入的新密码不一致");
+      return;
+    }
+    setLocalError(null);
+    await onSubmit(oldPassword, newPassword);
+  };
+
+  return (
+    <div className="modal-backdrop" aria-modal="true">
+      <div className="modal" role="dialog" aria-label="修改密码">
+        <h3>修改密码</h3>
+        {(localError || error) && (
+          <div className="feedback error">{localError ?? error}</div>
+        )}
+        {notice && <div className="feedback success">{notice}</div>}
+        <form onSubmit={handleSubmit}>
+          <label>
+            当前密码
+            <input
+              type="password"
+              value={oldPassword}
+              onChange={(event) => setOldPassword(event.target.value)}
+              disabled={submitting}
+            />
+          </label>
+          <label>
+            新密码
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+              disabled={submitting}
+            />
+          </label>
+          <label>
+            确认新密码
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              disabled={submitting}
+            />
+          </label>
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="secondary"
+              onClick={onClose}
+              disabled={submitting}
+            >
+              取消
+            </button>
+            <button type="submit" className="primary" disabled={submitting}>
+              {submitting ? "保存中..." : "确认修改"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
 const App = () => {
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const [passwordSubmitting, setPasswordSubmitting] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordNotice, setPasswordNotice] = useState<string | null>(null);
+
   const [clusters, setClusters] = useState<ClusterConfig[]>([]);
   const [agents, setAgents] = useState<InspectionAgent[]>([]);
   const [runs, setRuns] = useState<InspectionRunListItem[]>([]);
   const [items, setItems] = useState<InspectionItem[]>([]);
   const [schedules, setSchedules] = useState<InspectionSchedule[]>([]);
+  const isAuthenticated = authUser !== null;
 
   const [clusterError, setClusterError] = useState<string | null>(null);
-const [clusterNotice, setClusterNotice] = useState<string | null>(null);
-const [clusterNoticeType, setClusterNoticeType] =
-  useState<NoticeType>(null);
-const [clusterNoticeScope, setClusterNoticeScope] =
-  useState<NoticeScope | null>(null);
-const clearClusterNotice = useCallback(() => {
-  setClusterNotice(null);
-  setClusterNoticeType(null);
-  setClusterNoticeScope(null);
-}, []);
-const showClusterNotice = useCallback(
-  (scope: NoticeScope, message: string, type: Exclude<NoticeType, null>) => {
-    setClusterNotice(message);
-    setClusterNoticeType(type);
-    setClusterNoticeScope(scope);
-  },
-  []
-);
-const [clusterUploading, setClusterUploading] = useState(false);
+  const [clusterNotice, setClusterNotice] = useState<string | null>(null);
+  const [clusterNoticeType, setClusterNoticeType] =
+    useState<NoticeType>(null);
+  const [clusterNoticeScope, setClusterNoticeScope] =
+    useState<NoticeScope | null>(null);
+  const clearClusterNotice = useCallback(() => {
+    setClusterNotice(null);
+    setClusterNoticeType(null);
+    setClusterNoticeScope(null);
+  }, []);
+  const showClusterNotice = useCallback(
+    (scope: NoticeScope, message: string, type: Exclude<NoticeType, null>) => {
+      setClusterNotice(message);
+      setClusterNoticeType(type);
+      setClusterNoticeScope(scope);
+    },
+    []
+  );
+  const [clusterUploading, setClusterUploading] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      setAuthLoading(true);
+      try {
+        const user = await getCurrentUser();
+        if (cancelled) {
+          return;
+        }
+        setAuthUser(user);
+        setAuthError(null);
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+        const message =
+          err instanceof Error ? err.message : "获取登录状态失败";
+        if (message === "未登录") {
+          setAuthUser(null);
+          setAuthError(null);
+        } else {
+          setAuthUser(null);
+          setAuthError(message);
+        }
+      } finally {
+        if (!cancelled) {
+          setAuthLoading(false);
+          setAuthChecked(true);
+        }
+      }
+    };
+    void check();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleLogin = useCallback(
+    async (username: string, password: string) => {
+      setAuthSubmitting(true);
+      setAuthError(null);
+      try {
+        const user = await login(username, password);
+        setAuthUser(user);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "登录失败";
+        setAuthError(message);
+      } finally {
+        setAuthSubmitting(false);
+      }
+    },
+    []
+  );
+
+  const handleLogout = useCallback(async () => {
+    setAuthSubmitting(true);
+    setAuthError(null);
+    try {
+      await logout();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "退出登录失败";
+      setAuthError(message);
+    } finally {
+      setAuthSubmitting(false);
+      setAuthUser(null);
+      setAuthChecked(true);
+      setSettingsOpen(false);
+      setClusters([]);
+      setAgents([]);
+      setRuns([]);
+      setItems([]);
+      setSchedules([]);
+    }
+  }, []);
+
+  const handleOpenPasswordModal = useCallback(() => {
+    setPasswordError(null);
+    setPasswordNotice(null);
+    setPasswordModalOpen(true);
+  }, []);
+
+  const handleClosePasswordModal = useCallback(() => {
+    setPasswordModalOpen(false);
+    setPasswordError(null);
+    setPasswordNotice(null);
+  }, []);
+
+  const handleChangePassword = useCallback(
+    async (oldPassword: string, newPassword: string) => {
+      setPasswordSubmitting(true);
+      setPasswordError(null);
+      setPasswordNotice(null);
+      try {
+        await changePassword(oldPassword, newPassword);
+        setPasswordNotice("密码已更新");
+        setPasswordModalOpen(false);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "修改密码失败";
+        setPasswordError(message);
+      } finally {
+        setPasswordSubmitting(false);
+      }
+    },
+    []
+  );
   const [clusterNameInput, setClusterNameInput] = useState("");
   const [clusterPromInput, setClusterPromInput] = useState("");
   const [clusterDefaultAgentIdInput, setClusterDefaultAgentIdInput] =
@@ -7725,12 +8056,12 @@ const [clusterUploading, setClusterUploading] = useState(false);
   const [agentNotice, setAgentNotice] = useState<string | null>(null);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [agentSubmitting, setAgentSubmitting] = useState(false);
-const [generatedAgentCommand, setGeneratedAgentCommand] = useState<string | null>(
-  null
-);
-const [pendingRefreshTargets, setPendingRefreshTargets] = useState<
-  Record<number, number>
->({});
+  const [generatedAgentCommand, setGeneratedAgentCommand] = useState<
+    string | null
+  >(null);
+  const [pendingRefreshTargets, setPendingRefreshTargets] = useState<
+    Record<number, number>
+  >({});
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSubmitting, setSettingsSubmitting] = useState(false);
@@ -7857,21 +8188,24 @@ const [pendingRefreshTargets, setPendingRefreshTargets] = useState<
   }, []);
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
     void refreshLicenseStatus();
-  }, [refreshLicenseStatus]);
+  }, [isAuthenticated, refreshLicenseStatus]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === "undefined" || !isAuthenticated) {
       return;
     }
     const intervalId = window.setInterval(() => {
       void refreshLicenseStatus();
     }, LICENSE_POLL_INTERVAL);
     return () => window.clearInterval(intervalId);
-  }, [refreshLicenseStatus]);
+  }, [isAuthenticated, refreshLicenseStatus]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === "undefined" || !isAuthenticated) {
       return;
     }
     const handleFocus = () => {
@@ -7879,10 +8213,10 @@ const [pendingRefreshTargets, setPendingRefreshTargets] = useState<
     };
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
-  }, [refreshLicenseStatus]);
+  }, [isAuthenticated, refreshLicenseStatus]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === "undefined" || !isAuthenticated) {
       return;
     }
     const expiresAt = parseDateValue(licenseStatus?.expires_at);
@@ -7900,7 +8234,7 @@ const [pendingRefreshTargets, setPendingRefreshTargets] = useState<
       Math.max(0, delay + 1000)
     );
     return () => window.clearTimeout(timerId);
-  }, [licenseStatus?.expires_at, refreshLicenseStatus]);
+  }, [isAuthenticated, licenseStatus?.expires_at, refreshLicenseStatus]);
 
   const refreshAgents = useCallback(async () => {
     try {
@@ -8347,7 +8681,7 @@ const backgroundLocation =
   );
 
   useEffect(() => {
-    if (!hasRunningRuns || typeof window === "undefined") {
+    if (!isAuthenticated || !hasRunningRuns || typeof window === "undefined") {
       return;
     }
     let cancelled = false;
@@ -8385,7 +8719,7 @@ const backgroundLocation =
         window.clearTimeout(timerId);
       }
     };
-  }, [hasRunningRuns, refreshRuns]);
+  }, [isAuthenticated, hasRunningRuns, refreshRuns]);
 
   const refreshItems = useCallback(async () => {
     try {
@@ -8472,14 +8806,17 @@ const backgroundLocation =
   }, [location.pathname, navigate]);
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
     void refreshClusters();
     void refreshRuns();
     void refreshItems();
     void refreshSchedules();
-  }, [refreshClusters, refreshRuns, refreshItems, refreshSchedules]);
+  }, [isAuthenticated, refreshClusters, refreshRuns, refreshItems, refreshSchedules]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === "undefined" || !isAuthenticated) {
       return;
     }
     const timer = window.setInterval(() => {
@@ -8488,10 +8825,10 @@ const backgroundLocation =
     return () => {
       window.clearInterval(timer);
     };
-  }, [refreshClusters]);
+  }, [isAuthenticated, refreshClusters]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === "undefined" || !isAuthenticated) {
       return;
     }
     if (!location.pathname.startsWith("/schedule")) {
@@ -8503,10 +8840,14 @@ const backgroundLocation =
     return () => {
       window.clearInterval(timer);
     };
-  }, [location.pathname, refreshSchedules]);
+  }, [isAuthenticated, location.pathname, refreshSchedules]);
 
   useEffect(() => {
-    if (pendingClusterIds.length === 0 || typeof window === "undefined") {
+    if (
+      !isAuthenticated ||
+      pendingClusterIds.length === 0 ||
+      typeof window === "undefined"
+    ) {
       return;
     }
     const timer = window.setInterval(() => {
@@ -8515,7 +8856,7 @@ const backgroundLocation =
     return () => {
       window.clearInterval(timer);
     };
-  }, [pendingClusterIds, refreshClusters]);
+  }, [isAuthenticated, pendingClusterIds, refreshClusters]);
 
   useEffect(() => {
     setPendingRefreshTargets((prev) => {
@@ -8545,6 +8886,7 @@ const backgroundLocation =
 
   useEffect(() => {
     if (
+      !isAuthenticated ||
       !Object.keys(pendingRefreshTargets).length ||
       typeof window === "undefined"
     ) {
@@ -8556,7 +8898,7 @@ const backgroundLocation =
     return () => {
       window.clearInterval(timer);
     };
-  }, [pendingRefreshTargets, refreshClusters]);
+  }, [isAuthenticated, pendingRefreshTargets, refreshClusters]);
 
   const resetClusterUploadForm = () => {
     setClusterNameInput("");
@@ -10195,6 +10537,29 @@ const hasManualKubeconfig = useMemo(
     />
   );
 
+  if (!authChecked) {
+    return (
+      <div className="login-page">
+        <div className="login-card">
+          <div className="login-header">
+            <h1>Kubernetes 巡检中心</h1>
+            <p>正在校验登录状态...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!authUser) {
+    return (
+      <LoginView
+        loading={authSubmitting}
+        error={authError}
+        onSubmit={handleLogin}
+      />
+    );
+  }
+
   return (
     <>
       <Helmet>
@@ -10326,6 +10691,15 @@ const hasManualKubeconfig = useMemo(
         onClear={handleKubeconfigClear}
       />
 
+      <PasswordModal
+        open={passwordModalOpen}
+        submitting={passwordSubmitting}
+        error={passwordError}
+        notice={passwordNotice}
+        onClose={handleClosePasswordModal}
+        onSubmit={handleChangePassword}
+      />
+
       <ConfirmationModal
         state={confirmState && confirmState.scope !== "settings" ? confirmState : null}
         onClose={() => setConfirmState(null)}
@@ -10336,6 +10710,9 @@ const hasManualKubeconfig = useMemo(
         tabs={settingsTabs}
         initialTabId="overview"
         onClose={handleCloseSettings}
+        user={authUser}
+        onLogout={handleLogout}
+        onChangePassword={handleOpenPasswordModal}
         confirmState={
           confirmState && confirmState.scope === "settings"
             ? confirmState

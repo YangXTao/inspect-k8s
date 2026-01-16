@@ -492,3 +492,22 @@ class LicenseStatusOut(BaseModel):
 
 class LicenseImportPayload(BaseModel):
     content: str = Field(..., min_length=1, description="加密或明文 License 内容")
+
+
+class AuthLoginIn(BaseModel):
+    username: str = Field(..., min_length=1, max_length=100)
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class AuthUserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str
+    display_name: Optional[str] = None
+    role: str
+
+
+class AuthPasswordChangeIn(BaseModel):
+    old_password: str = Field(..., min_length=1, max_length=128)
+    new_password: str = Field(..., min_length=6, max_length=128)

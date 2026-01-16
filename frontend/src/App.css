@@ -11,6 +11,69 @@ body {
   margin: 0;
 }
 
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+  background: radial-gradient(circle at top, #e0e7ff 0%, #f8fafc 55%);
+}
+
+.login-card {
+  width: min(420px, 100%);
+  background: #ffffff;
+  border-radius: 20px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.08);
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.login-header h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+  color: #0f172a;
+}
+
+.login-header p {
+  margin: 0;
+  font-size: 14px;
+  color: #64748b;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.login-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #334155;
+}
+
+.login-form input {
+  border-radius: 10px;
+  border: 1px solid #cbd5f5;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: #0f172a;
+  background: #ffffff;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.login-form input:focus {
+  outline: none;
+  border-color: #1d4ed8;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
 .top-navigation {
   position: sticky;
   top: 0;
@@ -1782,6 +1845,62 @@ th {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
   max-height: 100%;
   overflow-y: auto;
+}
+
+.settings-user-card {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid #dbe2f7;
+  background: #eef2ff;
+  color: #1e293b;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.settings-user-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #1d4ed8;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.settings-user-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.settings-user-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.settings-user-meta {
+  color: #475569;
+}
+
+.settings-user-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.settings-user-actions button {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 12px;
+  border-radius: 8px;
+  box-shadow: none;
 }
 
 .settings-nav-button {
