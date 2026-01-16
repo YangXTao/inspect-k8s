@@ -107,11 +107,11 @@ def _dispatch_schedule_runs(
     *,
     operator_label: str,
     multi_version_label: str,
-) -> None:
+) -> int:
     item_ids = schedule.item_ids
     cluster_ids = schedule.cluster_ids
     if not item_ids or not cluster_ids:
-        return
+        return 0
 
     items = [
         item
@@ -119,12 +119,13 @@ def _dispatch_schedule_runs(
         if not item.is_archived
     ]
     if not items:
-        return
+        return 0
 
     plan_json = _build_run_plan(items)
     prometheus_version = _derive_prometheus_version(items, multi_version_label)
     operator = _format_schedule_operator(schedule.name, operator_label)
 
+    created = 0
     for cluster_id in cluster_ids:
         cluster = crud.get_cluster(db, cluster_id)
         if not cluster or cluster.is_archived:
@@ -145,6 +146,8 @@ def _dispatch_schedule_runs(
             agent_status="queued",
             agent_id=agent.id,
         )
+        created += 1
+    return created
 
 
 class InspectionScheduler:
@@ -209,13 +212,14 @@ class InspectionScheduler:
                         schedule.cron,
                     )
                     continue
-                _dispatch_schedule_runs(
+                created = _dispatch_schedule_runs(
                     db,
                     schedule,
                     operator_label=self._operator_label,
                     multi_version_label=self._multi_version_label,
                 )
-                schedule.last_run_at = now
-                schedule.updated_at = now
-                db.add(schedule)
-                db.commit()
+                if created > 0:
+                    schedule.last_run_at = now
+                    schedule.updated_at = now
+                    db.add(schedule)
+                    db.commit()

@@ -136,6 +136,16 @@ def update_cluster(
 def delete_cluster(db: Session, cluster: models.ClusterConfig) -> None:
     cluster_id = cluster.id
     cluster_name = cluster.name
+    schedules = db.query(models.InspectionSchedule).all()
+    for schedule in schedules:
+        if cluster_id not in schedule.cluster_ids:
+            continue
+        name_map = schedule.cluster_name_map
+        if cluster_id not in name_map:
+            name_map[cluster_id] = cluster_name
+            schedule.set_cluster_name_map(name_map)
+            schedule.updated_at = datetime.utcnow()
+            db.add(schedule)
     related_agents = (
         db.query(models.InspectionAgent)
         .filter(
@@ -864,8 +874,15 @@ def create_inspection_schedule(
     payload = schedule_in.model_dump()
     cluster_ids = payload.pop("cluster_ids", [])
     item_ids = payload.pop("item_ids", [])
+    cluster_name_map = {
+        cluster.id: cluster.name
+        for cluster in db.query(models.ClusterConfig)
+        .filter(models.ClusterConfig.id.in_(cluster_ids))
+        .all()
+    }
     schedule = models.InspectionSchedule(**payload)
     schedule.set_cluster_ids(cluster_ids)
+    schedule.set_cluster_name_map(cluster_name_map)
     schedule.set_item_ids(item_ids)
     db.add(schedule)
     db.commit()
@@ -885,9 +902,21 @@ def update_inspection_schedule(
     schedule: models.InspectionSchedule,
     schedule_in: schemas.InspectionScheduleUpdate,
 ) -> models.InspectionSchedule:
+    previous_name_map = schedule.cluster_name_map
     payload = schedule_in.model_dump(exclude_unset=True)
     if "cluster_ids" in payload:
-        schedule.set_cluster_ids(payload.pop("cluster_ids") or [])
+        cluster_ids = payload.pop("cluster_ids") or []
+        schedule.set_cluster_ids(cluster_ids)
+        current_name_map = {
+            cluster.id: cluster.name
+            for cluster in db.query(models.ClusterConfig)
+            .filter(models.ClusterConfig.id.in_(cluster_ids))
+            .all()
+        }
+        for cluster_id in cluster_ids:
+            if cluster_id not in current_name_map and cluster_id in previous_name_map:
+                current_name_map[cluster_id] = previous_name_map[cluster_id]
+        schedule.set_cluster_name_map(current_name_map)
     if "item_ids" in payload:
         schedule.set_item_ids(payload.pop("item_ids") or [])
     for key, value in payload.items():
