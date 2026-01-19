@@ -150,57 +150,120 @@ const DEFAULT_PROMETHEUS_VERSION_OPTIONS = [
 ];
 const PROMETHEUS_VERSION_STORAGE_KEY = "prometheusVersionOptions.v1";
 const DEFAULT_SCHEDULE_CRON = ["0", "0", "*", "*", "*"] as const;
-const ROLE_PERMISSION_SECTIONS = [
+type RolePermissionOption = {
+  key: string;
+  label: string;
+};
+
+type RolePermissionRow = {
+  label: string;
+  options: RolePermissionOption[];
+};
+
+type RolePermissionBlock = {
+  title?: string;
+  rows: RolePermissionRow[];
+};
+
+const ROLE_PERMISSION_BLOCKS: RolePermissionBlock[] = [
   {
-    title: "定时巡检",
-    items: [
-      { key: "schedule.read", label: "查看" },
-      { key: "schedule.create", label: "新增" },
-      { key: "schedule.update", label: "修改" },
-      { key: "schedule.delete", label: "删除" },
+    rows: [
+      {
+        label: "定时巡检",
+        options: [
+          { key: "schedule.read", label: "查看" },
+          { key: "schedule.create", label: "新增" },
+          { key: "schedule.update", label: "修改" },
+          { key: "schedule.delete", label: "删除" },
+        ],
+      },
     ],
   },
   {
-    title: "历史巡检",
-    items: [
-      { key: "history.read", label: "查看" },
-      { key: "history.create", label: "新增" },
-      { key: "history.update", label: "修改" },
-      { key: "history.delete", label: "删除" },
+    rows: [
+      {
+        label: "历史巡检",
+        options: [
+          { key: "history.read", label: "查看" },
+          { key: "history.create", label: "新增" },
+          { key: "history.update", label: "修改" },
+          { key: "history.delete", label: "删除" },
+        ],
+      },
     ],
   },
   {
     title: "设置",
-    items: [
-      { key: "license.upload", label: "License 添加" },
-      { key: "license.view", label: "License 查看" },
-      { key: "prometheus.create", label: "Prometheus 版本 新增" },
-      { key: "prometheus.update", label: "Prometheus 版本 修改" },
-      { key: "prometheus.delete", label: "Prometheus 版本 删除" },
-      { key: "prometheus.read", label: "Prometheus 版本 查看" },
-      { key: "inspectionItem.create", label: "巡检项 新增" },
-      { key: "inspectionItem.update", label: "巡检项 修改" },
-      { key: "inspectionItem.delete", label: "巡检项 删除" },
-      { key: "inspectionItem.read", label: "巡检项 查看" },
-      { key: "role.create", label: "角色 新增" },
-      { key: "role.update", label: "角色 修改" },
-      { key: "role.delete", label: "角色 删除" },
-      { key: "role.read", label: "角色 查看" },
+    rows: [
+      {
+        label: "License",
+        options: [
+          { key: "license.upload", label: "添加" },
+          { key: "license.view", label: "查看" },
+        ],
+      },
+      {
+        label: "Prometheus 版本",
+        options: [
+          { key: "prometheus.create", label: "新增" },
+          { key: "prometheus.update", label: "修改" },
+          { key: "prometheus.delete", label: "删除" },
+          { key: "prometheus.read", label: "查看" },
+        ],
+      },
+      {
+        label: "巡检项",
+        options: [
+          { key: "inspectionItem.create", label: "新增" },
+          { key: "inspectionItem.update", label: "修改" },
+          { key: "inspectionItem.delete", label: "删除" },
+          { key: "inspectionItem.read", label: "查看" },
+        ],
+      },
+      {
+        label: "角色",
+        options: [
+          { key: "role.create", label: "新增" },
+          { key: "role.update", label: "修改" },
+          { key: "role.delete", label: "删除" },
+          { key: "role.read", label: "查看" },
+        ],
+      },
     ],
   },
   {
     title: "集群",
-    items: [
-      { key: "clusterAgent.create", label: "Agent/集群 新增" },
-      { key: "clusterAgent.update", label: "Agent/集群 修改" },
-      { key: "clusterAgent.delete", label: "Agent/集群 删除" },
-      { key: "clusterAgent.read", label: "Agent/集群 查看" },
-      { key: "runRecord.read", label: "巡检记录 查看" },
-      { key: "runRecord.delete", label: "巡检记录 删除" },
-      { key: "result.read", label: "巡检结果 查看" },
-      { key: "result.delete", label: "巡检结果 删除" },
-      { key: "report.read", label: "巡检报告 查看" },
-      { key: "report.delete", label: "巡检报告 删除" },
+    rows: [
+      {
+        label: "Agent/集群",
+        options: [
+          { key: "clusterAgent.create", label: "新增" },
+          { key: "clusterAgent.update", label: "修改" },
+          { key: "clusterAgent.delete", label: "删除" },
+          { key: "clusterAgent.read", label: "查看" },
+        ],
+      },
+      {
+        label: "巡检记录",
+        options: [
+          { key: "runRecord.read", label: "查看" },
+          { key: "runRecord.delete", label: "删除" },
+        ],
+      },
+      {
+        label: "巡检结果",
+        options: [
+          { key: "result.read", label: "查看" },
+          { key: "result.delete", label: "删除" },
+        ],
+      },
+      {
+        label: "巡检报告",
+        options: [
+          { key: "report.read", label: "查看" },
+          { key: "report.delete", label: "删除" },
+        ],
+      },
     ],
   },
 ];
@@ -6689,21 +6752,60 @@ const RoleEditorModal = ({
           <div className="role-permission-block">
             <div className="role-permission-title">权限配置</div>
             <div className="role-permission-grid">
-              {ROLE_PERMISSION_SECTIONS.map((section) => (
-                <div key={section.title} className="role-permission-group">
-                  <h4>{section.title}</h4>
-                  <div className="role-permission-list">
-                    {section.items.map((item) => (
-                      <label key={item.key}>
-                        <input
-                          type="checkbox"
-                          checked={selectedPermissions.includes(item.key)}
-                          onChange={() => handleTogglePermission(item.key)}
-                          disabled={submitting || isSystemRole}
-                        />
-                        <span>{item.label}</span>
-                      </label>
-                    ))}
+              {ROLE_PERMISSION_BLOCKS.map((block, blockIndex) => (
+                <div
+                  key={`${block.title ?? "block"}-${blockIndex}`}
+                  className="role-permission-group"
+                >
+                  {block.title && <h4>{block.title}</h4>}
+                  <div className="role-permission-dropdowns">
+                    {block.rows.map((row) => {
+                      const selectedItems = row.options.filter((item) =>
+                        selectedPermissions.includes(item.key)
+                      );
+                      return (
+                        <div key={row.label} className="role-permission-row">
+                          <div className="role-permission-row-head">
+                            <span className="role-permission-row-label">
+                              {row.label}
+                            </span>
+                            <details
+                              className="role-permission-dropdown"
+                              data-disabled={submitting || isSystemRole}
+                            >
+                              <summary>选择</summary>
+                              <div className="role-permission-options">
+                                {row.options.map((item) => (
+                                  <label key={item.key}>
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedPermissions.includes(item.key)}
+                                      onChange={() => handleTogglePermission(item.key)}
+                                      disabled={submitting || isSystemRole}
+                                    />
+                                    <span>{item.label}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </details>
+                          </div>
+                          <div className="role-permission-selected">
+                            {selectedItems.length === 0 ? (
+                              <span className="role-permission-empty">未选择</span>
+                            ) : (
+                              selectedItems.map((item) => (
+                                <span
+                                  key={item.key}
+                                  className="role-permission-tag"
+                                >
+                                  {item.label}
+                                </span>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ))}
