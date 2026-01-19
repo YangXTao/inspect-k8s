@@ -66,6 +66,8 @@ import {
   deleteRole,
   getUsers,
   createUser,
+  updateUser,
+  deleteUser,
 } from "./api";
 import { appConfig } from "./config";
 import CompanyLogoUrl from "./assets/company-logo.png?url";
@@ -6861,12 +6863,24 @@ interface UserSettingsPanelProps {
   notice: string | null;
   error: string | null;
   canCreate: boolean;
+  canUpdate: boolean;
+  canDelete: boolean;
   onCreate: (payload: {
     username: string;
     display_name?: string;
     password: string;
     roles: string[];
   }) => Promise<void>;
+  onUpdate: (
+    userId: number,
+    payload: {
+      display_name?: string;
+      password?: string;
+      roles?: string[];
+      is_active?: boolean;
+    }
+  ) => Promise<void>;
+  onDelete: (user: AuthUser) => void;
   onRefresh: () => Promise<AuthUser[] | null>;
 }
 
@@ -6878,10 +6892,15 @@ const UserSettingsPanel = ({
   notice,
   error,
   canCreate,
+  canUpdate,
+  canDelete,
   onCreate,
+  onUpdate,
+  onDelete,
   onRefresh,
 }: UserSettingsPanelProps) => {
   const [editorOpen, setEditorOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<AuthUser | null>(null);
   const [formUsername, setFormUsername] = useState("");
   const [formDisplayName, setFormDisplayName] = useState("");
   const [formPassword, setFormPassword] = useState("");
@@ -6901,6 +6920,7 @@ const UserSettingsPanel = ({
   }, [roles]);
 
   const openCreate = () => {
+    setEditingUser(null);
     setFormUsername("");
     setFormDisplayName("");
     setFormPassword("");
@@ -6909,8 +6929,25 @@ const UserSettingsPanel = ({
     setEditorOpen(true);
   };
 
+  const openEdit = (user: AuthUser) => {
+    const roleNames =
+      user.roles && user.roles.length > 0
+        ? user.roles
+        : user.role
+          ? [user.role]
+          : [];
+    setEditingUser(user);
+    setFormUsername(user.username);
+    setFormDisplayName(user.display_name || "");
+    setFormPassword("");
+    setSelectedRoles(roleNames);
+    setLocalError(null);
+    setEditorOpen(true);
+  };
+
   const handleCloseEditor = () => {
     setEditorOpen(false);
+    setEditingUser(null);
     setLocalError(null);
   };
 
@@ -6930,7 +6967,7 @@ const UserSettingsPanel = ({
       setLocalError("用户名不能为空");
       return;
     }
-    if (!trimmedPassword) {
+    if (!editingUser && !trimmedPassword) {
       setLocalError("密码不能为空");
       return;
     }
@@ -6939,12 +6976,20 @@ const UserSettingsPanel = ({
       return;
     }
     setLocalError(null);
-    await onCreate({
-      username: trimmedUsername,
-      display_name: formDisplayName.trim() || undefined,
-      password: trimmedPassword,
-      roles: selectedRoles,
-    });
+    if (editingUser) {
+      await onUpdate(editingUser.id, {
+        display_name: formDisplayName.trim() || undefined,
+        password: trimmedPassword || undefined,
+        roles: selectedRoles,
+      });
+    } else {
+      await onCreate({
+        username: trimmedUsername,
+        display_name: formDisplayName.trim() || undefined,
+        password: trimmedPassword,
+        roles: selectedRoles,
+      });
+    }
     setEditorOpen(false);
   };
 
@@ -7003,12 +7048,13 @@ const UserSettingsPanel = ({
                 <th>显示名称</th>
                 <th>角色</th>
                 <th>状态</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
               {sortedUsers.length === 0 && (
                 <tr>
-                  <td colSpan={4}>{loading ? "加载中..." : "暂无用户"}</td>
+                  <td colSpan={5}>{loading ? "加载中..." : "暂无用户"}</td>
                 </tr>
               )}
               {sortedUsers.map((user) => (
@@ -7016,7 +7062,27 @@ const UserSettingsPanel = ({
                   <td>{user.username}</td>
                   <td>{user.display_name || "-"}</td>
                   <td>{renderUserRoles(user)}</td>
-                  <td>启用</td>
+                  <td>{user.is_active === false ? "停用" : "启用"}</td>
+                  <td>
+                    <div className="table-actions">
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={() => openEdit(user)}
+                        disabled={!canUpdate || submitting}
+                      >
+                        编辑
+                      </button>
+                      <button
+                        type="button"
+                        className="link-button danger"
+                        onClick={() => onDelete(user)}
+                        disabled={!canDelete || submitting}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -7025,9 +7091,13 @@ const UserSettingsPanel = ({
       </div>
       {editorOpen && (
         <div className="modal-backdrop" aria-modal="true">
-          <div className="modal user-editor-modal" role="dialog" aria-label="创建用户">
+          <div
+            className="modal user-editor-modal"
+            role="dialog"
+            aria-label={editingUser ? "编辑用户" : "创建用户"}
+          >
             <div className="modal-header">
-              <h3>创建用户</h3>
+              <h3>{editingUser ? "编辑用户" : "创建用户"}</h3>
             </div>
             {localError && <div className="feedback error">{localError}</div>}
             <form className="settings-form" onSubmit={handleSubmit}>
@@ -7038,7 +7108,7 @@ const UserSettingsPanel = ({
                   value={formUsername}
                   onChange={(event) => setFormUsername(event.target.value)}
                   placeholder="例如：admin2"
-                  disabled={submitting}
+                  disabled={submitting || Boolean(editingUser)}
                 />
               </label>
               <label>
@@ -7057,7 +7127,7 @@ const UserSettingsPanel = ({
                   type="password"
                   value={formPassword}
                   onChange={(event) => setFormPassword(event.target.value)}
-                  placeholder="至少 6 位"
+                  placeholder={editingUser ? "留空则不修改" : "至少 6 位"}
                   disabled={submitting}
                 />
               </label>
@@ -9978,6 +10048,72 @@ const backgroundLocation =
     [canCreateUsers, refreshUsers]
   );
 
+  const handleUpdateUser = useCallback(
+    async (
+      userId: number,
+      payload: {
+        display_name?: string;
+        password?: string;
+        roles?: string[];
+        is_active?: boolean;
+      }
+    ) => {
+      if (!canUpdateUsers) {
+        setUsersError("无权限修改用户");
+        return;
+      }
+      setUsersSubmitting(true);
+      setUsersError(null);
+      setUsersNotice(null);
+      try {
+        await updateUser(userId, payload);
+        setUsersNotice("用户已更新");
+        await refreshUsers();
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "用户更新失败";
+        setUsersError(message);
+      } finally {
+        setUsersSubmitting(false);
+      }
+    },
+    [canUpdateUsers, refreshUsers]
+  );
+
+  const handleDeleteUser = useCallback(
+    (user: AuthUser) => {
+      if (!canDeleteUsers) {
+        setUsersError("无权限删除用户");
+        return;
+      }
+      setConfirmState({
+        title: "删除用户",
+        message: `确认删除用户(${user.username})？该操作不可恢复。`,
+        confirmLabel: "删除",
+        variant: "danger",
+        scope: "settings",
+        onConfirm: async () => {
+          setUsersSubmitting(true);
+          setUsersError(null);
+          setUsersNotice(null);
+          try {
+            await deleteUser(user.id);
+            setUsersNotice("用户已删除");
+            await refreshUsers();
+          } catch (err) {
+            const message =
+              err instanceof Error ? err.message : "用户删除失败";
+            setUsersError(message);
+            throw err instanceof Error ? err : new Error(message);
+          } finally {
+            setUsersSubmitting(false);
+          }
+        },
+      });
+    },
+    [canDeleteUsers, refreshUsers]
+  );
+
   const pendingClusterIds = useMemo(
     () =>
       clusters
@@ -11795,7 +11931,11 @@ const hasManualKubeconfig = useMemo(
               notice={usersNotice}
               error={usersError}
               canCreate={canCreateUsers}
+              canUpdate={canUpdateUsers}
+              canDelete={canDeleteUsers}
               onCreate={handleCreateUser}
+              onUpdate={handleUpdateUser}
+              onDelete={handleDeleteUser}
               onRefresh={refreshUsers}
             />
           ),
@@ -11862,11 +12002,15 @@ const hasManualKubeconfig = useMemo(
       canUpdateRoles,
       canDeleteRoles,
       canCreateUsers,
+      canUpdateUsers,
+      canDeleteUsers,
       handleCreateRole,
       handleUpdateRole,
       handleDeleteRole,
       refreshRoles,
       handleCreateUser,
+      handleUpdateUser,
+      handleDeleteUser,
       refreshUsers,
       licenseCapabilities,
       licenseUploading,

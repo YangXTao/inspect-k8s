@@ -18,6 +18,7 @@ export type AuthUser = {
   role: string;
   roles?: string[];
   permissions?: string[];
+  is_active?: boolean;
 };
 
 export type AuthRole = {

@@ -240,6 +240,27 @@ export function createUser(payload: {
   });
 }
 
+export function updateUser(
+  userId: number,
+  payload: {
+    display_name?: string;
+    password?: string;
+    roles?: string[];
+    is_active?: boolean;
+  }
+): Promise<AuthUser> {
+  return request<AuthUser>(`/users/${userId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteUser(userId: number): Promise<void> {
+  return request<void>(`/users/${userId}`, {
+    method: "DELETE",
+  });
+}
+
 export function getInspectionItems(): Promise<InspectionItem[]> {
   return request<InspectionItem[]>("/inspection-items");
 }

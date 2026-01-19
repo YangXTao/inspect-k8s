@@ -1497,6 +1497,53 @@ def create_user(
     return _serialize_user(user)
 
 
+@app.put("/users/{user_id}", response_model=schemas.AuthUserListOut)
+def update_user(
+    user_id: int,
+    payload: schemas.AuthUserUpdateIn,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "user.update", "用户修改")
+    user = db.query(models.AuthUser).filter(models.AuthUser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    update_payload = payload.model_dump(exclude_unset=True)
+    if "display_name" in update_payload:
+        user.display_name = (update_payload["display_name"] or user.username).strip()
+    if "password" in update_payload and update_payload["password"]:
+        user.password_hash = hash_password(update_payload["password"])
+    if "roles" in update_payload:
+        role_names = _normalize_user_roles(db, update_payload["roles"] or [])
+        user.role = role_names[0]
+        user.roles_json = json.dumps(role_names, ensure_ascii=True)
+    if "is_active" in update_payload:
+        if user.id == current_user.id and not update_payload["is_active"]:
+            raise HTTPException(status_code=400, detail="不能停用当前登录账号")
+        user.is_active = bool(update_payload["is_active"])
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return _serialize_user(user)
+
+
+@app.delete("/users/{user_id}", status_code=204)
+def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "user.delete", "用户删除")
+    user = db.query(models.AuthUser).filter(models.AuthUser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="不能删除当前登录账号")
+    db.delete(user)
+    db.commit()
+    return {}
+
+
 @app.get("/system-agent-install.sh", response_class=PlainTextResponse)
 def system_agent_install_script() -> str:
     return _build_system_agent_install_script()

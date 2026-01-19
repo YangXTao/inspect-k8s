@@ -542,6 +542,13 @@ class AuthUserCreateIn(BaseModel):
     roles: List[str] = Field(default_factory=list)
 
 
+class AuthUserUpdateIn(BaseModel):
+    display_name: Optional[str] = Field(default=None, max_length=100)
+    password: Optional[str] = Field(default=None, min_length=6, max_length=128)
+    roles: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+
+
 class AuthPasswordChangeIn(BaseModel):
     old_password: str = Field(..., min_length=1, max_length=128)
     new_password: str = Field(..., min_length=6, max_length=128)
