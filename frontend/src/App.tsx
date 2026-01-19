@@ -10620,14 +10620,12 @@ const hasManualKubeconfig = useMemo(
       if (!canDeleteClusterAgents) {
         const message = "当前账号无集群/Agent 删除权限。";
         setClusterError(message);
-        showClusterNotice("overview", message, "error");
         return Promise.resolve();
       }
       if (!licenseCapabilities.canManageClusters) {
         const message =
           licenseCapabilities.reason ?? "当前 License 不支持集群管理。";
         setClusterError(message);
-        showClusterNotice("overview", message, "error");
         return Promise.resolve();
       }
       const targets = clusters.filter((cluster) =>
@@ -10722,14 +10720,12 @@ const hasManualKubeconfig = useMemo(
       if (!canDeleteClusterAgents) {
         const message = "当前账号无集群/Agent 删除权限。";
         setClusterError(message);
-        showClusterNotice(currentNoticeScope, message, "error");
         return Promise.resolve();
       }
       if (!licenseCapabilities.canManageClusters) {
         const message =
           licenseCapabilities.reason ?? "当前 License 不支持集群管理。";
         setClusterError(message);
-        showClusterNotice(currentNoticeScope, message, "error");
         return Promise.resolve();
       }
       setConfirmState({
