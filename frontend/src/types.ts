@@ -16,6 +16,16 @@ export type AuthUser = {
   username: string;
   display_name?: string | null;
   role: string;
+  permissions?: string[];
+};
+
+export type AuthRole = {
+  id: number;
+  name: string;
+  display_name: string;
+  description?: string | null;
+  permissions: string[];
+  is_system: boolean;
 };
 
 export type AuthLoginChallenge = {

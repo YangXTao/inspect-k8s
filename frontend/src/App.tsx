@@ -42,6 +42,7 @@ import {
   getInspectionRuns,
   getInspectionSchedules,
   getLicenseStatus,
+  getRoles,
   getReportDownloadUrl,
   getCurrentUser,
   logout,
@@ -60,6 +61,9 @@ import {
   uploadLicense,
   uploadLicenseText,
   updateInspectionItem as apiUpdateInspectionItem,
+  createRole,
+  updateRole,
+  deleteRole,
 } from "./api";
 import { appConfig } from "./config";
 import CompanyLogoUrl from "./assets/company-logo.png?url";
@@ -78,6 +82,7 @@ import type {
   InspectionSchedule,
   LicenseStatus,
   AuthUser,
+  AuthRole,
 } from "./types";
 
 type NoticeType = "success" | "warning" | "error" | null;
@@ -145,6 +150,60 @@ const DEFAULT_PROMETHEUS_VERSION_OPTIONS = [
 ];
 const PROMETHEUS_VERSION_STORAGE_KEY = "prometheusVersionOptions.v1";
 const DEFAULT_SCHEDULE_CRON = ["0", "0", "*", "*", "*"] as const;
+const ROLE_PERMISSION_SECTIONS = [
+  {
+    title: "定时巡检",
+    items: [
+      { key: "schedule.read", label: "查看" },
+      { key: "schedule.create", label: "新增" },
+      { key: "schedule.update", label: "修改" },
+      { key: "schedule.delete", label: "删除" },
+    ],
+  },
+  {
+    title: "历史巡检",
+    items: [
+      { key: "history.read", label: "查看" },
+      { key: "history.create", label: "新增" },
+      { key: "history.update", label: "修改" },
+      { key: "history.delete", label: "删除" },
+    ],
+  },
+  {
+    title: "设置",
+    items: [
+      { key: "license.upload", label: "License 添加" },
+      { key: "license.view", label: "License 查看" },
+      { key: "prometheus.create", label: "Prometheus 版本 新增" },
+      { key: "prometheus.update", label: "Prometheus 版本 修改" },
+      { key: "prometheus.delete", label: "Prometheus 版本 删除" },
+      { key: "prometheus.read", label: "Prometheus 版本 查看" },
+      { key: "inspectionItem.create", label: "巡检项 新增" },
+      { key: "inspectionItem.update", label: "巡检项 修改" },
+      { key: "inspectionItem.delete", label: "巡检项 删除" },
+      { key: "inspectionItem.read", label: "巡检项 查看" },
+      { key: "role.create", label: "角色 新增" },
+      { key: "role.update", label: "角色 修改" },
+      { key: "role.delete", label: "角色 删除" },
+      { key: "role.read", label: "角色 查看" },
+    ],
+  },
+  {
+    title: "集群",
+    items: [
+      { key: "clusterAgent.create", label: "Agent/集群 新增" },
+      { key: "clusterAgent.update", label: "Agent/集群 修改" },
+      { key: "clusterAgent.delete", label: "Agent/集群 删除" },
+      { key: "clusterAgent.read", label: "Agent/集群 查看" },
+      { key: "runRecord.read", label: "巡检记录 查看" },
+      { key: "runRecord.delete", label: "巡检记录 删除" },
+      { key: "result.read", label: "巡检结果 查看" },
+      { key: "result.delete", label: "巡检结果 删除" },
+      { key: "report.read", label: "巡检报告 查看" },
+      { key: "report.delete", label: "巡检报告 删除" },
+    ],
+  },
+];
 
 const loadPrometheusVersionOptions = () => {
   if (typeof window === "undefined") {
@@ -204,6 +263,10 @@ const isLicenseRelatedMessage = (value?: string | null) => {
     return false;
   }
   const lower = trimmed.toLowerCase();
+  const readOnlyMessage = !license.canRunInspections
+    ? license.reason ?? "当前 License 不支持巡检项管理。"
+    : "当前账号无巡检项管理权限。";
+
   return (
     lower.includes("license") ||
     trimmed.includes("授权") ||
@@ -856,7 +919,15 @@ const logWithTimestamp = (
   logger(`[${timestamp}] ${message}`, ...details);
 };
 
-const TopNavigation = ({ onOpenSettings }: { onOpenSettings: () => void }) => {
+const TopNavigation = ({
+  onOpenSettings,
+  showSchedule,
+  showHistory,
+}: {
+  onOpenSettings: () => void;
+  showSchedule: boolean;
+  showHistory: boolean;
+}) => {
   const handleSettingsClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
     if (
       event.metaKey ||
@@ -889,46 +960,50 @@ const TopNavigation = ({ onOpenSettings }: { onOpenSettings: () => void }) => {
         <span className="top-navigation-title">Kubernetes 巡检中心</span>
       </Link>
       <nav className="top-navigation-links">
-        <NavLink
-          to="/schedule"
-          className={({ isActive }) =>
-            `top-navigation-link${isActive ? " active" : ""}`
-          }
-        >
-          <span className="top-navigation-link-inner">
-            <span className="top-navigation-link-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" focusable="false">
-                <path
-                  d="M7.5 3a.75.75 0 0 1 .75.75V6h7.5V3.75a.75.75 0 0 1 1.5 0V6h1.25A2.5 2.5 0 0 1 21 8.5v10A2.5 2.5 0 0 1 18.5 21h-13A2.5 2.5 0 0 1 3 18.5v-10A2.5 2.5 0 0 1 5.5 6h1.25V3.75A.75.75 0 0 1 7.5 3Zm11 9.5h-13v6a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-6Zm0-1.5v-2.5a1 1 0 0 0-1-1h-11a1 1 0 0 0-1 1V11h13Z"
-                  fill="currentColor"
-                />
-              </svg>
+        {showSchedule && (
+          <NavLink
+            to="/schedule"
+            className={({ isActive }) =>
+              `top-navigation-link${isActive ? " active" : ""}`
+            }
+          >
+            <span className="top-navigation-link-inner">
+              <span className="top-navigation-link-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path
+                    d="M7.5 3a.75.75 0 0 1 .75.75V6h7.5V3.75a.75.75 0 0 1 1.5 0V6h1.25A2.5 2.5 0 0 1 21 8.5v10A2.5 2.5 0 0 1 18.5 21h-13A2.5 2.5 0 0 1 3 18.5v-10A2.5 2.5 0 0 1 5.5 6h1.25V3.75A.75.75 0 0 1 7.5 3Zm11 9.5h-13v6a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-6Zm0-1.5v-2.5a1 1 0 0 0-1-1h-11a1 1 0 0 0-1 1V11h13Z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </span>
+              <span>定时巡检</span>
             </span>
-            <span>定时巡检</span>
-          </span>
-        </NavLink>
-        <NavLink
-          to="/history"
-          className={({ isActive }) =>
-            `top-navigation-link${isActive ? " active" : ""}`
-          }
-        >
-          <span className="top-navigation-link-inner">
-            <span className="top-navigation-link-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" focusable="false">
-                <path
-                  d="M12 6a.75.75 0 0 1 .75.75v4.19l3 1.8a.75.75 0 0 1-.75 1.3l-3.37-2.02a.75.75 0 0 1-.38-.65V6.75A.75.75 0 0 1 12 6Z"
-                  fill="currentColor"
-                />
-                <path
-                  d="M12 3.25A8.75 8.75 0 1 0 20.75 12 8.76 8.76 0 0 0 12 3.25Zm0 16a7.25 7.25 0 1 1 7.25-7.25A7.26 7.26 0 0 1 12 19.25Z"
-                  fill="currentColor"
-                />
-              </svg>
+          </NavLink>
+        )}
+        {showHistory && (
+          <NavLink
+            to="/history"
+            className={({ isActive }) =>
+              `top-navigation-link${isActive ? " active" : ""}`
+            }
+          >
+            <span className="top-navigation-link-inner">
+              <span className="top-navigation-link-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path
+                    d="M12 6a.75.75 0 0 1 .75.75v4.19l3 1.8a.75.75 0 0 1-.75 1.3l-3.37-2.02a.75.75 0 0 1-.38-.65V6.75A.75.75 0 0 1 12 6Z"
+                    fill="currentColor"
+                  />
+                  <path
+                    d="M12 3.25A8.75 8.75 0 1 0 20.75 12 8.76 8.76 0 0 0 12 3.25Zm0 16a7.25 7.25 0 1 1 7.25-7.25A7.26 7.26 0 0 1 12 19.25Z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </span>
+              <span>历史巡检</span>
             </span>
-            <span>历史巡检</span>
-          </span>
-        </NavLink>
+          </NavLink>
+        )}
         <Link
           to={SETTINGS_BASE_PATH}
           className="top-navigation-link"
@@ -3786,6 +3861,8 @@ interface SettingsOverviewPanelProps {
   onOpenInspection: () => void;
   onOpenLicense: () => void;
   license: LicenseCapabilities;
+  canOpenInspection: boolean;
+  canOpenLicense: boolean;
 }
 
 const splitBrandingText = (value: string): [string, string] => {
@@ -3808,6 +3885,8 @@ const SettingsOverviewPanel = ({
   onOpenInspection,
   onOpenLicense,
   license,
+  canOpenInspection,
+  canOpenLicense,
 }: SettingsOverviewPanelProps) => {
   const brandingText =
     appConfig.branding.logoText?.trim() || "Kubernetes 巡检中心";
@@ -3885,10 +3964,20 @@ const SettingsOverviewPanel = ({
           )}
         </div>
         <div className="settings-overview-actions">
-          <button type="button" className="primary" onClick={onOpenInspection}>
+          <button
+            type="button"
+            className="primary"
+            onClick={onOpenInspection}
+            disabled={!canOpenInspection}
+          >
             管理巡检项
           </button>
-          <button type="button" className="secondary" onClick={onOpenLicense}>
+          <button
+            type="button"
+            className="secondary"
+            onClick={onOpenLicense}
+            disabled={!canOpenLicense}
+          >
             查看 License
           </button>
         </div>
@@ -3926,6 +4015,7 @@ interface InspectionSettingsPanelProps {
   notice: string | null;
   error: string | null;
   license: LicenseCapabilities;
+  canManage: boolean;
   onClose: () => void;
   onSave: (payload: {
     id?: number;
@@ -3948,6 +4038,7 @@ const InspectionSettingsPanel = ({
   notice,
   error,
   license,
+  canManage,
   onClose,
   onSave,
   onDelete,
@@ -3955,7 +4046,7 @@ const InspectionSettingsPanel = ({
   onExport,
   onImport,
 }: InspectionSettingsPanelProps) => {
-  const readOnly = !license.canRunInspections;
+  const readOnly = !license.canRunInspections || !canManage;
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [editingItem, setEditingItem] = useState<InspectionItem | null>(null);
   const [formName, setFormName] = useState("");
@@ -4416,9 +4507,7 @@ const InspectionSettingsPanel = ({
       {error && <div className="feedback error">{error}</div>}
       {formError && <div className="feedback error">{formError}</div>}
       {readOnly && (
-        <div className="feedback warning">
-          {license.reason ?? "当前 License 不支持巡检项管理。"}
-        </div>
+        <div className="feedback warning">{readOnlyMessage}</div>
       )}
       <div className="inspection-settings-body">
         <section className="inspection-section inspection-section-list">
@@ -4840,6 +4929,7 @@ interface PrometheusVersionSettingsPanelProps {
   versions: string[];
   defaultVersion: string;
   license: LicenseCapabilities;
+  canManage: boolean;
   onAddVersion: (value: string) => { ok: boolean; message?: string };
   onDeleteVersion: (value: string) => { ok: boolean; message?: string };
 }
@@ -4849,10 +4939,11 @@ const PrometheusVersionSettingsPanel = ({
   versions,
   defaultVersion,
   license,
+  canManage,
   onAddVersion,
   onDeleteVersion,
 }: PrometheusVersionSettingsPanelProps) => {
-  const readOnly = !license.canRunInspections;
+  const readOnly = !license.canRunInspections || !canManage;
   const [versionInput, setVersionInput] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -4871,10 +4962,14 @@ const PrometheusVersionSettingsPanel = ({
     return counts;
   }, [items, defaultVersion]);
 
+  const readOnlyMessage = !license.canRunInspections
+    ? license.reason ?? "当前 License 不支持版本管理"
+    : "当前账号无 Prometheus 版本管理权限";
+
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (readOnly) {
-      setError(license.reason ?? "当前 License 不支持版本管理");
+      setError(readOnlyMessage);
       setNotice(null);
       return;
     }
@@ -4891,7 +4986,7 @@ const PrometheusVersionSettingsPanel = ({
 
   const handleDelete = (value: string) => {
     if (readOnly) {
-      setError(license.reason ?? "当前 License 不支持版本管理");
+      setError(readOnlyMessage);
       setNotice(null);
       return;
     }
@@ -6269,10 +6364,379 @@ const SchedulePage = ({
   </section>
 );
 
+const NoPermissionPanel = ({
+  title,
+  description,
+}: {
+  title: string;
+  description?: string;
+}) => (
+  <section className="card permission-panel">
+    <div className="permission-panel-content">
+      <h3>{title}</h3>
+      <p>{description ?? "当前账号没有该功能的访问权限。"}</p>
+    </div>
+  </section>
+);
+
+interface RoleSettingsPanelProps {
+  roles: AuthRole[];
+  loading: boolean;
+  submitting: boolean;
+  notice: string | null;
+  error: string | null;
+  canCreate: boolean;
+  canUpdate: boolean;
+  canDelete: boolean;
+  onCreate: (payload: {
+    name: string;
+    display_name?: string;
+    description?: string;
+    permissions: string[];
+  }) => Promise<void>;
+  onUpdate: (
+    roleId: number,
+    payload: {
+      display_name?: string;
+      description?: string;
+      permissions?: string[];
+    }
+  ) => Promise<void>;
+  onDelete: (role: AuthRole) => void;
+  onRefresh: () => Promise<AuthRole[] | null>;
+}
+
+const RoleSettingsPanel = ({
+  roles,
+  loading,
+  submitting,
+  notice,
+  error,
+  canCreate,
+  canUpdate,
+  canDelete,
+  onCreate,
+  onUpdate,
+  onDelete,
+  onRefresh,
+}: RoleSettingsPanelProps) => {
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editingRole, setEditingRole] = useState<AuthRole | null>(null);
+  const sortedRoles = useMemo(
+    () => roles.slice().sort((a, b) => a.id - b.id),
+    [roles]
+  );
+
+  const openCreate = () => {
+    setEditingRole(null);
+    setEditorOpen(true);
+  };
+
+  const openEdit = (role: AuthRole) => {
+    setEditingRole(role);
+    setEditorOpen(true);
+  };
+
+  const handleCloseEditor = () => {
+    setEditorOpen(false);
+    setEditingRole(null);
+  };
+
+  const handleSubmit = async (payload: {
+    name: string;
+    display_name?: string;
+    description?: string;
+    permissions: string[];
+  }) => {
+    if (editingRole) {
+      await onUpdate(editingRole.id, {
+        display_name: payload.display_name,
+        description: payload.description,
+        permissions: payload.permissions,
+      });
+    } else {
+      await onCreate(payload);
+    }
+    setEditorOpen(false);
+    setEditingRole(null);
+  };
+
+  return (
+    <div className="inspection-settings-panel role-settings-panel">
+      <div className="settings-header">
+        <div>
+          <h3>角色管理</h3>
+          <p>管理系统角色与权限范围</p>
+        </div>
+        <div className="settings-actions">
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => void onRefresh()}
+            disabled={loading || submitting}
+          >
+            刷新
+          </button>
+          <button
+            type="button"
+            className="primary"
+            onClick={openCreate}
+            disabled={!canCreate || loading || submitting}
+          >
+            创建角色
+          </button>
+        </div>
+      </div>
+      {notice && <div className="feedback success">{notice}</div>}
+      {error && <div className="feedback error">{error}</div>}
+      <div className="settings-list">
+        <div className="settings-list-header">
+          <div className="settings-list-count">
+            共 {sortedRoles.length} 个角色
+          </div>
+        </div>
+        <div className="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>名称</th>
+                <th>说明</th>
+                <th>权限</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedRoles.length === 0 && (
+                <tr>
+                  <td colSpan={4}>{loading ? "加载中..." : "暂无角色"}</td>
+                </tr>
+              )}
+              {sortedRoles.map((role) => {
+                const permissionLabel = role.permissions.includes("*")
+                  ? "全部权限"
+                  : `${role.permissions.length} 项`;
+                return (
+                  <tr key={role.id}>
+                    <td>
+                      <div className="role-name">
+                        <span>{role.display_name || role.name}</span>
+                        {role.is_system && (
+                          <span className="role-badge">系统</span>
+                        )}
+                      </div>
+                      <div className="role-subname">{role.name}</div>
+                    </td>
+                    <td>{role.description || "-"}</td>
+                    <td>{permissionLabel}</td>
+                    <td>
+                      <div className="table-actions">
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={() => openEdit(role)}
+                          disabled={!canUpdate || role.is_system}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          type="button"
+                          className="link-button danger"
+                          onClick={() => onDelete(role)}
+                          disabled={!canDelete || role.is_system}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {editorOpen && (
+        <RoleEditorModal
+          role={editingRole}
+          submitting={submitting}
+          onClose={handleCloseEditor}
+          onSubmit={handleSubmit}
+        />
+      )}
+    </div>
+  );
+};
+
+interface RoleEditorModalProps {
+  role: AuthRole | null;
+  submitting: boolean;
+  onClose: () => void;
+  onSubmit: (payload: {
+    name: string;
+    display_name?: string;
+    description?: string;
+    permissions: string[];
+  }) => Promise<void>;
+}
+
+const RoleEditorModal = ({
+  role,
+  submitting,
+  onClose,
+  onSubmit,
+}: RoleEditorModalProps) => {
+  const isEdit = Boolean(role);
+  const isSystemRole = role?.is_system ?? false;
+  const [name, setName] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [description, setDescription] = useState("");
+  const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!role) {
+      setName("");
+      setDisplayName("");
+      setDescription("");
+      setSelectedPermissions([]);
+      setLocalError(null);
+      return;
+    }
+    setName(role.name);
+    setDisplayName(role.display_name || role.name);
+    setDescription(role.description || "");
+    setSelectedPermissions(role.permissions || []);
+    setLocalError(null);
+  }, [role]);
+
+  const handleTogglePermission = (key: string) => {
+    setSelectedPermissions((prev) =>
+      prev.includes(key)
+        ? prev.filter((value) => value !== key)
+        : [...prev, key]
+    );
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmedName = name.trim();
+    const trimmedDisplay = displayName.trim();
+    if (!trimmedName) {
+      setLocalError("角色标识不能为空");
+      return;
+    }
+    if (!trimmedDisplay) {
+      setLocalError("角色名称不能为空");
+      return;
+    }
+    setLocalError(null);
+    try {
+      await onSubmit({
+        name: trimmedName,
+        display_name: trimmedDisplay,
+        description: description.trim() || undefined,
+        permissions: selectedPermissions,
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "保存角色失败";
+      setLocalError(message);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" aria-modal="true">
+      <div className="modal role-editor-modal" role="dialog" aria-label="角色设置">
+        <div className="modal-header">
+          <h3>{isEdit ? "编辑角色" : "创建角色"}</h3>
+        </div>
+        {(localError || isSystemRole) && (
+          <div className="feedback error">
+            {localError ?? "系统角色不可编辑。"}
+          </div>
+        )}
+        <form className="settings-form" onSubmit={handleSubmit}>
+          <label>
+            角色标识
+            <input
+              type="text"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="例如：custom_role"
+              disabled={submitting || isEdit || isSystemRole}
+            />
+          </label>
+          <label>
+            角色名称
+            <input
+              type="text"
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              placeholder="例如：运维管理员"
+              disabled={submitting || isSystemRole}
+            />
+          </label>
+          <label>
+            角色说明
+            <textarea
+              rows={3}
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="角色的用途说明"
+              disabled={submitting || isSystemRole}
+            />
+          </label>
+          <div className="role-permission-block">
+            <div className="role-permission-title">权限配置</div>
+            <div className="role-permission-grid">
+              {ROLE_PERMISSION_SECTIONS.map((section) => (
+                <div key={section.title} className="role-permission-group">
+                  <h4>{section.title}</h4>
+                  <div className="role-permission-list">
+                    {section.items.map((item) => (
+                      <label key={item.key}>
+                        <input
+                          type="checkbox"
+                          checked={selectedPermissions.includes(item.key)}
+                          onChange={() => handleTogglePermission(item.key)}
+                          disabled={submitting || isSystemRole}
+                        />
+                        <span>{item.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="secondary"
+              onClick={onClose}
+              disabled={submitting}
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              className="primary"
+              disabled={submitting || isSystemRole}
+            >
+              {submitting ? "保存中..." : "保存"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
 interface LicenseSettingsPanelProps {
   status: LicenseCapabilities;
   uploading: boolean;
   textUploading: boolean;
+  canUpload: boolean;
   onUpload: (file: File) => Promise<LicenseStatus | null>;
   onUploadText: (value: string) => Promise<LicenseStatus | null>;
   onRefresh: () => Promise<LicenseStatus | null>;
@@ -6282,6 +6746,7 @@ const LicenseSettingsPanel = ({
   status,
   uploading,
   textUploading,
+  canUpload,
   onUpload,
   onUploadText,
   onRefresh,
@@ -6300,6 +6765,10 @@ const LicenseSettingsPanel = ({
     if (!file) {
       return;
     }
+    if (!canUpload) {
+      setLocalError("当前账号无 License 上传权限");
+      return;
+    }
     try {
       setLocalError(null);
       await onUpload(file);
@@ -6315,6 +6784,10 @@ const LicenseSettingsPanel = ({
     const content = textValue.trim();
     if (!content) {
       setLocalError("License 内容不能为空");
+      return;
+    }
+    if (!canUpload) {
+      setLocalError("当前账号无 License 上传权限");
       return;
     }
     try {
@@ -6378,6 +6851,9 @@ const LicenseSettingsPanel = ({
       {status.reason && !status.valid && (
         <div className="feedback warning">{status.reason}</div>
       )}
+      {!canUpload && (
+        <div className="feedback warning">当前账号无 License 上传权限</div>
+      )}
       {localError && <div className="feedback error">{localError}</div>}
       <section className="settings-list">
         <table>
@@ -6428,7 +6904,7 @@ const LicenseSettingsPanel = ({
             type="file"
             accept=".lic,.txt,.json"
             onChange={handleFileChange}
-            disabled={uploading}
+            disabled={uploading || !canUpload}
           />
           <p className="settings-overview-hint">
             支持 .lic / .txt / .json 文件，上传后立即生效。
@@ -6442,13 +6918,13 @@ const LicenseSettingsPanel = ({
               value={textValue}
               onChange={(event) => setTextValue(event.target.value)}
               placeholder="-----BEGIN LICENSE-----"
-              disabled={textUploading}
+              disabled={textUploading || !canUpload}
             />
             <div className="settings-actions">
               <button
                 type="submit"
                 className="primary"
-                disabled={textUploading}
+                disabled={textUploading || !canUpload}
               >
                 {textUploading ? "导入中..." : "导入文本"}
               </button>
@@ -7885,6 +8361,44 @@ const App = () => {
   const [items, setItems] = useState<InspectionItem[]>([]);
   const [schedules, setSchedules] = useState<InspectionSchedule[]>([]);
   const isAuthenticated = authUser !== null;
+  const permissionSet = useMemo(
+    () => new Set(authUser?.permissions ?? []),
+    [authUser?.permissions]
+  );
+  const hasPermission = useCallback(
+    (permission: string) =>
+      permissionSet.has("*") || permissionSet.has(permission),
+    [permissionSet]
+  );
+  const canViewSchedule = hasPermission("schedule.read");
+  const canCreateSchedule = hasPermission("schedule.create");
+  const canUpdateSchedule = hasPermission("schedule.update");
+  const canDeleteSchedule = hasPermission("schedule.delete");
+  const canViewHistory =
+    hasPermission("history.read") || hasPermission("runRecord.read");
+  const canUpdateHistory = hasPermission("history.update");
+  const canDeleteHistory = hasPermission("history.delete");
+  const canCreateHistory = hasPermission("history.create");
+  const canViewRoles = hasPermission("role.read");
+  const canCreateRoles = hasPermission("role.create");
+  const canUpdateRoles = hasPermission("role.update");
+  const canDeleteRoles = hasPermission("role.delete");
+  const canViewLicense = hasPermission("license.view");
+  const canManageLicense = hasPermission("license.upload");
+  const canViewInspectionItems = hasPermission("inspectionItem.read");
+  const canManageInspectionItems =
+    hasPermission("inspectionItem.create") ||
+    hasPermission("inspectionItem.update") ||
+    hasPermission("inspectionItem.delete");
+  const canViewPrometheusVersions = hasPermission("prometheus.read");
+  const canManagePrometheusVersions =
+    hasPermission("prometheus.create") ||
+    hasPermission("prometheus.update") ||
+    hasPermission("prometheus.delete");
+  const canViewClusterAgents = hasPermission("clusterAgent.read");
+  const canCreateClusterAgents = hasPermission("clusterAgent.create");
+  const canUpdateClusterAgents = hasPermission("clusterAgent.update");
+  const canDeleteClusterAgents = hasPermission("clusterAgent.delete");
 
   const [clusterError, setClusterError] = useState<string | null>(null);
   const [clusterNotice, setClusterNotice] = useState<string | null>(null);
@@ -8091,6 +8605,11 @@ const App = () => {
   const [settingsTabId, setSettingsTabId] = useState<string>("overview");
   const previousSettingsPathRef = useRef<string>("/");
   const backgroundLocationRef = useRef<RouterLocation | null>(null);
+  const [roles, setRoles] = useState<AuthRole[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(false);
+  const [rolesError, setRolesError] = useState<string | null>(null);
+  const [rolesNotice, setRolesNotice] = useState<string | null>(null);
+  const [roleSubmitting, setRoleSubmitting] = useState(false);
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
   const [licenseError, setLicenseError] = useState<string | null>(null);
   const [licenseLoading, setLicenseLoading] = useState(false);
@@ -8191,6 +8710,11 @@ const App = () => {
   ]);
 
   const refreshLicenseStatus = useCallback(async (): Promise<LicenseStatus | null> => {
+    if (!canViewLicense) {
+      setLicenseStatus(null);
+      setLicenseError(null);
+      return null;
+    }
     setLicenseLoading(true);
     try {
       const status = await getLicenseStatus();
@@ -8206,7 +8730,7 @@ const App = () => {
     } finally {
       setLicenseLoading(false);
     }
-  }, []);
+  }, [canViewLicense]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -8258,6 +8782,11 @@ const App = () => {
   }, [isAuthenticated, licenseStatus?.expires_at, refreshLicenseStatus]);
 
   const refreshAgents = useCallback(async () => {
+    if (!canViewClusterAgents) {
+      setAgents([]);
+      setAgentError(null);
+      return null;
+    }
     try {
       logWithTimestamp("info", "开始获取 Agent 列表");
       const data = await getAgents();
@@ -8271,7 +8800,7 @@ const App = () => {
       setAgentError(message);
       return null;
     }
-  }, []);
+  }, [canViewClusterAgents]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -8282,6 +8811,10 @@ const App = () => {
 
   const handleUploadLicenseFile = useCallback(
     async (file: File) => {
+      if (!canManageLicense) {
+        setLicenseError("当前账号无 License 上传权限");
+        return null;
+      }
       setLicenseUploading(true);
       try {
         const status = await uploadLicense(file);
@@ -8297,11 +8830,15 @@ const App = () => {
         setLicenseUploading(false);
       }
     },
-    []
+    [canManageLicense]
   );
 
   const handleUploadLicenseText = useCallback(
     async (content: string) => {
+      if (!canManageLicense) {
+        setLicenseError("当前账号无 License 上传权限");
+        return null;
+      }
       setLicenseTextUploading(true);
       try {
         const status = await uploadLicenseText(content);
@@ -8317,7 +8854,7 @@ const App = () => {
         setLicenseTextUploading(false);
       }
     },
-    []
+    [canManageLicense]
   );
 
   const sortedItems = useMemo(
@@ -8542,6 +9079,12 @@ const backgroundLocation =
   }, [agentNotice]);
 
   const refreshClusters = useCallback(async () => {
+    if (!canViewClusterAgents) {
+      setClusters([]);
+      setClusterDisplayIds({});
+      setClusterError(null);
+      return null;
+    }
     try {
       logWithTimestamp("info", "开始获取集群信息");
       const data = await getClusters();
@@ -8554,13 +9097,15 @@ const backgroundLocation =
       });
       setClusterError(null);
       logWithTimestamp("info", "集群信息获取成功,数量: %d", data.length);
+      return data;
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "获取集群信息失败";
       logWithTimestamp("error", "获取集群信息失败: %s", message);
       setClusterError(message);
+      return null;
     }
-  }, []);
+  }, [canViewClusterAgents]);
 
   const handleTestClusterConnection = useCallback(
     async (
@@ -8568,6 +9113,18 @@ const backgroundLocation =
       options?: { quiet?: boolean }
     ) => {
       const { quiet } = options ?? {};
+      if (!canUpdateClusterAgents) {
+        const message = "当前账号无集群/Agent 修改权限。";
+        if (!quiet) {
+          setClusterError(message);
+        }
+        showClusterNotice(
+          quiet ? "overview" : currentNoticeScope,
+          message,
+          "error"
+        );
+        return;
+      }
       if (!licenseCapabilities.canManageClusters) {
         const message =
           licenseCapabilities.reason ?? "当前 License 不支持集群管理。";
@@ -8615,10 +9172,15 @@ const backgroundLocation =
       setClusterTesting,
       showClusterNotice,
       licenseCapabilities,
+      canUpdateClusterAgents,
     ]
   );
 
   const refreshRuns = useCallback(async (): Promise<InspectionRunListItem[] | null> => {
+    if (!canViewHistory && !hasPermission("result.read") && !hasPermission("report.read")) {
+      setRuns([]);
+      return null;
+    }
     try {
       logWithTimestamp("info", "开始获取巡检历史");
       const data = await getInspectionRuns();
@@ -8637,7 +9199,7 @@ const backgroundLocation =
       showClusterNotice(currentNoticeScope, message, "error");
       return null;
     }
-  }, [currentNoticeScope, showClusterNotice]);
+  }, [currentNoticeScope, showClusterNotice, canViewHistory, hasPermission]);
 
   const handleCreateAgent = useCallback(
     async (payload: {
@@ -8646,6 +9208,10 @@ const backgroundLocation =
       description?: string;
       prometheus_url?: string | null;
     }) => {
+      if (!canCreateClusterAgents) {
+        setAgentError("当前账号无集群/Agent 创建权限。");
+        return;
+      }
       if (!licenseCapabilities.canManageAgents) {
         setAgentError(
           licenseCapabilities.reason ?? "当前 License 不支持 Agent 管理。"
@@ -8696,7 +9262,13 @@ const backgroundLocation =
         setAgentSubmitting(false);
       }
     },
-    [licenseCapabilities, agents, refreshAgents, refreshClusters]
+    [
+      licenseCapabilities,
+      agents,
+      refreshAgents,
+      refreshClusters,
+      canCreateClusterAgents,
+    ]
   );
 
   const handleClearAgentCommand = useCallback(() => {
@@ -8775,6 +9347,11 @@ const backgroundLocation =
   }, [isAuthenticated, hasRunningRuns, refreshRuns]);
 
   const refreshItems = useCallback(async () => {
+    if (!canViewInspectionItems) {
+      setItems([]);
+      setInspectionError(null);
+      return;
+    }
     try {
       logWithTimestamp("info", "开始获取巡检项");
       const data = await getInspectionItems();
@@ -8787,9 +9364,14 @@ const backgroundLocation =
       logWithTimestamp("error", "获取巡检项失败: %s", message);
       setInspectionError(message);
     }
-  }, []);
+  }, [canViewInspectionItems]);
 
   const refreshSchedules = useCallback(async () => {
+    if (!canViewSchedule) {
+      setSchedules([]);
+      setScheduleError(null);
+      return null;
+    }
     try {
       logWithTimestamp("info", "开始获取定时巡检");
       const data = await getInspectionSchedules();
@@ -8803,7 +9385,124 @@ const backgroundLocation =
       setScheduleError(message);
       return null;
     }
-  }, []);
+  }, [canViewSchedule]);
+
+  const refreshRoles = useCallback(async () => {
+    if (!canViewRoles) {
+      setRoles([]);
+      return null;
+    }
+    setRolesLoading(true);
+    try {
+      const data = await getRoles();
+      setRoles(data);
+      setRolesError(null);
+      return data;
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "获取角色列表失败";
+      setRolesError(message);
+      return null;
+    } finally {
+      setRolesLoading(false);
+    }
+  }, [canViewRoles]);
+
+  const handleCreateRole = useCallback(
+    async (payload: {
+      name: string;
+      display_name?: string;
+      description?: string;
+      permissions: string[];
+    }) => {
+      if (!canCreateRoles) {
+        setRolesError("无权限创建角色");
+        return;
+      }
+      setRoleSubmitting(true);
+      setRolesError(null);
+      setRolesNotice(null);
+      try {
+        await createRole(payload);
+        setRolesNotice("角色创建成功");
+        await refreshRoles();
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "创建角色失败";
+        setRolesError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setRoleSubmitting(false);
+      }
+    },
+    [canCreateRoles, refreshRoles]
+  );
+
+  const handleUpdateRole = useCallback(
+    async (
+      roleId: number,
+      payload: {
+        display_name?: string;
+        description?: string;
+        permissions?: string[];
+      }
+    ) => {
+      if (!canUpdateRoles) {
+        setRolesError("无权限修改角色");
+        return;
+      }
+      setRoleSubmitting(true);
+      setRolesError(null);
+      setRolesNotice(null);
+      try {
+        await updateRole(roleId, payload);
+        setRolesNotice("角色已更新");
+        await refreshRoles();
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "更新角色失败";
+        setRolesError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setRoleSubmitting(false);
+      }
+    },
+    [canUpdateRoles, refreshRoles]
+  );
+
+  const handleDeleteRole = useCallback(
+    (role: AuthRole) => {
+      if (!canDeleteRoles) {
+        setRolesError("无权限删除角色");
+        return;
+      }
+      setConfirmState({
+        title: "删除角色",
+        message: `确认删除角色(${role.display_name || role.name})？该操作不可恢复。`,
+        confirmLabel: "删除",
+        variant: "danger",
+        scope: "settings",
+        onConfirm: async () => {
+          setRoleSubmitting(true);
+          setRolesError(null);
+          setRolesNotice(null);
+          try {
+            await deleteRole(role.id);
+            setRolesNotice("角色已删除");
+            await refreshRoles();
+          } catch (err) {
+            const message =
+              err instanceof Error ? err.message : "删除角色失败";
+            setRolesError(message);
+            throw err instanceof Error ? err : new Error(message);
+          } finally {
+            setRoleSubmitting(false);
+          }
+        },
+      });
+    },
+    [canDeleteRoles, refreshRoles]
+  );
 
   const pendingClusterIds = useMemo(
     () =>
@@ -8866,7 +9565,15 @@ const backgroundLocation =
     void refreshRuns();
     void refreshItems();
     void refreshSchedules();
-  }, [isAuthenticated, refreshClusters, refreshRuns, refreshItems, refreshSchedules]);
+    void refreshRoles();
+  }, [
+    isAuthenticated,
+    refreshClusters,
+    refreshRuns,
+    refreshItems,
+    refreshSchedules,
+    refreshRoles,
+  ]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !isAuthenticated) {
@@ -8965,6 +9672,10 @@ const backgroundLocation =
   };
 
   const handleOpenKubeconfigModal = useCallback(() => {
+    if (!canCreateClusterAgents) {
+      setClusterError("当前账号无集群/Agent 创建权限。");
+      return;
+    }
     if (!licenseCapabilities.canManageClusters) {
       setClusterError(
         licenseCapabilities.reason ?? "当前 License 不支持集群管理。"
@@ -8972,7 +9683,7 @@ const backgroundLocation =
       return;
     }
     setKubeconfigModalOpen(true);
-  }, [licenseCapabilities, setClusterError]);
+  }, [licenseCapabilities, setClusterError, canCreateClusterAgents]);
 
   const handleCloseKubeconfigModal = useCallback(() => {
     setKubeconfigModalOpen(false);
@@ -9022,6 +9733,10 @@ const backgroundLocation =
   }, []);
 
   const handleUploadCluster = useCallback(async () => {
+    if (!canCreateClusterAgents) {
+      setClusterError("当前账号无集群/Agent 创建权限。");
+      return;
+    }
     if (!licenseCapabilities.canManageClusters) {
       setClusterError(
         licenseCapabilities.reason ?? "当前 License 不支持集群管理。"
@@ -9114,10 +9829,16 @@ const backgroundLocation =
     currentNoticeScope,
     showClusterNotice,
     licenseCapabilities,
+    canCreateClusterAgents,
   ]);
 
   const handleUpdateClusterExecution = useCallback(
     async (clusterId: number, payload: { defaultAgentId: number | null }) => {
+      if (!canUpdateClusterAgents) {
+        const reason = "当前账号无集群/Agent 修改权限。";
+        setClusterError(reason);
+        throw new Error(reason);
+      }
       if (!licenseCapabilities.canManageClusters) {
         const reason =
           licenseCapabilities.reason ?? "当前 License 不支持集群管理。";
@@ -9156,6 +9877,7 @@ const backgroundLocation =
       refreshRuns,
       refreshAgents,
       showClusterNotice,
+      canUpdateClusterAgents,
     ]
   );
   useEffect(() => {
@@ -9202,6 +9924,10 @@ const hasManualKubeconfig = useMemo(
 
   const handleStartInspection = useCallback(
     async (clusterId: number, prometheusVersion: string) => {
+      if (!canCreateHistory) {
+        setInspectionError("当前账号无历史巡检创建权限。");
+        return;
+      }
       if (!licenseCapabilities.canRunInspections) {
         setInspectionError(
           licenseCapabilities.reason ?? "当前 License 不支持巡检功能。"
@@ -9247,11 +9973,24 @@ const hasManualKubeconfig = useMemo(
       setInspectionLoading(false);
     }
   },
-  [selectedItemIds, operator, refreshRuns, refreshClusters, licenseCapabilities]
+  [
+    selectedItemIds,
+    operator,
+    refreshRuns,
+    refreshClusters,
+    licenseCapabilities,
+    canCreateHistory,
+  ]
 );
 
   const handleDeleteClustersBulk = useCallback(
     (clusterIds: number[]): Promise<void> => {
+      if (!canDeleteClusterAgents) {
+        const message = "当前账号无集群/Agent 删除权限。";
+        setClusterError(message);
+        showClusterNotice("overview", message, "error");
+        return Promise.resolve();
+      }
       if (!licenseCapabilities.canManageClusters) {
         const message =
           licenseCapabilities.reason ?? "当前 License 不支持集群管理。";
@@ -9342,11 +10081,18 @@ const hasManualKubeconfig = useMemo(
       showClusterNotice,
       licenseCapabilities,
       setClusterError,
+      canDeleteClusterAgents,
     ]
   );
 
   const handleDeleteCluster = useCallback(
     (cluster: ClusterConfig): Promise<void> => {
+      if (!canDeleteClusterAgents) {
+        const message = "当前账号无集群/Agent 删除权限。";
+        setClusterError(message);
+        showClusterNotice(currentNoticeScope, message, "error");
+        return Promise.resolve();
+      }
       if (!licenseCapabilities.canManageClusters) {
         const message =
           licenseCapabilities.reason ?? "当前 License 不支持集群管理。";
@@ -9431,11 +10177,16 @@ const hasManualKubeconfig = useMemo(
       showClusterNotice,
       licenseCapabilities,
       setClusterError,
+      canDeleteClusterAgents,
     ]
   );
 
   const handleDeleteRunsBulk = useCallback(
     (runIds: number[], scope: NoticeScope): Promise<void> => {
+      if (!canDeleteHistory) {
+        showClusterNotice(scope, "当前账号无巡检记录删除权限。", "error");
+        return Promise.resolve();
+      }
       if (!licenseCapabilities.canRunInspections) {
         const message =
           licenseCapabilities.reason ?? "当前 License 不支持巡检功能。";
@@ -9489,11 +10240,26 @@ const hasManualKubeconfig = useMemo(
       });
       return Promise.resolve();
     },
-    [runs, refreshRuns, refreshClusters, showClusterNotice, licenseCapabilities]
+    [
+      runs,
+      refreshRuns,
+      refreshClusters,
+      showClusterNotice,
+      licenseCapabilities,
+      canDeleteHistory,
+    ]
   );
 
   const handleDeleteRun = useCallback(
     (run: InspectionRunListItem): Promise<void> => {
+      if (!canDeleteHistory) {
+        showClusterNotice(
+          currentNoticeScope,
+          "当前账号无巡检记录删除权限。",
+          "error"
+        );
+        return Promise.resolve();
+      }
       if (!licenseCapabilities.canRunInspections) {
         const message =
           licenseCapabilities.reason ?? "当前 License 不支持巡检功能。";
@@ -9538,11 +10304,20 @@ const hasManualKubeconfig = useMemo(
       currentNoticeScope,
       showClusterNotice,
       licenseCapabilities,
+      canDeleteHistory,
     ]
   );
 
   const handleDeleteRunById = useCallback(
     (runId: number, redirectPath?: string): Promise<void> => {
+      if (!canDeleteHistory) {
+        showClusterNotice(
+          currentNoticeScope,
+          "当前账号无巡检记录删除权限。",
+          "error"
+        );
+        return Promise.resolve();
+      }
       if (!licenseCapabilities.canRunInspections) {
         const message =
           licenseCapabilities.reason ?? "当前 License 不支持巡检功能。";
@@ -9595,11 +10370,20 @@ const hasManualKubeconfig = useMemo(
       currentNoticeScope,
       showClusterNotice,
       licenseCapabilities,
+      canDeleteHistory,
     ]
   );
 
   const handleCancelRun = useCallback(
     (run: InspectionRunListItem): Promise<void> => {
+      if (!canUpdateHistory) {
+        showClusterNotice(
+          currentNoticeScope,
+          "当前账号无巡检记录修改权限。",
+          "error"
+        );
+        return Promise.resolve();
+      }
       if (!licenseCapabilities.canRunInspections) {
         const message =
           licenseCapabilities.reason ?? "当前 License 不支持巡检功能。";
@@ -9637,11 +10421,20 @@ const hasManualKubeconfig = useMemo(
       currentNoticeScope,
       showClusterNotice,
       licenseCapabilities,
+      canUpdateHistory,
     ]
   );
 
   const handlePauseRun = useCallback(
     async (run: InspectionRunListItem): Promise<void> => {
+      if (!canUpdateHistory) {
+        showClusterNotice(
+          currentNoticeScope,
+          "当前账号无巡检记录修改权限。",
+          "error"
+        );
+        return;
+      }
       if (!licenseCapabilities.canRunInspections) {
         const message =
           licenseCapabilities.reason ?? "当前 License 不支持巡检功能。";
@@ -9667,11 +10460,20 @@ const hasManualKubeconfig = useMemo(
       currentNoticeScope,
       showClusterNotice,
       licenseCapabilities,
+      canUpdateHistory,
     ]
   );
 
   const handleResumeRun = useCallback(
     async (run: InspectionRunListItem): Promise<void> => {
+      if (!canUpdateHistory) {
+        showClusterNotice(
+          currentNoticeScope,
+          "当前账号无巡检记录修改权限。",
+          "error"
+        );
+        return;
+      }
       if (!licenseCapabilities.canRunInspections) {
         const message =
           licenseCapabilities.reason ?? "当前 License 不支持巡检功能。";
@@ -9697,11 +10499,20 @@ const hasManualKubeconfig = useMemo(
       currentNoticeScope,
       showClusterNotice,
       licenseCapabilities,
+      canUpdateHistory,
     ]
   );
 
   const handleCancelRunById = useCallback(
     (runId: number, redirectPath?: string): Promise<void> => {
+      if (!canUpdateHistory) {
+        showClusterNotice(
+          currentNoticeScope,
+          "当前账号无巡检记录修改权限。",
+          "error"
+        );
+        return Promise.resolve();
+      }
       if (!licenseCapabilities.canRunInspections) {
         const message =
           licenseCapabilities.reason ?? "当前 License 不支持巡检功能。";
@@ -9746,11 +10557,20 @@ const hasManualKubeconfig = useMemo(
       currentNoticeScope,
       showClusterNotice,
       licenseCapabilities,
+      canUpdateHistory,
     ]
   );
 
   const handlePauseRunById = useCallback(
     async (runId: number): Promise<void> => {
+      if (!canUpdateHistory) {
+        showClusterNotice(
+          currentNoticeScope,
+          "当前账号无巡检记录修改权限。",
+          "error"
+        );
+        return;
+      }
       if (!licenseCapabilities.canRunInspections) {
         const message =
           licenseCapabilities.reason ?? "当前 License 不支持巡检功能。";
@@ -9776,11 +10596,20 @@ const hasManualKubeconfig = useMemo(
       currentNoticeScope,
       showClusterNotice,
       licenseCapabilities,
+      canUpdateHistory,
     ]
   );
 
   const handleResumeRunById = useCallback(
     async (runId: number): Promise<void> => {
+      if (!canUpdateHistory) {
+        showClusterNotice(
+          currentNoticeScope,
+          "当前账号无巡检记录修改权限。",
+          "error"
+        );
+        return;
+      }
       if (!licenseCapabilities.canRunInspections) {
         const message =
           licenseCapabilities.reason ?? "当前 License 不支持巡检功能。";
@@ -9806,13 +10635,21 @@ const hasManualKubeconfig = useMemo(
       currentNoticeScope,
       showClusterNotice,
       licenseCapabilities,
+      canUpdateHistory,
     ]
   );
 
-  const handleEditCluster = useCallback((cluster: ClusterConfig) => {
-    setClusterEditState(cluster);
-    setClusterEditError(null);
-  }, []);
+  const handleEditCluster = useCallback(
+    (cluster: ClusterConfig) => {
+      if (!canUpdateClusterAgents) {
+        setClusterError("当前账号无集群/Agent 修改权限。");
+        return;
+      }
+      setClusterEditState(cluster);
+      setClusterEditError(null);
+    },
+    [canUpdateClusterAgents]
+  );
 
   const handleSaveInspectionItem = useCallback(
     async ({
@@ -9830,6 +10667,11 @@ const hasManualKubeconfig = useMemo(
       prometheus_version?: string;
       config: Record<string, unknown>;
     }) => {
+      if (!canManageInspectionItems) {
+        setSettingsError("当前账号无巡检项管理权限。");
+        setSettingsNotice(null);
+        return;
+      }
       if (!licenseCapabilities.canRunInspections) {
         setSettingsError(
           licenseCapabilities.reason ?? "当前 License 不支持巡检项管理。"
@@ -9872,11 +10714,14 @@ const hasManualKubeconfig = useMemo(
         setSettingsSubmitting(false);
       }
     },
-    [refreshItems, licenseCapabilities]
+    [refreshItems, licenseCapabilities, canManageInspectionItems]
   );
 
   const handleAddPrometheusVersion = useCallback(
     (value: string): { ok: boolean; message?: string } => {
+      if (!canManagePrometheusVersions) {
+        return { ok: false, message: "当前账号无 Prometheus 版本管理权限" };
+      }
       if (!licenseCapabilities.canRunInspections) {
         return {
           ok: false,
@@ -9900,11 +10745,14 @@ const hasManualKubeconfig = useMemo(
       setPrometheusVersionOptions((prev) => [...prev, trimmed]);
       return { ok: true };
     },
-    [prometheusVersionOptions, licenseCapabilities]
+    [prometheusVersionOptions, licenseCapabilities, canManagePrometheusVersions]
   );
 
   const handleDeletePrometheusVersion = useCallback(
     (value: string): { ok: boolean; message?: string } => {
+      if (!canManagePrometheusVersions) {
+        return { ok: false, message: "当前账号无 Prometheus 版本管理权限" };
+      }
       if (!licenseCapabilities.canRunInspections) {
         return {
           ok: false,
@@ -9939,11 +10787,16 @@ const hasManualKubeconfig = useMemo(
       );
       return { ok: true };
     },
-    [items, licenseCapabilities]
+    [items, licenseCapabilities, canManagePrometheusVersions]
   );
 
   const deleteInspectionItemsBatch = useCallback(
     async (ids: number[], successMessage: string) => {
+      if (!canManageInspectionItems) {
+        setSettingsError("当前账号无巡检项管理权限。");
+        setSettingsNotice(null);
+        return;
+      }
       if (!licenseCapabilities.canRunInspections) {
         setSettingsError(
           licenseCapabilities.reason ?? "当前 License 不支持巡检项管理。"
@@ -9970,7 +10823,7 @@ const hasManualKubeconfig = useMemo(
         setSettingsSubmitting(false);
       }
     },
-    [refreshItems, licenseCapabilities]
+    [refreshItems, licenseCapabilities, canManageInspectionItems]
   );
 
   const performDeleteInspectionItem = useCallback(
@@ -9981,6 +10834,11 @@ const hasManualKubeconfig = useMemo(
 
   const handleDeleteInspectionItem = useCallback(
     (item: InspectionItem) => {
+      if (!canManageInspectionItems) {
+        setSettingsError("当前账号无巡检项管理权限。");
+        setSettingsNotice(null);
+        return;
+      }
       if (!licenseCapabilities.canRunInspections) {
         setSettingsError(
           licenseCapabilities.reason ?? "当前 License 不支持巡检项管理。"
@@ -9997,11 +10855,16 @@ const hasManualKubeconfig = useMemo(
         onConfirm: () => performDeleteInspectionItem(item),
       });
     },
-    [performDeleteInspectionItem, licenseCapabilities]
+    [performDeleteInspectionItem, licenseCapabilities, canManageInspectionItems]
   );
 
   const handleDeleteInspectionItemsBulk = useCallback(
     (itemIds: number[]) => {
+      if (!canManageInspectionItems) {
+        setSettingsError("当前账号无巡检项管理权限。");
+        setSettingsNotice(null);
+        return;
+      }
       if (!licenseCapabilities.canRunInspections) {
         setSettingsError(
           licenseCapabilities.reason ?? "当前 License 不支持巡检项管理。"
@@ -10028,10 +10891,15 @@ const hasManualKubeconfig = useMemo(
           ),
       });
     },
-    [items, deleteInspectionItemsBatch, licenseCapabilities]
+    [items, deleteInspectionItemsBatch, licenseCapabilities, canManageInspectionItems]
   );
 
   const handleExportInspectionItems = useCallback(async (format: "json" | "yaml") => {
+    if (!canViewInspectionItems) {
+      setSettingsError("当前账号无巡检项查看权限。");
+      setSettingsNotice(null);
+      return;
+    }
     if (!licenseCapabilities.canRunInspections) {
       setSettingsError(
         licenseCapabilities.reason ?? "当前 License 不支持巡检项管理。"
@@ -10100,10 +10968,15 @@ const hasManualKubeconfig = useMemo(
       }
       setSettingsSubmitting(false);
     }
-  }, [licenseCapabilities]);
+  }, [licenseCapabilities, canViewInspectionItems]);
 
   const handleImportInspectionItems = useCallback(
     async (file: File) => {
+      if (!canManageInspectionItems) {
+        setSettingsError("当前账号无巡检项管理权限。");
+        setSettingsNotice(null);
+        return;
+      }
       if (!licenseCapabilities.canRunInspections) {
         setSettingsError(
           licenseCapabilities.reason ?? "当前 License 不支持巡检项管理。"
@@ -10141,7 +11014,7 @@ const hasManualKubeconfig = useMemo(
         setSettingsSubmitting(false);
       }
     },
-    [refreshItems, licenseCapabilities]
+    [refreshItems, licenseCapabilities, canManageInspectionItems]
   );
 
   const handleSaveSchedule = useCallback(
@@ -10153,6 +11026,11 @@ const hasManualKubeconfig = useMemo(
       itemIds: number[];
       isEnabled: boolean;
     }) => {
+      if (payload.id ? !canUpdateSchedule : !canCreateSchedule) {
+        setScheduleError("当前账号无定时巡检管理权限。");
+        setScheduleNotice(null);
+        return;
+      }
       if (!licenseCapabilities.canRunInspections) {
         setScheduleError(
           licenseCapabilities.reason ?? "当前 License 不支持定时巡检。"
@@ -10197,11 +11075,16 @@ const hasManualKubeconfig = useMemo(
         setScheduleSubmitting(false);
       }
     },
-    [refreshSchedules, licenseCapabilities]
+    [refreshSchedules, licenseCapabilities, canCreateSchedule, canUpdateSchedule]
   );
 
   const performDeleteSchedule = useCallback(
     async (schedule: InspectionSchedule) => {
+      if (!canDeleteSchedule) {
+        setScheduleError("当前账号无定时巡检删除权限。");
+        setScheduleNotice(null);
+        return;
+      }
       if (!licenseCapabilities.canRunInspections) {
         setScheduleError(
           licenseCapabilities.reason ?? "当前 License 不支持定时巡检。"
@@ -10227,11 +11110,16 @@ const hasManualKubeconfig = useMemo(
         setScheduleSubmitting(false);
       }
     },
-    [refreshSchedules, licenseCapabilities]
+    [refreshSchedules, licenseCapabilities, canDeleteSchedule]
   );
 
   const handleDeleteSchedule = useCallback(
     (schedule: InspectionSchedule) => {
+      if (!canDeleteSchedule) {
+        setScheduleError("当前账号无定时巡检删除权限。");
+        setScheduleNotice(null);
+        return;
+      }
       if (!licenseCapabilities.canRunInspections) {
         setScheduleError(
           licenseCapabilities.reason ?? "当前 License 不支持定时巡检。"
@@ -10249,11 +11137,16 @@ const hasManualKubeconfig = useMemo(
         onConfirm: () => performDeleteSchedule(schedule),
       });
     },
-    [performDeleteSchedule, licenseCapabilities]
+    [performDeleteSchedule, licenseCapabilities, canDeleteSchedule]
   );
 
   const handleDeleteSchedulesBulk = useCallback(
     (scheduleIds: number[]): Promise<void> => {
+      if (!canDeleteSchedule) {
+        setScheduleError("当前账号无定时巡检删除权限。");
+        setScheduleNotice(null);
+        return Promise.resolve();
+      }
       if (!licenseCapabilities.canRunInspections) {
         setScheduleError(
           licenseCapabilities.reason ?? "当前 License 不支持定时巡检。"
@@ -10297,11 +11190,16 @@ const hasManualKubeconfig = useMemo(
       });
       return Promise.resolve();
     },
-    [licenseCapabilities, schedules, refreshSchedules]
+    [licenseCapabilities, schedules, refreshSchedules, canDeleteSchedule]
   );
 
   const handleToggleScheduleEnabled = useCallback(
     async (schedule: InspectionSchedule, enabled: boolean) => {
+      if (!canUpdateSchedule) {
+        setScheduleError("当前账号无定时巡检修改权限。");
+        setScheduleNotice(null);
+        return;
+      }
       if (!licenseCapabilities.canRunInspections) {
         setScheduleError(
           licenseCapabilities.reason ?? "当前 License 不支持定时巡检。"
@@ -10334,71 +11232,113 @@ const hasManualKubeconfig = useMemo(
         setScheduleSubmitting(false);
       }
     },
-    [refreshSchedules, licenseCapabilities]
+    [refreshSchedules, licenseCapabilities, canUpdateSchedule]
   );
 
   const settingsTabs = useMemo<SettingsModalTab[]>(
-    () => [
-      {
-        id: "overview",
-        label: "设置总览",
-        render: ({ selectTab }) => (
+    () => {
+      const tabs: SettingsModalTab[] = [
+        {
+          id: "overview",
+          label: "设置总览",
+          render: ({ selectTab }) => (
           <SettingsOverviewPanel
             onOpenInspection={() => selectTab("inspection")}
             onOpenLicense={() => selectTab("license")}
             license={licenseCapabilities}
+            canOpenInspection={canViewInspectionItems}
+            canOpenLicense={canViewLicense}
           />
-        ),
-      },
-      {
-        id: "inspection",
-        label: "巡检项设置",
-        render: ({ close }) => (
-          <InspectionSettingsPanel
-            items={sortedItems}
-            prometheusVersionOptions={prometheusVersionOptions}
-            submitting={settingsSubmitting}
-            notice={settingsNotice}
-            error={settingsError}
-            license={licenseCapabilities}
-            onClose={close}
-            onSave={handleSaveInspectionItem}
-            onDelete={handleDeleteInspectionItem}
-            onDeleteMany={handleDeleteInspectionItemsBulk}
-            onExport={handleExportInspectionItems}
-            onImport={handleImportInspectionItems}
-          />
-        ),
-      },
-      {
-        id: "prometheus-version",
-        label: "Prometheus 版本",
-        render: () => (
+          ),
+        },
+        {
+          id: "inspection",
+          label: "巡检项设置",
+          render: ({ close }) => (
+            <InspectionSettingsPanel
+              items={sortedItems}
+              prometheusVersionOptions={prometheusVersionOptions}
+              submitting={settingsSubmitting}
+              notice={settingsNotice}
+              error={settingsError}
+              license={licenseCapabilities}
+              canManage={canManageInspectionItems}
+              onClose={close}
+              onSave={handleSaveInspectionItem}
+              onDelete={handleDeleteInspectionItem}
+              onDeleteMany={handleDeleteInspectionItemsBulk}
+              onExport={handleExportInspectionItems}
+              onImport={handleImportInspectionItems}
+            />
+          ),
+        },
+        {
+          id: "prometheus-version",
+          label: "Prometheus 版本",
+          render: () => (
           <PrometheusVersionSettingsPanel
             items={sortedItems}
             versions={prometheusVersionOptions}
             defaultVersion={DEFAULT_PROMETHEUS_VERSION}
             license={licenseCapabilities}
+            canManage={canManagePrometheusVersions}
             onAddVersion={handleAddPrometheusVersion}
             onDeleteVersion={handleDeletePrometheusVersion}
           />
-        ),
-      },
-      {
-        id: "license",
-        label: "License 管理",
-        render: () => (
-          <LicenseSettingsPanel
-            status={licenseCapabilities}
-            uploading={licenseUploading}
-            textUploading={licenseTextUploading}
-            onUpload={handleUploadLicenseFile}
-            onUploadText={handleUploadLicenseText}
-            onRefresh={refreshLicenseStatus}
-          />
-        ),
-      },
-    ],
+          ),
+        },
+        {
+          id: "roles",
+          label: "角色管理",
+          render: () => (
+            <RoleSettingsPanel
+              roles={roles}
+              loading={rolesLoading}
+              submitting={roleSubmitting}
+              notice={rolesNotice}
+              error={rolesError}
+              canCreate={canCreateRoles}
+              canUpdate={canUpdateRoles}
+              canDelete={canDeleteRoles}
+              onCreate={handleCreateRole}
+              onUpdate={handleUpdateRole}
+              onDelete={handleDeleteRole}
+              onRefresh={refreshRoles}
+            />
+          ),
+        },
+        {
+          id: "license",
+          label: "License 管理",
+          render: () => (
+            <LicenseSettingsPanel
+              status={licenseCapabilities}
+              uploading={licenseUploading}
+              textUploading={licenseTextUploading}
+              canUpload={canManageLicense}
+              onUpload={handleUploadLicenseFile}
+              onUploadText={handleUploadLicenseText}
+              onRefresh={refreshLicenseStatus}
+            />
+          ),
+        },
+      ];
+      return tabs.filter((tab) => {
+        if (tab.id === "inspection") {
+          return canViewInspectionItems;
+        }
+        if (tab.id === "prometheus-version") {
+          return canViewPrometheusVersions;
+        }
+        if (tab.id === "roles") {
+          return canViewRoles;
+        }
+        if (tab.id === "license") {
+          return canViewLicense;
+        }
+        return true;
+      });
+    },
     [
       sortedItems,
       settingsSubmitting,
@@ -10412,12 +11352,31 @@ const hasManualKubeconfig = useMemo(
       prometheusVersionOptions,
       handleAddPrometheusVersion,
       handleDeletePrometheusVersion,
+      roles,
+      rolesLoading,
+      roleSubmitting,
+      rolesNotice,
+      rolesError,
+      canCreateRoles,
+      canUpdateRoles,
+      canDeleteRoles,
+      handleCreateRole,
+      handleUpdateRole,
+      handleDeleteRole,
+      refreshRoles,
       licenseCapabilities,
       licenseUploading,
       licenseTextUploading,
       handleUploadLicenseFile,
       handleUploadLicenseText,
       refreshLicenseStatus,
+      canViewInspectionItems,
+      canViewPrometheusVersions,
+      canViewRoles,
+      canViewLicense,
+      canManageInspectionItems,
+      canManagePrometheusVersions,
+      canManageLicense,
     ]
   );
 
@@ -10504,6 +11463,10 @@ const hasManualKubeconfig = useMemo(
       if (!clusterEditState) {
         return;
       }
+      if (!canUpdateClusterAgents) {
+        setClusterEditError("当前账号无集群/Agent 修改权限。");
+        return;
+      }
       if (!licenseCapabilities.canManageClusters) {
         setClusterEditError(
           licenseCapabilities.reason ?? "当前 License 不支持集群管理。"
@@ -10550,6 +11513,7 @@ const hasManualKubeconfig = useMemo(
       currentNoticeScope,
       showClusterNotice,
       licenseCapabilities,
+      canUpdateClusterAgents,
     ]
   );
 
@@ -10634,7 +11598,11 @@ const hasManualKubeconfig = useMemo(
         <title>K8s Inspection Center</title>
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
       </Helmet>
-      <TopNavigation onOpenSettings={handleOpenSettings} />
+      <TopNavigation
+        onOpenSettings={handleOpenSettings}
+        showSchedule={canViewSchedule}
+        showHistory={canViewHistory}
+      />
       {globalNotices.length > 0 && (
         <div className="global-notice-bar" role="status" aria-live="polite">
           {globalNotices.map((notice) => (
@@ -10652,38 +11620,46 @@ const hasManualKubeconfig = useMemo(
           <Route
             path="/history"
             element={
-              <HistoryView
-                runs={runs}
-                onRefreshRuns={refreshRuns}
-                onDeleteRun={handleDeleteRun}
-                onDeleteRunsBulk={(ids) =>
-                  handleDeleteRunsBulk(ids, "history")
-                }
-                onCancelRun={handleCancelRun}
-                clusterDisplayIds={clusterDisplayIds}
-                runDisplayIds={runDisplayIds}
-                license={licenseCapabilities}
-              />
+              canViewHistory ? (
+                <HistoryView
+                  runs={runs}
+                  onRefreshRuns={refreshRuns}
+                  onDeleteRun={handleDeleteRun}
+                  onDeleteRunsBulk={(ids) =>
+                    handleDeleteRunsBulk(ids, "history")
+                  }
+                  onCancelRun={handleCancelRun}
+                  clusterDisplayIds={clusterDisplayIds}
+                  runDisplayIds={runDisplayIds}
+                  license={licenseCapabilities}
+                />
+              ) : (
+                <NoPermissionPanel title="无权限访问历史巡检" />
+              )
             }
           />
           <Route
             path="/schedule"
             element={
-              <SchedulePage
-                schedules={schedules}
-                clusters={clusters}
-                clusterDisplayIds={clusterDisplayIds}
-                items={sortedItems}
-                prometheusVersionOptions={prometheusVersionOptions}
-                submitting={scheduleSubmitting}
-                notice={scheduleNotice}
-                error={scheduleError}
-                license={licenseCapabilities}
-                onSave={handleSaveSchedule}
-                onDelete={handleDeleteSchedule}
-                onDeleteMany={handleDeleteSchedulesBulk}
-                onToggleEnabled={handleToggleScheduleEnabled}
-              />
+              canViewSchedule ? (
+                <SchedulePage
+                  schedules={schedules}
+                  clusters={clusters}
+                  clusterDisplayIds={clusterDisplayIds}
+                  items={sortedItems}
+                  prometheusVersionOptions={prometheusVersionOptions}
+                  submitting={scheduleSubmitting}
+                  notice={scheduleNotice}
+                  error={scheduleError}
+                  license={licenseCapabilities}
+                  onSave={handleSaveSchedule}
+                  onDelete={handleDeleteSchedule}
+                  onDeleteMany={handleDeleteSchedulesBulk}
+                  onToggleEnabled={handleToggleScheduleEnabled}
+                />
+              ) : (
+                <NoPermissionPanel title="无权限访问定时巡检" />
+              )
             }
           />
           <Route

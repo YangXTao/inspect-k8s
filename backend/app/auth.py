@@ -2,11 +2,12 @@ import base64
 import binascii
 import hashlib
 import hmac
+import json
 import os
 import secrets
 import time
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from typing import Iterable, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -29,6 +30,54 @@ AUTH_NONCE_SECRET_BYTES = (
     if AUTH_NONCE_SECRET
     else secrets.token_bytes(32)
 )
+
+KNOWN_PERMISSIONS = {
+    "schedule.read",
+    "schedule.create",
+    "schedule.update",
+    "schedule.delete",
+    "history.read",
+    "history.create",
+    "history.update",
+    "history.delete",
+    "license.view",
+    "license.upload",
+    "prometheus.read",
+    "prometheus.create",
+    "prometheus.update",
+    "prometheus.delete",
+    "inspectionItem.read",
+    "inspectionItem.create",
+    "inspectionItem.update",
+    "inspectionItem.delete",
+    "role.read",
+    "role.create",
+    "role.update",
+    "role.delete",
+    "clusterAgent.read",
+    "clusterAgent.create",
+    "clusterAgent.update",
+    "clusterAgent.delete",
+    "runRecord.read",
+    "runRecord.delete",
+    "result.read",
+    "result.delete",
+    "report.read",
+    "report.delete",
+}
+
+READ_ONLY_PERMISSIONS = {
+    "schedule.read",
+    "history.read",
+    "license.view",
+    "prometheus.read",
+    "inspectionItem.read",
+    "role.read",
+    "clusterAgent.read",
+    "runRecord.read",
+    "result.read",
+    "report.read",
+}
 
 
 def hash_password(password: str, salt: Optional[str] = None) -> str:
@@ -148,6 +197,135 @@ def ensure_default_admin(db: Session) -> None:
     )
     db.add(user)
     db.commit()
+
+
+def _parse_permissions(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return []
+    if not isinstance(payload, list):
+        return []
+    normalized: list[str] = []
+    for value in payload:
+        if not isinstance(value, str):
+            continue
+        trimmed = value.strip()
+        if not trimmed:
+            continue
+        if trimmed != "*" and trimmed not in KNOWN_PERMISSIONS:
+            continue
+        normalized.append(trimmed)
+    return sorted(set(normalized))
+
+
+def _dump_permissions(permissions: Iterable[str]) -> str:
+    normalized: list[str] = []
+    for value in permissions:
+        if not isinstance(value, str):
+            continue
+        trimmed = value.strip()
+        if not trimmed:
+            continue
+        if trimmed != "*" and trimmed not in KNOWN_PERMISSIONS:
+            continue
+        normalized.append(trimmed)
+    unique = sorted(set(normalized))
+    return json.dumps(unique, ensure_ascii=True)
+
+
+def normalize_permissions(permissions: Iterable[str]) -> list[str]:
+    return _parse_permissions(_dump_permissions(permissions))
+
+
+def parse_permissions_json(raw: str | None) -> list[str]:
+    return _parse_permissions(raw)
+
+
+def ensure_default_roles(db: Session) -> None:
+    defaults = [
+        {
+            "name": "admin",
+            "display_name": "管理员",
+            "description": "拥有全部权限。",
+            "permissions": ["*"],
+            "is_system": True,
+        },
+        {
+            "name": "readonly",
+            "display_name": "只读管理员",
+            "description": "仅可查看数据，不允许新增、修改或删除。",
+            "permissions": sorted(READ_ONLY_PERMISSIONS),
+            "is_system": True,
+        },
+    ]
+    for payload in defaults:
+        role = (
+            db.query(models.AuthRole)
+            .filter(models.AuthRole.name == payload["name"])
+            .first()
+        )
+        if role:
+            role.display_name = payload["display_name"]
+            role.description = payload["description"]
+            role.permissions_json = _dump_permissions(payload["permissions"])
+            role.is_system = True
+            db.add(role)
+            continue
+        role = models.AuthRole(
+            name=payload["name"],
+            display_name=payload["display_name"],
+            description=payload["description"],
+            permissions_json=_dump_permissions(payload["permissions"]),
+            is_system=True,
+        )
+        db.add(role)
+    db.commit()
+
+
+def get_role_permissions(db: Session, role_name: str | None) -> set[str]:
+    if not role_name:
+        return set()
+    role = (
+        db.query(models.AuthRole)
+        .filter(models.AuthRole.name == role_name)
+        .first()
+    )
+    if not role and role_name == "admin":
+        return {"*"}
+    if not role:
+        return set()
+    return set(_parse_permissions(role.permissions_json))
+
+
+def get_user_permissions(db: Session, user: models.AuthUser) -> list[str]:
+    permissions = get_role_permissions(db, user.role)
+    if "*" in permissions:
+        return sorted(KNOWN_PERMISSIONS | {"*"})
+    return sorted(permissions)
+
+
+def user_has_permission(
+    db: Session, user: models.AuthUser, permission: str
+) -> bool:
+    permissions = get_role_permissions(db, user.role)
+    if "*" in permissions:
+        return True
+    return permission in permissions
+
+
+def user_has_any_permission(
+    db: Session, user: models.AuthUser, permissions: Iterable[str]
+) -> bool:
+    perms = get_role_permissions(db, user.role)
+    if "*" in perms:
+        return True
+    for permission in permissions:
+        if permission in perms:
+            return True
+    return False
 
 
 def create_session(db: Session, user: models.AuthUser) -> models.AuthSession:

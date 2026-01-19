@@ -2637,6 +2637,91 @@ th {
   gap: 12px;
 }
 
+.permission-panel {
+  padding: 24px;
+  text-align: center;
+}
+
+.permission-panel h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  color: #1e293b;
+}
+
+.permission-panel p {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.role-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.role-subname {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+
+.role-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: #e2e8f0;
+  color: #1e293b;
+}
+
+.role-permission-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.role-permission-title {
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.role-permission-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.role-permission-group {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #f8fafc;
+}
+
+.role-permission-group h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #1e293b;
+}
+
+.role-permission-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.role-permission-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .settings-form input,
 .settings-form select,
 .settings-form textarea {

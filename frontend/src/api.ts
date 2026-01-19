@@ -12,6 +12,7 @@ import {
   InspectionRunListItem,
   InspectionSchedule,
   LicenseStatus,
+  AuthRole,
   AuthLoginChallenge,
   AuthUser,
 } from "./types";
@@ -184,6 +185,42 @@ export function changePassword(
       old_password: oldPassword,
       new_password: newPassword,
     }),
+  });
+}
+
+export function getRoles(): Promise<AuthRole[]> {
+  return request<AuthRole[]>("/roles");
+}
+
+export function createRole(payload: {
+  name: string;
+  display_name?: string;
+  description?: string;
+  permissions: string[];
+}): Promise<AuthRole> {
+  return request<AuthRole>("/roles", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateRole(
+  roleId: number,
+  payload: {
+    display_name?: string;
+    description?: string;
+    permissions?: string[];
+  }
+): Promise<AuthRole> {
+  return request<AuthRole>(`/roles/${roleId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteRole(roleId: number): Promise<void> {
+  return request<void>(`/roles/${roleId}`, {
+    method: "DELETE",
   });
 }
 

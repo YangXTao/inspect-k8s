@@ -285,6 +285,21 @@ class InspectionAgent(Base):
     runs = relationship("InspectionRun", back_populates="agent")
 
 
+class AuthRole(Base):
+    __tablename__ = "auth_roles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), unique=True, nullable=False)
+    display_name = Column(String(100), nullable=False, default="")
+    description = Column(Text, nullable=True)
+    permissions_json = Column(Text, nullable=False)
+    is_system = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
 class AuthUser(Base):
     __tablename__ = "auth_users"
 
