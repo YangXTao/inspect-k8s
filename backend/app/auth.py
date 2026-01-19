@@ -54,6 +54,10 @@ KNOWN_PERMISSIONS = {
     "role.create",
     "role.update",
     "role.delete",
+    "user.read",
+    "user.create",
+    "user.update",
+    "user.delete",
     "clusterAgent.read",
     "clusterAgent.create",
     "clusterAgent.update",
@@ -73,6 +77,7 @@ READ_ONLY_PERMISSIONS = {
     "prometheus.read",
     "inspectionItem.read",
     "role.read",
+    "user.read",
     "clusterAgent.read",
     "runRecord.read",
     "result.read",
@@ -192,6 +197,7 @@ def ensure_default_admin(db: Session) -> None:
         display_name="admin",
         password_hash=hash_password("admin"),
         role="admin",
+        roles_json=json.dumps(["admin"], ensure_ascii=True),
         is_active=True,
         auth_provider="local",
     )
@@ -216,6 +222,26 @@ def _parse_permissions(raw: str | None) -> list[str]:
         if not trimmed:
             continue
         if trimmed != "*" and trimmed not in KNOWN_PERMISSIONS:
+            continue
+        normalized.append(trimmed)
+    return sorted(set(normalized))
+
+
+def _parse_roles(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return []
+    if not isinstance(payload, list):
+        return []
+    normalized: list[str] = []
+    for value in payload:
+        if not isinstance(value, str):
+            continue
+        trimmed = value.strip()
+        if not trimmed:
             continue
         normalized.append(trimmed)
     return sorted(set(normalized))
@@ -300,8 +326,19 @@ def get_role_permissions(db: Session, role_name: str | None) -> set[str]:
     return set(_parse_permissions(role.permissions_json))
 
 
+def get_user_role_names(user: models.AuthUser) -> list[str]:
+    roles = _parse_roles(user.roles_json)
+    if roles:
+        return roles
+    if user.role:
+        return [user.role]
+    return []
+
+
 def get_user_permissions(db: Session, user: models.AuthUser) -> list[str]:
-    permissions = get_role_permissions(db, user.role)
+    permissions: set[str] = set()
+    for role_name in get_user_role_names(user):
+        permissions |= get_role_permissions(db, role_name)
     if "*" in permissions:
         return sorted(KNOWN_PERMISSIONS | {"*"})
     return sorted(permissions)
@@ -310,7 +347,9 @@ def get_user_permissions(db: Session, user: models.AuthUser) -> list[str]:
 def user_has_permission(
     db: Session, user: models.AuthUser, permission: str
 ) -> bool:
-    permissions = get_role_permissions(db, user.role)
+    permissions: set[str] = set()
+    for role_name in get_user_role_names(user):
+        permissions |= get_role_permissions(db, role_name)
     if "*" in permissions:
         return True
     return permission in permissions
@@ -319,7 +358,9 @@ def user_has_permission(
 def user_has_any_permission(
     db: Session, user: models.AuthUser, permissions: Iterable[str]
 ) -> bool:
-    perms = get_role_permissions(db, user.role)
+    perms: set[str] = set()
+    for role_name in get_user_role_names(user):
+        perms |= get_role_permissions(db, role_name)
     if "*" in perms:
         return True
     for permission in permissions:

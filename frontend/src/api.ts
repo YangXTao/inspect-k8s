@@ -224,6 +224,22 @@ export function deleteRole(roleId: number): Promise<void> {
   });
 }
 
+export function getUsers(): Promise<AuthUser[]> {
+  return request<AuthUser[]>("/users");
+}
+
+export function createUser(payload: {
+  username: string;
+  display_name?: string;
+  password: string;
+  roles: string[];
+}): Promise<AuthUser> {
+  return request<AuthUser>("/users", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function getInspectionItems(): Promise<InspectionItem[]> {
   return request<InspectionItem[]>("/inspection-items");
 }

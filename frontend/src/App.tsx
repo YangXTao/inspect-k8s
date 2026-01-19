@@ -64,6 +64,8 @@ import {
   createRole,
   updateRole,
   deleteRole,
+  getUsers,
+  createUser,
 } from "./api";
 import { appConfig } from "./config";
 import CompanyLogoUrl from "./assets/company-logo.png?url";
@@ -229,6 +231,15 @@ const ROLE_PERMISSION_BLOCKS: RolePermissionBlock[] = [
           { key: "role.read", label: "查看" },
         ],
       },
+      {
+        label: "用户",
+        options: [
+          { key: "user.create", label: "新增" },
+          { key: "user.update", label: "修改" },
+          { key: "user.delete", label: "删除" },
+          { key: "user.read", label: "查看" },
+        ],
+      },
     ],
   },
   {
@@ -354,6 +365,14 @@ const HISTORY_STATUS_OPTIONS: {
   { value: "cancelled", label: "已取消" },
 ];
 const SETTINGS_BASE_PATH = "/setting";
+const SETTINGS_TAB_IDS = [
+  "overview",
+  "inspection",
+  "prometheus-version",
+  "roles",
+  "users",
+  "license",
+] as const;
 const CONNECTION_TEST_OPERATOR = "__system_connection_test__";
 
 const BEIJING_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
@@ -6834,6 +6853,272 @@ const RoleEditorModal = ({
   );
 };
 
+interface UserSettingsPanelProps {
+  users: AuthUser[];
+  roles: AuthRole[];
+  loading: boolean;
+  submitting: boolean;
+  notice: string | null;
+  error: string | null;
+  canCreate: boolean;
+  onCreate: (payload: {
+    username: string;
+    display_name?: string;
+    password: string;
+    roles: string[];
+  }) => Promise<void>;
+  onRefresh: () => Promise<AuthUser[] | null>;
+}
+
+const UserSettingsPanel = ({
+  users,
+  roles,
+  loading,
+  submitting,
+  notice,
+  error,
+  canCreate,
+  onCreate,
+  onRefresh,
+}: UserSettingsPanelProps) => {
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [formUsername, setFormUsername] = useState("");
+  const [formDisplayName, setFormDisplayName] = useState("");
+  const [formPassword, setFormPassword] = useState("");
+  const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const sortedUsers = useMemo(
+    () => users.slice().sort((a, b) => a.id - b.id),
+    [users]
+  );
+  const roleLabelMap = useMemo(() => {
+    const map = new Map<string, string>();
+    roles.forEach((role) => {
+      map.set(role.name, role.display_name || role.name);
+    });
+    return map;
+  }, [roles]);
+
+  const openCreate = () => {
+    setFormUsername("");
+    setFormDisplayName("");
+    setFormPassword("");
+    setSelectedRoles([]);
+    setLocalError(null);
+    setEditorOpen(true);
+  };
+
+  const handleCloseEditor = () => {
+    setEditorOpen(false);
+    setLocalError(null);
+  };
+
+  const toggleRole = (name: string) => {
+    setSelectedRoles((prev) =>
+      prev.includes(name)
+        ? prev.filter((value) => value !== name)
+        : [...prev, name]
+    );
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmedUsername = formUsername.trim();
+    const trimmedPassword = formPassword.trim();
+    if (!trimmedUsername) {
+      setLocalError("用户名不能为空");
+      return;
+    }
+    if (!trimmedPassword) {
+      setLocalError("密码不能为空");
+      return;
+    }
+    if (selectedRoles.length === 0) {
+      setLocalError("请至少选择一个角色");
+      return;
+    }
+    setLocalError(null);
+    await onCreate({
+      username: trimmedUsername,
+      display_name: formDisplayName.trim() || undefined,
+      password: trimmedPassword,
+      roles: selectedRoles,
+    });
+    setEditorOpen(false);
+  };
+
+  const renderUserRoles = (user: AuthUser) => {
+    const roleNames =
+      user.roles && user.roles.length > 0
+        ? user.roles
+        : user.role
+          ? [user.role]
+          : [];
+    if (roleNames.length === 0) {
+      return "-";
+    }
+    return roleNames
+      .map((name) => roleLabelMap.get(name) || name)
+      .join("、");
+  };
+
+  return (
+    <div className="inspection-settings-panel role-settings-panel">
+      <div className="settings-header">
+        <div>
+          <h3>用户管理</h3>
+          <p>管理账号与角色授权范围</p>
+        </div>
+        <div className="settings-actions">
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => void onRefresh()}
+            disabled={loading || submitting}
+          >
+            刷新
+          </button>
+          <button
+            type="button"
+            className="primary"
+            onClick={openCreate}
+            disabled={!canCreate || loading || submitting}
+          >
+            创建用户
+          </button>
+        </div>
+      </div>
+      {notice && <div className="feedback success">{notice}</div>}
+      {error && <div className="feedback error">{error}</div>}
+      <div className="settings-list">
+        <div className="settings-list-header">
+          <div className="settings-list-count">共 {sortedUsers.length} 个用户</div>
+        </div>
+        <div className="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>用户名</th>
+                <th>显示名称</th>
+                <th>角色</th>
+                <th>状态</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedUsers.length === 0 && (
+                <tr>
+                  <td colSpan={4}>{loading ? "加载中..." : "暂无用户"}</td>
+                </tr>
+              )}
+              {sortedUsers.map((user) => (
+                <tr key={user.id}>
+                  <td>{user.username}</td>
+                  <td>{user.display_name || "-"}</td>
+                  <td>{renderUserRoles(user)}</td>
+                  <td>启用</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {editorOpen && (
+        <div className="modal-backdrop" aria-modal="true">
+          <div className="modal user-editor-modal" role="dialog" aria-label="创建用户">
+            <div className="modal-header">
+              <h3>创建用户</h3>
+            </div>
+            {localError && <div className="feedback error">{localError}</div>}
+            <form className="settings-form" onSubmit={handleSubmit}>
+              <label>
+                用户名
+                <input
+                  type="text"
+                  value={formUsername}
+                  onChange={(event) => setFormUsername(event.target.value)}
+                  placeholder="例如：admin2"
+                  disabled={submitting}
+                />
+              </label>
+              <label>
+                显示名称
+                <input
+                  type="text"
+                  value={formDisplayName}
+                  onChange={(event) => setFormDisplayName(event.target.value)}
+                  placeholder="例如：运维管理员"
+                  disabled={submitting}
+                />
+              </label>
+              <label>
+                登录密码
+                <input
+                  type="password"
+                  value={formPassword}
+                  onChange={(event) => setFormPassword(event.target.value)}
+                  placeholder="至少 6 位"
+                  disabled={submitting}
+                />
+              </label>
+              <div className="user-role-block">
+                <div className="user-role-title">角色授权</div>
+                <div className="user-role-list">
+                  {roles.length === 0 && (
+                    <div className="placeholder">暂无可用角色</div>
+                  )}
+                  {roles.map((role) => (
+                    <label key={role.id} className="user-role-option">
+                      <input
+                        type="checkbox"
+                        checked={selectedRoles.includes(role.name)}
+                        onChange={() => toggleRole(role.name)}
+                        disabled={submitting}
+                      />
+                      <span className="user-role-name">
+                        {role.display_name || role.name}
+                      </span>
+                      <span className="user-role-code">{role.name}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="user-role-selected">
+                  {selectedRoles.length === 0 ? (
+                    <span className="user-role-empty">未选择</span>
+                  ) : (
+                    selectedRoles.map((name) => (
+                      <span key={name} className="user-role-tag">
+                        {roleLabelMap.get(name) || name}
+                      </span>
+                    ))
+                  )}
+                </div>
+              </div>
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={handleCloseEditor}
+                  disabled={submitting}
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="primary"
+                  disabled={submitting}
+                >
+                  {submitting ? "创建中..." : "创建"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 interface LicenseSettingsPanelProps {
   status: LicenseCapabilities;
   uploading: boolean;
@@ -8485,6 +8770,10 @@ const App = () => {
   const canCreateRoles = hasPermission("role.create");
   const canUpdateRoles = hasPermission("role.update");
   const canDeleteRoles = hasPermission("role.delete");
+  const canViewUsers = hasPermission("user.read");
+  const canCreateUsers = hasPermission("user.create");
+  const canUpdateUsers = hasPermission("user.update");
+  const canDeleteUsers = hasPermission("user.delete");
   const canViewLicense = hasPermission("license.view");
   const canManageLicense = hasPermission("license.upload");
   const canViewInspectionItems = hasPermission("inspectionItem.read");
@@ -8602,6 +8891,8 @@ const App = () => {
       setRuns([]);
       setItems([]);
       setSchedules([]);
+      setRoles([]);
+      setUsers([]);
     }
   }, []);
 
@@ -8712,6 +9003,11 @@ const App = () => {
   const [rolesError, setRolesError] = useState<string | null>(null);
   const [rolesNotice, setRolesNotice] = useState<string | null>(null);
   const [roleSubmitting, setRoleSubmitting] = useState(false);
+  const [users, setUsers] = useState<AuthUser[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState<string | null>(null);
+  const [usersNotice, setUsersNotice] = useState<string | null>(null);
+  const [usersSubmitting, setUsersSubmitting] = useState(false);
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
   const [licenseError, setLicenseError] = useState<string | null>(null);
   const [licenseLoading, setLicenseLoading] = useState(false);
@@ -9169,6 +9465,32 @@ const backgroundLocation =
   }, [scheduleNotice]);
 
   useEffect(() => {
+    if ((!rolesNotice && !rolesError) || typeof window === "undefined") {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setRolesNotice(null);
+      setRolesError(null);
+    }, 5000);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [rolesNotice, rolesError]);
+
+  useEffect(() => {
+    if ((!usersNotice && !usersError) || typeof window === "undefined") {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setUsersNotice(null);
+      setUsersError(null);
+    }, 5000);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [usersNotice, usersError]);
+
+  useEffect(() => {
     if (!agentNotice || typeof window === "undefined") {
       return;
     }
@@ -9510,6 +9832,27 @@ const backgroundLocation =
     }
   }, [canViewRoles]);
 
+  const refreshUsers = useCallback(async () => {
+    if (!canViewUsers) {
+      setUsers([]);
+      return null;
+    }
+    setUsersLoading(true);
+    try {
+      const data = await getUsers();
+      setUsers(data);
+      setUsersError(null);
+      return data;
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "获取用户列表失败";
+      setUsersError(message);
+      return null;
+    } finally {
+      setUsersLoading(false);
+    }
+  }, [canViewUsers]);
+
   const handleCreateRole = useCallback(
     async (payload: {
       name: string;
@@ -9606,6 +9949,35 @@ const backgroundLocation =
     [canDeleteRoles, refreshRoles]
   );
 
+  const handleCreateUser = useCallback(
+    async (payload: {
+      username: string;
+      display_name?: string;
+      password: string;
+      roles: string[];
+    }) => {
+      if (!canCreateUsers) {
+        setUsersError("无权限创建用户");
+        return;
+      }
+      setUsersSubmitting(true);
+      setUsersError(null);
+      setUsersNotice(null);
+      try {
+        await createUser(payload);
+        setUsersNotice("用户创建成功");
+        await refreshUsers();
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "用户创建失败";
+        setUsersError(message);
+      } finally {
+        setUsersSubmitting(false);
+      }
+    },
+    [canCreateUsers, refreshUsers]
+  );
+
   const pendingClusterIds = useMemo(
     () =>
       clusters
@@ -9664,18 +10036,20 @@ const backgroundLocation =
       return;
     }
     void refreshClusters();
-    void refreshRuns();
-    void refreshItems();
-    void refreshSchedules();
-    void refreshRoles();
-  }, [
-    isAuthenticated,
-    refreshClusters,
-    refreshRuns,
-    refreshItems,
-    refreshSchedules,
-    refreshRoles,
-  ]);
+      void refreshRuns();
+      void refreshItems();
+      void refreshSchedules();
+      void refreshRoles();
+      void refreshUsers();
+    }, [
+      isAuthenticated,
+      refreshClusters,
+      refreshRuns,
+      refreshItems,
+      refreshSchedules,
+      refreshRoles,
+      refreshUsers,
+    ]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !isAuthenticated) {
@@ -11410,6 +11784,23 @@ const hasManualKubeconfig = useMemo(
           ),
         },
         {
+          id: "users",
+          label: "用户管理",
+          render: () => (
+            <UserSettingsPanel
+              users={users}
+              roles={roles}
+              loading={usersLoading}
+              submitting={usersSubmitting}
+              notice={usersNotice}
+              error={usersError}
+              canCreate={canCreateUsers}
+              onCreate={handleCreateUser}
+              onRefresh={refreshUsers}
+            />
+          ),
+        },
+        {
           id: "license",
           label: "License 管理",
           render: () => (
@@ -11435,6 +11826,9 @@ const hasManualKubeconfig = useMemo(
         if (tab.id === "roles") {
           return canViewRoles;
         }
+        if (tab.id === "users") {
+          return canViewUsers;
+        }
         if (tab.id === "license") {
           return canViewLicense;
         }
@@ -11459,13 +11853,21 @@ const hasManualKubeconfig = useMemo(
       roleSubmitting,
       rolesNotice,
       rolesError,
+      users,
+      usersLoading,
+      usersSubmitting,
+      usersNotice,
+      usersError,
       canCreateRoles,
       canUpdateRoles,
       canDeleteRoles,
+      canCreateUsers,
       handleCreateRole,
       handleUpdateRole,
       handleDeleteRole,
       refreshRoles,
+      handleCreateUser,
+      refreshUsers,
       licenseCapabilities,
       licenseUploading,
       licenseTextUploading,
@@ -11475,6 +11877,7 @@ const hasManualKubeconfig = useMemo(
       canViewInspectionItems,
       canViewPrometheusVersions,
       canViewRoles,
+      canViewUsers,
       canViewLicense,
       canManageInspectionItems,
       canManagePrometheusVersions,
@@ -11527,6 +11930,14 @@ const hasManualKubeconfig = useMemo(
         setSettingsTabId(nextTab);
       }
       if (!validTabIds.includes(requestedTab)) {
+        if (
+          !authChecked &&
+          SETTINGS_TAB_IDS.includes(
+            requestedTab as (typeof SETTINGS_TAB_IDS)[number]
+          )
+        ) {
+          return;
+        }
         const fallbackPath =
           nextTab === "overview"
             ? SETTINGS_BASE_PATH
@@ -11550,6 +11961,7 @@ const hasManualKubeconfig = useMemo(
     settingsTabId,
     navigate,
     backgroundLocation,
+    authChecked,
   ]);
 
   const handleSubmitClusterEdit = useCallback(

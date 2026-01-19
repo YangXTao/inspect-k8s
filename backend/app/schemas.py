@@ -520,7 +520,26 @@ class AuthUserOut(BaseModel):
     username: str
     display_name: Optional[str] = None
     role: str
+    roles: List[str] = Field(default_factory=list)
     permissions: List[str] = Field(default_factory=list)
+
+
+class AuthUserListOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str
+    display_name: Optional[str] = None
+    role: str
+    roles: List[str] = Field(default_factory=list)
+    is_active: bool
+
+
+class AuthUserCreateIn(BaseModel):
+    username: str = Field(..., min_length=1, max_length=100)
+    display_name: Optional[str] = Field(default=None, max_length=100)
+    password: str = Field(..., min_length=6, max_length=128)
+    roles: List[str] = Field(default_factory=list)
 
 
 class AuthPasswordChangeIn(BaseModel):

@@ -316,6 +316,7 @@ class AuthUser(Base):
     display_name = Column(String(100), nullable=False, default="")
     password_hash = Column(String(255), nullable=False)
     role = Column(String(50), nullable=False, default="admin")
+    roles_json = Column(Text, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
     auth_provider = Column(String(20), nullable=False, default="local")
     external_id = Column(String(150), nullable=True)

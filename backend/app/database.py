@@ -100,10 +100,24 @@ def _ensure_auth_schema() -> None:
         return
 
     dialect = engine.dialect.name
+    statements: list[str] = []
+    if "auth_users" in table_names:
+        columns = {column["name"] for column in inspector.get_columns("auth_users")}
+        if "roles_json" not in columns:
+            column_type = "TEXT" if dialect == "sqlite" else "TEXT"
+            statements.append(
+                f"ALTER TABLE auth_users ADD COLUMN roles_json {column_type} NULL"
+            )
+
     if dialect == "sqlite":
+        if not statements:
+            return
+        with engine.begin() as connection:
+            for statement in statements:
+                connection.execute(text(statement))
         return
 
-    statements: list[str] = []
+    # MySQL charset normalization
     if "auth_roles" in table_names:
         statements.extend(
             [
@@ -133,6 +147,8 @@ def _ensure_auth_schema() -> None:
                 "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
                 "ALTER TABLE auth_users MODIFY role VARCHAR(50) "
                 "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+                "ALTER TABLE auth_users MODIFY roles_json TEXT "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
                 "ALTER TABLE auth_users MODIFY auth_provider VARCHAR(20) "
                 "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
                 "ALTER TABLE auth_users MODIFY external_id VARCHAR(150) "

@@ -48,6 +48,7 @@ from .auth import (
     ensure_default_roles,
     get_user_from_session,
     get_user_permissions,
+    get_user_role_names,
     hash_password,
     normalize_permissions,
     parse_password_hash,
@@ -1166,7 +1167,10 @@ def health_check() -> dict[str, str]:
 def _serialize_auth_user(db: Session, user: models.AuthUser) -> schemas.AuthUserOut:
     payload = schemas.AuthUserOut.model_validate(user)
     return payload.model_copy(
-        update={"permissions": get_user_permissions(db, user)}
+        update={
+            "permissions": get_user_permissions(db, user),
+            "roles": get_user_role_names(user),
+        }
     )
 
 
@@ -1309,6 +1313,11 @@ def _serialize_role(role: models.AuthRole) -> schemas.AuthRoleOut:
     )
 
 
+def _serialize_user(user: models.AuthUser) -> schemas.AuthUserListOut:
+    payload = schemas.AuthUserListOut.model_validate(user)
+    return payload.model_copy(update={"roles": get_user_role_names(user)})
+
+
 def _normalize_role_permissions(raw_permissions: list[str]) -> list[str]:
     normalized = normalize_permissions(raw_permissions)
     invalid = []
@@ -1326,6 +1335,30 @@ def _normalize_role_permissions(raw_permissions: list[str]) -> list[str]:
         raise HTTPException(
             status_code=400,
             detail=f"无效的权限标识：{', '.join(sorted(set(invalid)))}",
+        )
+    return normalized
+
+
+def _normalize_user_roles(db: Session, raw_roles: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for value in raw_roles:
+        if not isinstance(value, str):
+            continue
+        trimmed = value.strip()
+        if not trimmed:
+            continue
+        if trimmed not in normalized:
+            normalized.append(trimmed)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="至少选择一个角色")
+    existing_roles = {
+        role.name for role in db.query(models.AuthRole.name).all()
+    }
+    missing = [name for name in normalized if name not in existing_roles]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"包含不存在的角色：{', '.join(missing)}",
         )
     return normalized
 
@@ -1412,16 +1445,56 @@ def delete_role(
         raise HTTPException(status_code=404, detail="角色不存在")
     if role.is_system:
         raise HTTPException(status_code=400, detail="系统角色不允许删除")
-    user_count = (
-        db.query(models.AuthUser.id)
-        .filter(models.AuthUser.role == role.name)
-        .count()
-    )
-    if user_count > 0:
+    users = db.query(models.AuthUser).all()
+    if any(role.name in get_user_role_names(user) for user in users):
         raise HTTPException(status_code=400, detail="该角色正在被用户使用")
     db.delete(role)
     db.commit()
     return {}
+
+
+@app.get("/users", response_model=List[schemas.AuthUserListOut])
+def list_users(
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "user.read", "用户查看")
+    users = db.query(models.AuthUser).order_by(models.AuthUser.id.asc()).all()
+    return [_serialize_user(user) for user in users]
+
+
+@app.post("/users", response_model=schemas.AuthUserListOut, status_code=201)
+def create_user(
+    payload: schemas.AuthUserCreateIn,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "user.create", "用户创建")
+    username = payload.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="用户名不能为空")
+    existing = (
+        db.query(models.AuthUser)
+        .filter(models.AuthUser.username == username)
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail="用户名已存在")
+    role_names = _normalize_user_roles(db, payload.roles)
+    display_name = (payload.display_name or username).strip()
+    user = models.AuthUser(
+        username=username,
+        display_name=display_name,
+        password_hash=hash_password(payload.password),
+        role=role_names[0],
+        roles_json=json.dumps(role_names, ensure_ascii=True),
+        is_active=True,
+        auth_provider="local",
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return _serialize_user(user)
 
 
 @app.get("/system-agent-install.sh", response_class=PlainTextResponse)

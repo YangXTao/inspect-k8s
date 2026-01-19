@@ -2906,6 +2906,101 @@ th {
   color: #94a3b8;
 }
 
+.user-editor-modal {
+  font-size: 14px;
+  color: #475569;
+  line-height: 1.4;
+  max-width: 720px;
+  width: min(720px, 92vw);
+}
+
+.user-editor-modal .modal-header h3 {
+  font-size: 18px;
+  color: #0f172a;
+}
+
+.user-editor-modal .settings-form {
+  font-size: 14px;
+  gap: 12px;
+}
+
+.user-editor-modal .settings-form label {
+  font-size: 14px;
+  color: inherit;
+}
+
+.user-editor-modal .settings-form input {
+  font-size: 14px;
+  padding: 8px 10px;
+  border-color: #dbe3f4;
+  background: #fff;
+  box-shadow: inset 0 1px 0 rgba(248, 250, 252, 0.8);
+  color: #0f172a;
+}
+
+.user-role-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.user-role-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.user-role-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.user-role-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-size: 13px;
+  color: #334155;
+}
+
+.user-role-option input[type="checkbox"] {
+  margin: 0;
+}
+
+.user-role-name {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.user-role-code {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.user-role-selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.user-role-tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #0f172a;
+  font-size: 12px;
+}
+
+.user-role-empty {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
 .settings-form input,
 .settings-form select,
 .settings-form textarea {
