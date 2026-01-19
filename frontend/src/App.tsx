@@ -339,9 +339,6 @@ const isLicenseRelatedMessage = (value?: string | null) => {
     return false;
   }
   const lower = trimmed.toLowerCase();
-  const readOnlyMessage = !license.canRunInspections
-    ? license.reason ?? "当前 License 不支持巡检项管理。"
-    : "当前账号无巡检项管理权限。";
 
   return (
     lower.includes("license") ||
