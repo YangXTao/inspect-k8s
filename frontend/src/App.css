@@ -2722,6 +2722,73 @@ th {
   gap: 8px;
 }
 
+.role-editor-modal {
+  font-size: 14px;
+  color: #475569;
+  line-height: 1.4;
+  max-width: 980px;
+  width: min(980px, 94vw);
+  max-height: 90vh;
+  overflow: auto;
+}
+
+.role-editor-modal .modal-header h3 {
+  font-size: 18px;
+  color: #0f172a;
+}
+
+.role-editor-modal .settings-form {
+  font-size: 14px;
+  gap: 12px;
+}
+
+.role-editor-modal .settings-form label {
+  font-size: 14px;
+  color: inherit;
+}
+
+.role-editor-modal .settings-form input,
+.role-editor-modal .settings-form select,
+.role-editor-modal .settings-form textarea {
+  font-size: 14px;
+  padding: 8px 10px;
+  border-color: #dbe3f4;
+  background: #fff;
+  box-shadow: inset 0 1px 0 rgba(248, 250, 252, 0.8);
+  color: #0f172a;
+}
+
+.role-editor-modal .role-permission-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.role-editor-modal .role-permission-grid {
+  grid-template-columns: repeat(4, minmax(160px, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+.role-editor-modal .role-permission-group {
+  padding: 8px 10px;
+  background: #f8fafc;
+}
+
+.role-editor-modal .role-permission-group h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.role-editor-modal .role-permission-list {
+  font-size: 13px;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
 .settings-form input,
 .settings-form select,
 .settings-form textarea {
