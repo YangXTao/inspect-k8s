@@ -368,7 +368,6 @@ const SETTINGS_TAB_IDS = [
   "overview",
   "inspection",
   "prometheus-version",
-  "roles",
   "users",
   "license",
 ] as const;
@@ -1326,6 +1325,8 @@ interface OverviewProps {
   ) => Promise<void>;
   testingClusterIds: Record<number, boolean>;
   license: LicenseCapabilities;
+  canUpdateClusters: boolean;
+  canDeleteClusters: boolean;
   canManageAgents: boolean;
   agentSubmitting: boolean;
   agentNotice: string | null;
@@ -1361,6 +1362,8 @@ const OverviewView = ({
   onTestClusterConnection,
   testingClusterIds,
   license,
+  canUpdateClusters,
+  canDeleteClusters,
   canManageAgents,
   agentSubmitting,
   agentNotice,
@@ -1372,6 +1375,8 @@ const OverviewView = ({
   const enableServerClusterUpload = false;
   const enableServerConnectionTest = true;
   const canManageClusters = license.canManageClusters;
+  const canEditClusters = canManageClusters && canUpdateClusters;
+  const canRemoveClusters = canManageClusters && canDeleteClusters;
   const [clusterPageSize, setClusterPageSize] = useState(
     DEFAULT_CLUSTER_PAGE_SIZE
   );
@@ -1567,10 +1572,10 @@ const OverviewView = ({
     );
   }, [clusters]);
   useEffect(() => {
-    if (!canManageClusters) {
+    if (!canRemoveClusters) {
       setSelectedClusterIds([]);
     }
-  }, [canManageClusters]);
+  }, [canRemoveClusters]);
 
   const filteredClusterIdSet = useMemo(
     () => new Set(filteredClusters.map((cluster) => cluster.id)),
@@ -1588,7 +1593,7 @@ const OverviewView = ({
 
   const handleToggleCluster = useCallback(
     (clusterId: number) => {
-      if (!canManageClusters) {
+      if (!canRemoveClusters) {
         return;
       }
       setSelectedClusterIds((prev) =>
@@ -1597,12 +1602,12 @@ const OverviewView = ({
           : [...prev, clusterId]
       );
     },
-    [canManageClusters]
+    [canRemoveClusters]
   );
 
   const handleToggleAllClusters = useCallback(() => {
     setSelectedClusterIds((prev) => {
-      if (!canManageClusters || filteredClusters.length === 0) {
+      if (!canRemoveClusters || filteredClusters.length === 0) {
         return prev;
       }
       const next = new Set(prev);
@@ -1616,10 +1621,10 @@ const OverviewView = ({
       filteredClusters.forEach((cluster) => next.add(cluster.id));
       return Array.from(next);
     });
-  }, [filteredClusters, canManageClusters]);
+  }, [filteredClusters, canRemoveClusters]);
 
   const handleDeleteSelectedClusters = useCallback(() => {
-    if (!canManageClusters) {
+    if (!canRemoveClusters) {
       return;
     }
     const targetIds = selectedClusterIds.filter((id) =>
@@ -1633,7 +1638,7 @@ const OverviewView = ({
     filteredClusterIdSet,
     onDeleteClustersBulk,
     selectedClusterIds,
-    canManageClusters,
+    canRemoveClusters,
   ]);
 
   return (
@@ -1736,25 +1741,29 @@ const OverviewView = ({
                   placeholder="关键字筛选"
                 />
               </div>
-              <span className="selection-hint">
-                已选 {selectedFilteredCount} / {filteredClusters.length}
-              </span>
-              <button
-                type="button"
-                className="secondary"
-                onClick={handleToggleAllClusters}
-                disabled={!canManageClusters}
-              >
-                {allSelected ? "取消全选" : "全选"}
-              </button>
-              <button
-                type="button"
-                className="secondary danger"
-                onClick={handleDeleteSelectedClusters}
-                disabled={selectedClusterIds.length === 0 || !canManageClusters}
-              >
-                删除
-              </button>
+              {canRemoveClusters && (
+                <>
+                  <span className="selection-hint">
+                    已选 {selectedFilteredCount} / {filteredClusters.length}
+                  </span>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={handleToggleAllClusters}
+                    disabled={!canRemoveClusters}
+                  >
+                    {allSelected ? "取消全选" : "全选"}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary danger"
+                    onClick={handleDeleteSelectedClusters}
+                    disabled={selectedClusterIds.length === 0 || !canRemoveClusters}
+                  >
+                    删除
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -1814,40 +1823,44 @@ const OverviewView = ({
                     <div className="cluster-card-content">
                     <div className="cluster-card-top">
                       <div className="cluster-name-row">
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={(event) => {
-                            event.stopPropagation();
-                            handleToggleCluster(cluster.id);
-                          }}
-                          onClick={(event) => event.stopPropagation()}
-                          disabled={!canManageClusters}
-                        />
+                        {canRemoveClusters && (
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(event) => {
+                              event.stopPropagation();
+                              handleToggleCluster(cluster.id);
+                            }}
+                            onClick={(event) => event.stopPropagation()}
+                            disabled={!canRemoveClusters}
+                          />
+                        )}
                         <span className="cluster-id-badge">{displayId}</span>
                         <div className="cluster-name">{cluster.name}</div>
                       </div>
                       <div className="cluster-actions">
-                        <button
-                          className="link-button small"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onEditCluster(cluster);
-                          }}
-                          disabled={!canManageClusters}
-                        >
-                          编辑
-                        </button>
-                        <button
-                          className="link-button small danger"
-                          onClick={async (event) => {
-                            event.stopPropagation();
-                            await onDeleteCluster(cluster);
-                          }}
-                          disabled={!canManageClusters}
-                        >
-                          删除
-                        </button>
+                        {canEditClusters && (
+                          <button
+                            className="link-button small"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onEditCluster(cluster);
+                            }}
+                          >
+                            编辑
+                          </button>
+                        )}
+                        {canRemoveClusters && (
+                          <button
+                            className="link-button small danger"
+                            onClick={async (event) => {
+                              event.stopPropagation();
+                              await onDeleteCluster(cluster);
+                            }}
+                          >
+                            删除
+                          </button>
+                        )}
                       </div>
                     </div>
                     <div className="cluster-status-line">
@@ -2622,6 +2635,8 @@ interface ClusterDetailViewProps {
   ) => Promise<void>;
   testingClusterIds: Record<number, boolean>;
   license: LicenseCapabilities;
+  canUpdateClusters: boolean;
+  canDeleteClusters: boolean;
 }
 
 const ClusterDetailView = ({
@@ -2647,6 +2662,8 @@ const ClusterDetailView = ({
   onTestClusterConnection,
   testingClusterIds,
   license,
+  canUpdateClusters,
+  canDeleteClusters,
 }: ClusterDetailViewProps) => {
   const enableServerConnectionTest = true;
   const { clusterKey } = useParams<{ clusterKey?: string }>();
@@ -2669,6 +2686,8 @@ const ClusterDetailView = ({
     DEFAULT_PROMETHEUS_VERSION
   );
   const canManageClusters = license.canManageClusters;
+  const canEditClusters = canManageClusters && canUpdateClusters;
+  const canRemoveClusters = canManageClusters && canDeleteClusters;
   const canRunInspections = license.canRunInspections;
   const canDownloadReports = license.canDownloadReports;
 
@@ -3107,22 +3126,24 @@ const ClusterDetailView = ({
               {isTesting ? "测试中..." : "连接测试"}
             </button>
           )}
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => onEditCluster(cluster)}
-            disabled={!canManageClusters}
-          >
-            编辑集群
-          </button>
-          <button
-            type="button"
-            className="secondary danger"
-            onClick={() => void onDeleteCluster(cluster)}
-            disabled={!canManageClusters}
-          >
-            删除集群
-          </button>
+          {canEditClusters && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => onEditCluster(cluster)}
+            >
+              编辑集群
+            </button>
+          )}
+          {canRemoveClusters && (
+            <button
+              type="button"
+              className="secondary danger"
+              onClick={() => void onDeleteCluster(cluster)}
+            >
+              删除集群
+            </button>
+          )}
         </div>
       </div>
 
@@ -7048,6 +7069,30 @@ const UserSettingsPanel = ({
       </div>
       {notice && <div className="feedback success">{notice}</div>}
       {error && <div className="feedback error">{error}</div>}
+      <div className="user-role-summary">
+        <div className="user-role-summary-title">系统角色</div>
+        <div className="user-role-summary-list">
+          {roles.length === 0 && (
+            <div className="placeholder">暂无角色</div>
+          )}
+          {roles.map((role) => {
+            const permissionLabel = role.permissions.includes("*")
+              ? "全部权限"
+              : `${role.permissions.length} 项`;
+            return (
+              <div key={role.id} className="user-role-summary-card">
+                <div className="user-role-summary-name">
+                  {role.display_name || role.name}
+                </div>
+                <div className="user-role-summary-meta">{role.name}</div>
+                <div className="user-role-summary-desc">
+                  {role.description || permissionLabel}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
       <div className="settings-list">
         <div className="settings-list-header">
           <div className="settings-list-count">共 {sortedUsers.length} 个用户</div>
@@ -11916,26 +11961,6 @@ const hasManualKubeconfig = useMemo(
           ),
         },
         {
-          id: "roles",
-          label: "角色管理",
-          render: () => (
-            <RoleSettingsPanel
-              roles={roles}
-              loading={rolesLoading}
-              submitting={roleSubmitting}
-              notice={rolesNotice}
-              error={rolesError}
-              canCreate={canCreateRoles}
-              canUpdate={canUpdateRoles}
-              canDelete={canDeleteRoles}
-              onCreate={handleCreateRole}
-              onUpdate={handleUpdateRole}
-              onDelete={handleDeleteRole}
-              onRefresh={refreshRoles}
-            />
-          ),
-        },
-        {
           id: "users",
           label: "用户管理",
           render: () => (
@@ -11978,9 +12003,6 @@ const hasManualKubeconfig = useMemo(
         }
         if (tab.id === "prometheus-version") {
           return canViewPrometheusVersions;
-        }
-        if (tab.id === "roles") {
-          return canViewRoles;
         }
         if (tab.id === "users") {
           return canViewUsers;
@@ -12218,6 +12240,8 @@ const hasManualKubeconfig = useMemo(
       onTestClusterConnection={handleTestClusterConnection}
       testingClusterIds={testingClusterIds}
       license={licenseCapabilities}
+      canUpdateClusters={canUpdateClusterAgents}
+      canDeleteClusters={canDeleteClusterAgents}
       canManageAgents={licenseCapabilities.canManageAgents}
       agentSubmitting={agentSubmitting}
       agentNotice={agentNotice}
@@ -12364,6 +12388,8 @@ const hasManualKubeconfig = useMemo(
                 onTestClusterConnection={handleTestClusterConnection}
                 testingClusterIds={testingClusterIds}
                 license={licenseCapabilities}
+                canUpdateClusters={canUpdateClusterAgents}
+                canDeleteClusters={canDeleteClusterAgents}
               />
             }
           />

@@ -3010,6 +3010,53 @@ th {
   color: #94a3b8;
 }
 
+.user-role-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.user-role-summary-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.user-role-summary-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.user-role-summary-card {
+  border-radius: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.user-role-summary-name {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.user-role-summary-meta {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.user-role-summary-desc {
+  font-size: 12px;
+  color: #475569;
+}
+
 .settings-form input,
 .settings-form select,
 .settings-form textarea {
