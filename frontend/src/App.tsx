@@ -8331,6 +8331,16 @@ const currentNoticeScope = useMemo(
   () => resolveNoticeScope(location.pathname),
   [location.pathname]
 );
+const loginRedirectState = useMemo(
+  () => ({
+    from: {
+      pathname: location.pathname,
+      search: location.search,
+      hash: location.hash,
+    },
+  }),
+  [location.pathname, location.search, location.hash]
+);
 const backgroundLocation =
     (
       location.state as
@@ -8692,6 +8702,25 @@ const backgroundLocation =
   const handleClearAgentCommand = useCallback(() => {
     setGeneratedAgentCommand(null);
   }, []);
+
+  useEffect(() => {
+    if (!authUser || location.pathname !== "/login") {
+      return;
+    }
+    const state = location.state as
+      | {
+          from?: {
+            pathname?: string;
+            search?: string;
+            hash?: string;
+          };
+        }
+      | undefined;
+    const from = state?.from;
+    const fromPath = from?.pathname && from.pathname !== "/login" ? from.pathname : "/";
+    const target = `${fromPath}${from?.search ?? ""}${from?.hash ?? ""}`;
+    navigate(target, { replace: true });
+  }, [authUser, location.pathname, location.state, navigate]);
 
   const hasRunningRuns = useMemo(
     () =>
@@ -10573,12 +10602,7 @@ const hasManualKubeconfig = useMemo(
   );
 
   if (!authChecked) {
-    return (
-      <Routes>
-        <Route path="/login" element={loginLoadingElement} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
-    );
+    return loginLoadingElement;
   }
 
   if (!authUser) {
@@ -10594,7 +10618,12 @@ const hasManualKubeconfig = useMemo(
             />
           }
         />
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        <Route
+          path="*"
+          element={
+            <Navigate to="/login" replace state={loginRedirectState} />
+          }
+        />
       </Routes>
     );
   }
