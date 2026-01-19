@@ -10561,26 +10561,41 @@ const hasManualKubeconfig = useMemo(
     />
   );
 
-  if (!authChecked) {
-    return (
-      <div className="login-page">
-        <div className="login-card">
-          <div className="login-header">
-            <h1>Kubernetes 巡检中心</h1>
-            <p>正在校验登录状态...</p>
-          </div>
+  const loginLoadingElement = (
+    <div className="login-page">
+      <div className="login-card">
+        <div className="login-header">
+          <h1>Kubernetes 巡检中心</h1>
+          <p>正在校验登录状态...</p>
         </div>
       </div>
+    </div>
+  );
+
+  if (!authChecked) {
+    return (
+      <Routes>
+        <Route path="/login" element={loginLoadingElement} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
     );
   }
 
   if (!authUser) {
     return (
-      <LoginView
-        loading={authSubmitting}
-        error={authError}
-        onSubmit={handleLogin}
-      />
+      <Routes>
+        <Route
+          path="/login"
+          element={
+            <LoginView
+              loading={authSubmitting}
+              error={authError}
+              onSubmit={handleLogin}
+            />
+          }
+        />
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
     );
   }
 
@@ -10603,6 +10618,7 @@ const hasManualKubeconfig = useMemo(
       <main className="app-shell">
         <Routes location={routesLocation}>
           <Route path="/" element={overviewRouteElement} />
+          <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/setting/*" element={overviewRouteElement} />
           <Route
             path="/history"
