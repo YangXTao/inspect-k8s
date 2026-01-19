@@ -496,7 +496,21 @@ class LicenseImportPayload(BaseModel):
 
 class AuthLoginIn(BaseModel):
     username: str = Field(..., min_length=1, max_length=100)
-    password: str = Field(..., min_length=1, max_length=128)
+    password: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    nonce: Optional[str] = Field(default=None, min_length=1, max_length=256)
+    proof: Optional[str] = Field(default=None, min_length=1, max_length=512)
+    scheme: Optional[str] = Field(default=None, min_length=1, max_length=50)
+
+
+class AuthLoginChallengeIn(BaseModel):
+    username: str = Field(..., min_length=1, max_length=100)
+
+
+class AuthLoginChallengeOut(BaseModel):
+    salt: str
+    iterations: int
+    nonce: str
+    scheme: str
 
 
 class AuthUserOut(BaseModel):

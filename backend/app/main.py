@@ -38,11 +38,16 @@ from .auth import (
     AUTH_COOKIE_NAME,
     COOKIE_SAMESITE,
     COOKIE_SECURE,
+    PASSWORD_ITERATIONS,
+    PASSWORD_SALT_BYTES,
     SESSION_TTL_HOURS,
+    build_login_challenge,
     create_session,
     ensure_default_admin,
     get_user_from_session,
     hash_password,
+    parse_password_hash,
+    verify_login_proof,
     verify_password,
 )
 from .database import SessionLocal, ensure_runtime_directories, init_db
@@ -775,6 +780,7 @@ app.add_middleware(
 
 PUBLIC_AUTH_PATHS = {
     "/auth/login",
+    "/auth/login-challenge",
     "/health",
     "/system-agent-install.sh",
     "/openapi.json",
@@ -1138,13 +1144,22 @@ def login(
     response: Response,
     db: Session = Depends(get_db),
 ) -> schemas.AuthUserOut:
+    username = payload.username.strip()
     user = (
         db.query(models.AuthUser)
-        .filter(models.AuthUser.username == payload.username.strip())
+        .filter(models.AuthUser.username == username)
         .first()
     )
-    if not user or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    if payload.proof and payload.nonce:
+        if not user or not verify_login_proof(
+            username, payload.nonce, payload.proof, user.password_hash
+        ):
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+    elif payload.password:
+        if not user or not verify_password(payload.password, user.password_hash):
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+    else:
+        raise HTTPException(status_code=400, detail="缺少登录凭据")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="账号已停用")
     session = create_session(db, user)
@@ -1167,6 +1182,32 @@ def login(
         secure=COOKIE_SECURE,
     )
     return schemas.AuthUserOut.model_validate(user)
+
+
+@app.post("/auth/login-challenge", response_model=schemas.AuthLoginChallengeOut)
+def login_challenge(
+    payload: schemas.AuthLoginChallengeIn,
+    db: Session = Depends(get_db),
+) -> schemas.AuthLoginChallengeOut:
+    username = payload.username.strip()
+    salt = secrets.token_bytes(PASSWORD_SALT_BYTES).hex()
+    iterations = PASSWORD_ITERATIONS
+    user = (
+        db.query(models.AuthUser)
+        .filter(models.AuthUser.username == username)
+        .first()
+    )
+    if user:
+        parsed = parse_password_hash(user.password_hash)
+        if parsed:
+            iterations, salt, _ = parsed
+    nonce = build_login_challenge(username)
+    return schemas.AuthLoginChallengeOut(
+        salt=salt,
+        iterations=iterations,
+        nonce=nonce,
+        scheme="pbkdf2-hmac-sha256",
+    )
 
 
 @app.post("/auth/logout")

@@ -18,6 +18,13 @@ export type AuthUser = {
   role: string;
 };
 
+export type AuthLoginChallenge = {
+  salt: string;
+  iterations: number;
+  nonce: string;
+  scheme: string;
+};
+
 export type ClusterConfig = {
   id: number;
   name: string;

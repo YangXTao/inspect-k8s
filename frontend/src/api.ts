@@ -12,6 +12,7 @@ import {
   InspectionRunListItem,
   InspectionSchedule,
   LicenseStatus,
+  AuthLoginChallenge,
   AuthUser,
 } from "./types";
 
@@ -80,14 +81,92 @@ async function request<T>(
   return (await response.json()) as T;
 }
 
+function hexToBytes(hex: string): Uint8Array {
+  const normalized = hex.length % 2 === 0 ? hex : `0${hex}`;
+  const bytes = new Uint8Array(normalized.length / 2);
+  for (let i = 0; i < bytes.length; i += 1) {
+    const byte = Number.parseInt(normalized.slice(i * 2, i * 2 + 2), 16);
+    if (Number.isNaN(byte)) {
+      throw new Error("登录参数无效");
+    }
+    bytes[i] = byte;
+  }
+  return bytes;
+}
+
+function bufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return globalThis.btoa(binary);
+}
+
+async function buildLoginProof(
+  password: string,
+  challenge: AuthLoginChallenge
+): Promise<string> {
+  if (!globalThis.crypto?.subtle) {
+    throw new Error("浏览器不支持安全登录，请更换浏览器");
+  }
+  const encoder = new TextEncoder();
+  const keyMaterial = await globalThis.crypto.subtle.importKey(
+    "raw",
+    encoder.encode(password),
+    { name: "PBKDF2" },
+    false,
+    ["deriveBits"]
+  );
+  const derivedBits = await globalThis.crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: hexToBytes(challenge.salt),
+      iterations: challenge.iterations,
+      hash: "SHA-256",
+    },
+    keyMaterial,
+    256
+  );
+  const hmacKey = await globalThis.crypto.subtle.importKey(
+    "raw",
+    derivedBits,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = await globalThis.crypto.subtle.sign(
+    "HMAC",
+    hmacKey,
+    encoder.encode(challenge.nonce)
+  );
+  return bufferToBase64(signature);
+}
+
 export function getCurrentUser(): Promise<AuthUser> {
   return request<AuthUser>("/auth/me");
 }
 
-export function login(username: string, password: string): Promise<AuthUser> {
+export async function login(
+  username: string,
+  password: string
+): Promise<AuthUser> {
+  const challenge = await request<AuthLoginChallenge>(
+    "/auth/login-challenge",
+    {
+      method: "POST",
+      body: JSON.stringify({ username }),
+    }
+  );
+  const proof = await buildLoginProof(password, challenge);
   return request<AuthUser>("/auth/login", {
     method: "POST",
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({
+      username,
+      nonce: challenge.nonce,
+      proof,
+      scheme: challenge.scheme,
+    }),
   });
 }
 
