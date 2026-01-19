@@ -4128,6 +4128,9 @@ const InspectionSettingsPanel = ({
   onImport,
 }: InspectionSettingsPanelProps) => {
   const readOnly = !license.canRunInspections || !canManage;
+  const readOnlyMessage = !license.canRunInspections
+    ? license.reason ?? "当前 License 不支持巡检项管理。"
+    : "当前账号无巡检项管理权限。";
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [editingItem, setEditingItem] = useState<InspectionItem | null>(null);
   const [formName, setFormName] = useState("");
