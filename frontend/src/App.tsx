@@ -6918,6 +6918,10 @@ const UserSettingsPanel = ({
     });
     return map;
   }, [roles]);
+  const isAdminUser = useCallback(
+    (user: AuthUser | null) => user?.username === "admin",
+    []
+  );
 
   const openCreate = () => {
     setEditingUser(null);
@@ -6963,6 +6967,7 @@ const UserSettingsPanel = ({
     event.preventDefault();
     const trimmedUsername = formUsername.trim();
     const trimmedPassword = formPassword.trim();
+    const editingAdmin = isAdminUser(editingUser);
     if (!trimmedUsername) {
       setLocalError("用户名不能为空");
       return;
@@ -6971,17 +6976,24 @@ const UserSettingsPanel = ({
       setLocalError("密码不能为空");
       return;
     }
-    if (selectedRoles.length === 0) {
+    if (!editingAdmin && selectedRoles.length === 0) {
       setLocalError("请至少选择一个角色");
       return;
     }
     setLocalError(null);
     if (editingUser) {
-      await onUpdate(editingUser.id, {
+      const payload: {
+        display_name?: string;
+        password?: string;
+        roles?: string[];
+      } = {
         display_name: formDisplayName.trim() || undefined,
         password: trimmedPassword || undefined,
-        roles: selectedRoles,
-      });
+      };
+      if (!editingAdmin) {
+        payload.roles = selectedRoles;
+      }
+      await onUpdate(editingUser.id, payload);
     } else {
       await onCreate({
         username: trimmedUsername,
@@ -7077,7 +7089,7 @@ const UserSettingsPanel = ({
                         type="button"
                         className="link-button danger"
                         onClick={() => onDelete(user)}
-                        disabled={!canDelete || submitting}
+                        disabled={!canDelete || submitting || isAdminUser(user)}
                       >
                         删除
                       </button>
@@ -7132,7 +7144,12 @@ const UserSettingsPanel = ({
                 />
               </label>
               <div className="user-role-block">
-                <div className="user-role-title">角色授权</div>
+                <div className="user-role-title">
+                  角色授权
+                  {editingUser && isAdminUser(editingUser) && (
+                    <span className="user-role-hint">管理员不可修改</span>
+                  )}
+                </div>
                 <div className="user-role-list">
                   {roles.length === 0 && (
                     <div className="placeholder">暂无可用角色</div>
@@ -7143,7 +7160,10 @@ const UserSettingsPanel = ({
                         type="checkbox"
                         checked={selectedRoles.includes(role.name)}
                         onChange={() => toggleRole(role.name)}
-                        disabled={submitting}
+                        disabled={
+                          submitting ||
+                          (editingUser !== null && isAdminUser(editingUser))
+                        }
                       />
                       <span className="user-role-name">
                         {role.display_name || role.name}

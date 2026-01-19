@@ -1509,6 +1509,10 @@ def update_user(
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
     update_payload = payload.model_dump(exclude_unset=True)
+    is_admin = user.username == "admin"
+    if is_admin:
+        if "roles" in update_payload or "is_active" in update_payload:
+            raise HTTPException(status_code=400, detail="管理员账号不允许修改角色或状态")
     if "display_name" in update_payload:
         user.display_name = (update_payload["display_name"] or user.username).strip()
     if "password" in update_payload and update_payload["password"]:
@@ -1520,6 +1524,8 @@ def update_user(
     if "is_active" in update_payload:
         if user.id == current_user.id and not update_payload["is_active"]:
             raise HTTPException(status_code=400, detail="不能停用当前登录账号")
+        if user.username == "admin" and not update_payload["is_active"]:
+            raise HTTPException(status_code=400, detail="管理员账号不能停用")
         user.is_active = bool(update_payload["is_active"])
     db.add(user)
     db.commit()
@@ -1537,6 +1543,8 @@ def delete_user(
     user = db.query(models.AuthUser).filter(models.AuthUser.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
+    if user.username == "admin":
+        raise HTTPException(status_code=400, detail="管理员账号不能删除")
     if user.id == current_user.id:
         raise HTTPException(status_code=400, detail="不能删除当前登录账号")
     db.delete(user)

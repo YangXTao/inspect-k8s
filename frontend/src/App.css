@@ -2948,6 +2948,9 @@ th {
   font-size: 16px;
   font-weight: 700;
   color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .user-role-list {
@@ -2998,6 +3001,12 @@ th {
 
 .user-role-empty {
   font-size: 12px;
+  color: #94a3b8;
+}
+
+.user-role-hint {
+  font-size: 12px;
+  font-weight: 400;
   color: #94a3b8;
 }
 
