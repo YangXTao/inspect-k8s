@@ -44,8 +44,25 @@ spec:
             - name: {{ $name }}
               value: {{ $value | quote }}
             {{- end }}
+          {{- if .Values.frontend.tls.existingSecret }}
+          volumeMounts:
+            - name: frontend-tls
+              mountPath: {{ .Values.frontend.tls.mountPath | quote }}
+              readOnly: true
+          {{- end }}
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
+      {{- if .Values.frontend.tls.existingSecret }}
+      volumes:
+        - name: frontend-tls
+          secret:
+            secretName: {{ .Values.frontend.tls.existingSecret }}
+            items:
+              - key: {{ .Values.frontend.tls.certKey }}
+                path: tls.crt
+              - key: {{ .Values.frontend.tls.keyKey }}
+                path: tls.key
+      {{- end }}
       nodeSelector:
         {{- toYaml .Values.frontend.nodeSelector | nindent 8 }}
       tolerations:

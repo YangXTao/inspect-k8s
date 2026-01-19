@@ -50,6 +50,11 @@ frontend:
   env:
     API_SERVER: http://backend:8000
     SSL_CN: inspect.local
+  tls:
+    existingSecret: ""
+    certKey: tls.crt
+    keyKey: tls.key
+    mountPath: /etc/nginx/certs
   service:
     type: NodePort
     port: 80
