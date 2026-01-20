@@ -2964,8 +2964,8 @@ th {
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 6px 10px;
+  gap: 4px;
+  padding: 6px 8px;
   border-radius: 10px;
   border: 1px solid #e2e8f0;
   background: #f8fafc;
@@ -2987,6 +2987,7 @@ th {
 .user-role-name {
   font-weight: 600;
   color: #0f172a;
+  white-space: nowrap;
 }
 
 .user-role-code {
