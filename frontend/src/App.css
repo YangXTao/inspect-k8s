@@ -2963,9 +2963,9 @@ th {
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: space-between;
-  gap: 4px;
-  padding: 6px 8px;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 6px 6px;
   border-radius: 10px;
   border: 1px solid #e2e8f0;
   background: #f8fafc;
@@ -2974,7 +2974,7 @@ th {
 }
 
 .user-editor-modal .user-role-option input[type="checkbox"] {
-  margin: 0;
+  margin: 0 0 0 6px;
 }
 
 .user-role-text {
