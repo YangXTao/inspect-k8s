@@ -2955,16 +2955,15 @@ th {
 
 .user-role-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 6px;
 }
 
 .user-role-option {
-  display: grid;
-  grid-template-columns: 16px auto;
+  display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 6px;
+  padding: 4px 8px;
   border-radius: 10px;
   border: 1px solid #e2e8f0;
   background: #f8fafc;
@@ -2974,6 +2973,7 @@ th {
 
 .user-role-option input[type="checkbox"] {
   margin: 0;
+  margin-left: auto;
 }
 
 .user-role-name {
