@@ -2955,8 +2955,8 @@ th {
 
 .user-role-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 4px;
 }
 
 .user-editor-modal .user-role-option {
@@ -2964,8 +2964,8 @@ th {
   flex-direction: row;
   align-items: center;
   justify-content: flex-start;
-  gap: 6px;
-  padding: 6px 6px;
+  gap: 4px;
+  padding: 4px 6px;
   border-radius: 10px;
   border: 1px solid #e2e8f0;
   background: #f8fafc;
