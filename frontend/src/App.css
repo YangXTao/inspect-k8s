@@ -2960,10 +2960,11 @@ th {
 }
 
 .user-role-option {
-  display: flex;
+  display: grid;
+  grid-template-columns: 16px auto;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: 6px;
+  padding: 4px 6px;
   border-radius: 10px;
   border: 1px solid #e2e8f0;
   background: #f8fafc;
@@ -2983,6 +2984,7 @@ th {
 .user-role-code {
   font-size: 12px;
   color: #94a3b8;
+  margin-left: 6px;
 }
 
 .user-role-selected {

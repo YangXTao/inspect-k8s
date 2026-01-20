@@ -7213,7 +7213,7 @@ const UserSettingsPanel = ({
                       <span className="user-role-name">
                         {role.display_name || role.name}
                       </span>
-                      <span className="user-role-code">{role.name}</span>
+                      <span className="user-role-code">({role.name})</span>
                     </label>
                   ))}
                 </div>

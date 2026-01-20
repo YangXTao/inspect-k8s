@@ -280,6 +280,30 @@ def ensure_default_roles(db: Session) -> None:
             "is_system": True,
         },
         {
+            "name": "inspector",
+            "display_name": "运维巡检人员",
+            "description": "可管理巡检任务与查看巡检结果。",
+            "permissions": sorted(
+                {
+                    "schedule.read",
+                    "schedule.create",
+                    "schedule.update",
+                    "schedule.delete",
+                    "history.read",
+                    "history.create",
+                    "history.update",
+                    "history.delete",
+                    "inspectionItem.read",
+                    "clusterAgent.read",
+                    "runRecord.read",
+                    "runRecord.delete",
+                    "result.read",
+                    "report.read",
+                }
+            ),
+            "is_system": True,
+        },
+        {
             "name": "readonly",
             "display_name": "只读管理员",
             "description": "仅可查看数据，不允许新增、修改或删除。",
