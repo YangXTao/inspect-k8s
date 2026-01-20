@@ -7201,6 +7201,12 @@ const UserSettingsPanel = ({
                   )}
                   {roles.map((role) => (
                     <label key={role.id} className="user-role-option">
+                      <span className="user-role-text">
+                        <span className="user-role-name">
+                          {role.display_name || role.name}
+                        </span>
+                        <span className="user-role-code">({role.name})</span>
+                      </span>
                       <input
                         type="checkbox"
                         checked={selectedRoles.includes(role.name)}
@@ -7210,10 +7216,6 @@ const UserSettingsPanel = ({
                           (editingUser !== null && isAdminUser(editingUser))
                         }
                       />
-                      <span className="user-role-name">
-                        {role.display_name || role.name}
-                      </span>
-                      <span className="user-role-code">({role.name})</span>
                     </label>
                   ))}
                 </div>

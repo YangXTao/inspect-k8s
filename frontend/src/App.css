@@ -2973,6 +2973,15 @@ th {
 
 .user-role-option input[type="checkbox"] {
   margin: 0;
+}
+
+.user-role-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.user-role-option input[type="checkbox"] {
   margin-left: auto;
 }
 
