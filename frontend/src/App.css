@@ -2959,11 +2959,13 @@ th {
   gap: 6px;
 }
 
-.user-role-option {
+.user-editor-modal .user-role-option {
   display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
   border-radius: 10px;
   border: 1px solid #e2e8f0;
   background: #f8fafc;
@@ -2971,7 +2973,7 @@ th {
   color: #334155;
 }
 
-.user-role-option input[type="checkbox"] {
+.user-editor-modal .user-role-option input[type="checkbox"] {
   margin: 0;
 }
 
@@ -2980,10 +2982,6 @@ th {
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
-}
-
-.user-role-option input[type="checkbox"] {
-  margin-left: auto;
 }
 
 .user-role-name {
