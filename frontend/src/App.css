@@ -2976,9 +2976,10 @@ th {
 }
 
 .user-role-text {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
 }
 
 .user-role-option input[type="checkbox"] {
@@ -2993,7 +2994,6 @@ th {
 .user-role-code {
   font-size: 12px;
   color: #94a3b8;
-  margin-left: 6px;
 }
 
 .user-role-selected {
