@@ -9628,6 +9628,22 @@ const loginRedirectState = useMemo(
   }, [backgroundLocation]);
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+    if (!location.pathname.startsWith(SETTINGS_BASE_PATH)) {
+      return;
+    }
+    if (backgroundLocation || backgroundLocationRef.current) {
+      return;
+    }
+    setSettingsOpen(false);
+    setSettingsTabId("overview");
+    previousSettingsPathRef.current = "/";
+    navigate("/", { replace: true });
+  }, [isAuthenticated, location.pathname, backgroundLocation, navigate]);
+
+  useEffect(() => {
     if (isAuthenticated) {
       return;
     }
