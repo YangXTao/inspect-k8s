@@ -9245,11 +9245,6 @@ const App = () => {
   ]);
 
   const refreshLicenseStatus = useCallback(async (): Promise<LicenseStatus | null> => {
-    if (!canViewLicense) {
-      setLicenseStatus(null);
-      setLicenseError(null);
-      return null;
-    }
     setLicenseLoading(true);
     try {
       const status = await getLicenseStatus();
@@ -9265,7 +9260,7 @@ const App = () => {
     } finally {
       setLicenseLoading(false);
     }
-  }, [canViewLicense]);
+  }, []);
 
   useEffect(() => {
     if (!isAuthenticated) {

@@ -1562,7 +1562,6 @@ def get_license_status(
     db: Session = Depends(get_db),
     current_user: models.AuthUser = Depends(get_current_user),
 ) -> schemas.LicenseStatusOut:
-    _require_permission(db, current_user, "license.view", "License 查看")
     status = license_manager.status()
     return schemas.LicenseStatusOut(**status)
 
