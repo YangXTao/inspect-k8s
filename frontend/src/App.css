@@ -2954,9 +2954,9 @@ th {
 }
 
 .user-role-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .user-editor-modal .user-role-option {
@@ -2971,6 +2971,9 @@ th {
   background: #f8fafc;
   font-size: 13px;
   color: #334155;
+  width: max-content;
+  max-width: 100%;
+  flex: 0 0 auto;
 }
 
 .user-editor-modal .user-role-option input[type="checkbox"] {
