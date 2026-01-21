@@ -1,5 +1,7 @@
 FROM 192.168.10.51/base/node:20-alpine AS build
 WORKDIR /frontend
+ARG VITE_API_BASE_URL=auto
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 COPY package*.json ./
 RUN npm ci
 COPY . .
