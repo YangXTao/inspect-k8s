@@ -9606,6 +9606,10 @@ const loginRedirectState = useMemo(
         const user = await login(username, password);
         setAuthUser(user);
         backgroundLocationRef.current = null;
+        setSettingsOpen(false);
+        setSettingsTabId("overview");
+        setConfirmState(null);
+        previousSettingsPathRef.current = "/";
         navigate("/", { replace: true });
       } catch (err) {
         const message = err instanceof Error ? err.message : "登录失败";
@@ -9622,6 +9626,19 @@ const loginRedirectState = useMemo(
       backgroundLocationRef.current = backgroundLocation;
     }
   }, [backgroundLocation]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      return;
+    }
+    setSettingsOpen(false);
+    setSettingsTabId("overview");
+    setConfirmState((prev) =>
+      prev && prev.scope === "settings" ? null : prev
+    );
+    backgroundLocationRef.current = null;
+    previousSettingsPathRef.current = "/";
+  }, [isAuthenticated]);
 
   const routesLocation =
     location.pathname.startsWith(SETTINGS_BASE_PATH) && backgroundLocation
