@@ -252,6 +252,7 @@ const ROLE_PERMISSION_BLOCKS: RolePermissionBlock[] = [
         options: [
           { key: "clusterAgent.create", label: "新增" },
           { key: "clusterAgent.update", label: "修改" },
+          { key: "clusterAgent.test", label: "连接测试" },
           { key: "clusterAgent.delete", label: "删除" },
           { key: "clusterAgent.read", label: "查看" },
         ],
@@ -1140,7 +1141,8 @@ const buildAgentRegisterCommand = ({
 interface AgentQuickCreateProps {
   clusters: ClusterConfig[];
   agents: InspectionAgent[];
-  canManageAgents: boolean;
+  canCreateAgents: boolean;
+  createDisabledReason: string | null;
   submitting: boolean;
   notice: string | null;
   error: string | null;
@@ -1157,7 +1159,8 @@ interface AgentQuickCreateProps {
 const AgentQuickCreate = ({
   clusters,
   agents,
-  canManageAgents,
+  canCreateAgents,
+  createDisabledReason,
   submitting,
   notice,
   error,
@@ -1241,8 +1244,8 @@ const AgentQuickCreate = ({
     <div className="agent-inline-form">
       <div className="agent-inline-form-header">
         <strong>快速创建 Agent</strong>
-        {!canManageAgents && (
-          <span className="agent-inline-hint">当前 License 不支持 Agent 管理</span>
+        {!canCreateAgents && createDisabledReason && (
+          <span className="agent-inline-hint">{createDisabledReason}</span>
         )}
       </div>
       <p className="agent-inline-copy">
@@ -1254,33 +1257,33 @@ const AgentQuickCreate = ({
           value={name}
           onChange={(event) => setName(event.target.value)}
           placeholder="Agent / 集群名称"
-          disabled={submitting || !canManageAgents}
+          disabled={submitting || !canCreateAgents}
         />
         <input
           type="text"
           value={description}
           onChange={(event) => setDescription(event.target.value)}
           placeholder="描述（可选）"
-          disabled={submitting || !canManageAgents}
+          disabled={submitting || !canCreateAgents}
         />
         <input
           type="text"
           value={backendUrl}
           onChange={(event) => setBackendUrl(event.target.value)}
           placeholder="Backend 地址（必填）"
-          disabled={submitting || !canManageAgents}
+          disabled={submitting || !canCreateAgents}
         />
         <input
           type="text"
           value={prometheusUrl}
           onChange={(event) => setPrometheusUrl(event.target.value)}
           placeholder="Prometheus 地址（可选）"
-          disabled={submitting || !canManageAgents}
+          disabled={submitting || !canCreateAgents}
         />
         <button
           type="submit"
           className="secondary"
-          disabled={submitting || !canManageAgents}
+          disabled={submitting || !canCreateAgents}
         >
           {submitting ? "创建中..." : "创建 Agent"}
         </button>
@@ -1327,6 +1330,8 @@ interface OverviewProps {
   license: LicenseCapabilities;
   canUpdateClusters: boolean;
   canDeleteClusters: boolean;
+  canTestClusterAgents: boolean;
+  canCreateClusterAgents: boolean;
   canManageAgents: boolean;
   agentSubmitting: boolean;
   agentNotice: string | null;
@@ -1364,6 +1369,8 @@ const OverviewView = ({
   license,
   canUpdateClusters,
   canDeleteClusters,
+  canTestClusterAgents,
+  canCreateClusterAgents,
   canManageAgents,
   agentSubmitting,
   agentNotice,
@@ -1377,6 +1384,13 @@ const OverviewView = ({
   const canManageClusters = license.canManageClusters;
   const canEditClusters = canManageClusters && canUpdateClusters;
   const canRemoveClusters = canManageClusters && canDeleteClusters;
+  const canTestClusters = canManageClusters && canTestClusterAgents;
+  const canCreateAgents = canManageAgents && canCreateClusterAgents;
+  const createAgentDisabledReason = !canManageAgents
+    ? license.reason ?? "当前 License 不支持 Agent 管理。"
+    : !canCreateClusterAgents
+      ? "当前账户没有创建 Agent 集群的权限。"
+      : null;
   const [clusterPageSize, setClusterPageSize] = useState(
     DEFAULT_CLUSTER_PAGE_SIZE
   );
@@ -1696,7 +1710,8 @@ const OverviewView = ({
             <AgentQuickCreate
               clusters={clusters}
               agents={agents}
-              canManageAgents={canManageAgents}
+              canCreateAgents={canCreateAgents}
+              createDisabledReason={createAgentDisabledReason}
               submitting={agentSubmitting}
               notice={agentNotice}
               error={agentError}
@@ -1874,7 +1889,7 @@ const OverviewView = ({
                               quiet: true,
                             });
                           }}
-                          disabled={isTesting || !canManageClusters}
+                          disabled={isTesting || !canTestClusters}
                         >
                           {isTesting ? "诊断中..." : "连接测试"}
                         </button>
@@ -3121,7 +3136,7 @@ const ClusterDetailView = ({
               type="button"
               className="secondary"
               onClick={() => void onTestClusterConnection(cluster.id)}
-              disabled={isTesting || !canManageClusters}
+              disabled={isTesting || !canTestClusters}
             >
               {isTesting ? "测试中..." : "连接测试"}
             </button>
@@ -8927,6 +8942,8 @@ const App = () => {
   const canCreateClusterAgents = hasPermission("clusterAgent.create");
   const canUpdateClusterAgents = hasPermission("clusterAgent.update");
   const canDeleteClusterAgents = hasPermission("clusterAgent.delete");
+  const canTestClusterAgents =
+    hasPermission("clusterAgent.test") || canUpdateClusterAgents;
 
   const [clusterError, setClusterError] = useState<string | null>(null);
   const [clusterNotice, setClusterNotice] = useState<string | null>(null);
@@ -9669,10 +9686,11 @@ const backgroundLocation =
       options?: { quiet?: boolean }
     ) => {
       const { quiet } = options ?? {};
-      if (!canUpdateClusterAgents) {
-        const message = "当前账号无集群/Agent 修改权限。";
+      if (!canTestClusterAgents) {
+        const message = "当前账号无集群/Agent 连接测试权限。";
+        setClusterError(null);
         if (!quiet) {
-          setClusterError(message);
+          clearClusterNotice();
         }
         showClusterNotice(
           quiet ? "overview" : currentNoticeScope,
@@ -9684,8 +9702,9 @@ const backgroundLocation =
       if (!licenseCapabilities.canManageClusters) {
         const message =
           licenseCapabilities.reason ?? "当前 License 不支持集群管理。";
+        setClusterError(null);
         if (!quiet) {
-          setClusterError(message);
+          clearClusterNotice();
         }
         showClusterNotice(
           quiet ? "overview" : currentNoticeScope,
@@ -9728,7 +9747,7 @@ const backgroundLocation =
       setClusterTesting,
       showClusterNotice,
       licenseCapabilities,
-      canUpdateClusterAgents,
+      canTestClusterAgents,
     ]
   );
 
@@ -9765,7 +9784,7 @@ const backgroundLocation =
       prometheus_url?: string | null;
     }) => {
       if (!canCreateClusterAgents) {
-        setAgentError("当前账号无集群/Agent 创建权限。");
+        setAgentError("当前账户没有创建 Agent 集群的权限。");
         return;
       }
       if (!licenseCapabilities.canManageAgents) {
@@ -12239,6 +12258,8 @@ const hasManualKubeconfig = useMemo(
       license={licenseCapabilities}
       canUpdateClusters={canUpdateClusterAgents}
       canDeleteClusters={canDeleteClusterAgents}
+      canTestClusterAgents={canTestClusterAgents}
+      canCreateClusterAgents={canCreateClusterAgents}
       canManageAgents={licenseCapabilities.canManageAgents}
       agentSubmitting={agentSubmitting}
       agentNotice={agentNotice}

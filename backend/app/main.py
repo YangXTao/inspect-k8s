@@ -1673,7 +1673,12 @@ def test_cluster_connection(
     current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("clusters")),
 ):
-    _require_permission(db, current_user, "clusterAgent.update", "集群连接测试")
+    _require_any_permission(
+        db,
+        current_user,
+        ["clusterAgent.test", "clusterAgent.update"],
+        "集群连接测试",
+    )
     cluster = crud.get_cluster(db, cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="指定的集群不存在。")

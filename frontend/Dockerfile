@@ -10,6 +10,7 @@ WORKDIR /etc/nginx
 ENV API_SERVER=http://inspect-backend:8000
 RUN apk add --no-cache openssl
 COPY docker/default.conf.template ./templates/default.conf.template
+COPY docker/default.http.conf.template ./templates/default.http.conf.template
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 COPY --from=build /frontend/dist /usr/share/nginx/html

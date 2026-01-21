@@ -50,6 +50,7 @@ frontend:
   env:
     API_SERVER: http://backend:8000
     SSL_CN: inspect.local
+    # FRONTEND_ENABLE_HTTPS: "true"
   tls:
     existingSecret: ""
     certKey: tls.crt
@@ -60,7 +61,7 @@ frontend:
     port: 80
     targetPort: 80
     nodePort: null
-    httpsEnabled: true
+    httpsEnabled: false
     httpsPort: 443
     httpsTargetPort: 443
     httpsNodePort: null
