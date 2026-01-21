@@ -2652,6 +2652,7 @@ interface ClusterDetailViewProps {
   license: LicenseCapabilities;
   canUpdateClusters: boolean;
   canDeleteClusters: boolean;
+  canTestClusterAgents: boolean;
 }
 
 const ClusterDetailView = ({
@@ -2679,6 +2680,7 @@ const ClusterDetailView = ({
   license,
   canUpdateClusters,
   canDeleteClusters,
+  canTestClusterAgents,
 }: ClusterDetailViewProps) => {
   const enableServerConnectionTest = true;
   const { clusterKey } = useParams<{ clusterKey?: string }>();
@@ -2701,6 +2703,7 @@ const ClusterDetailView = ({
     DEFAULT_PROMETHEUS_VERSION
   );
   const canManageClusters = license.canManageClusters;
+  const canTestClusters = canManageClusters && canTestClusterAgents;
   const canEditClusters = canManageClusters && canUpdateClusters;
   const canRemoveClusters = canManageClusters && canDeleteClusters;
   const canRunInspections = license.canRunInspections;
@@ -12408,6 +12411,7 @@ const hasManualKubeconfig = useMemo(
                 license={licenseCapabilities}
                 canUpdateClusters={canUpdateClusterAgents}
                 canDeleteClusters={canDeleteClusterAgents}
+                canTestClusterAgents={canTestClusterAgents}
               />
             }
           />
