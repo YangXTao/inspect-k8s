@@ -9185,6 +9185,8 @@ const App = () => {
       try {
         const user = await login(username, password);
         setAuthUser(user);
+        backgroundLocationRef.current = null;
+        navigate("/", { replace: true });
       } catch (err) {
         const message = err instanceof Error ? err.message : "登录失败";
         setAuthError(message);
@@ -9192,7 +9194,7 @@ const App = () => {
         setAuthSubmitting(false);
       }
     },
-    []
+    [navigate]
   );
 
   const handleLogout = useCallback(async () => {
