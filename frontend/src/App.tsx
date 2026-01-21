@@ -98,6 +98,25 @@ type GlobalNotice = {
   message: string;
 };
 
+const ERROR_AUTO_DISMISS_MS = 15000;
+
+const useAutoClearError = (
+  error: string | null,
+  setError: (value: string | null) => void
+) => {
+  useEffect(() => {
+    if (!error || typeof window === "undefined") {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setError(null);
+    }, ERROR_AUTO_DISMISS_MS);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [error, setError]);
+};
+
 type LicenseCapabilities = {
   loading: boolean;
   valid: boolean;
@@ -1195,6 +1214,22 @@ const AgentQuickCreate = ({
     [clusters, trimmedName]
   );
 
+  if (!canCreateAgents) {
+    return (
+      <div className="agent-inline-form">
+        <div className="agent-inline-form-header">
+          <strong>快速创建 Agent</strong>
+          {createDisabledReason && (
+            <span className="agent-inline-hint">{createDisabledReason}</span>
+          )}
+        </div>
+        <p className="agent-inline-copy">
+          Agent 名称必须与计划接入的集群名称保持一致，注册后不可修改。Backend 地址用于生成注册命令，请填写 Agent 节点可访问的地址。
+        </p>
+      </div>
+    );
+  }
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const normalizedName = name.trim();
@@ -1879,7 +1914,7 @@ const OverviewView = ({
                       </div>
                     </div>
                     <div className="cluster-status-line">
-                      {enableServerConnectionTest && (
+                      {enableServerConnectionTest && canTestClusterAgents && (
                         <button
                           type="button"
                           className="secondary cluster-test-button"
@@ -2162,6 +2197,9 @@ interface HistoryViewProps {
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
   license: LicenseCapabilities;
+  canCreateHistory: boolean;
+  canUpdateHistory: boolean;
+  canDeleteHistory: boolean;
 }
 
 const HistoryView = ({
@@ -2173,6 +2211,9 @@ const HistoryView = ({
   clusterDisplayIds,
   runDisplayIds,
   license,
+  canCreateHistory,
+  canUpdateHistory,
+  canDeleteHistory,
 }: HistoryViewProps) => {
   const navigate = useNavigate();
 
@@ -2186,6 +2227,8 @@ const HistoryView = ({
   const [pageInput, setPageInput] = useState("");
   const canRunInspections = license.canRunInspections;
   const canDownloadReports = license.canDownloadReports;
+  const canManageHistory =
+    canCreateHistory || canUpdateHistory || canDeleteHistory;
 
   const filteredRuns = useMemo(() => {
     const normalizedKeyword = historyKeyword.trim().toLowerCase();
@@ -2245,10 +2288,10 @@ const HistoryView = ({
     );
   }, [filteredRuns]);
   useEffect(() => {
-    if (!canRunInspections) {
+    if (!canRunInspections || !canDeleteHistory) {
       setSelectedRunIds([]);
     }
-  }, [canRunInspections]);
+  }, [canRunInspections, canDeleteHistory]);
 
   const pagedRuns = useMemo(() => {
     const start = (page - 1) * pageSize;
@@ -2269,7 +2312,7 @@ const HistoryView = ({
 
   const handleToggleRun = useCallback(
     (runId: number) => {
-      if (!canRunInspections) {
+      if (!canRunInspections || !canDeleteHistory) {
         return;
       }
       setSelectedRunIds((prev) =>
@@ -2278,12 +2321,16 @@ const HistoryView = ({
           : [...prev, runId]
       );
     },
-    [canRunInspections]
+    [canRunInspections, canDeleteHistory]
   );
 
   const handleToggleAllRuns = useCallback(() => {
     setSelectedRunIds((prev) => {
-      if (!canRunInspections || filteredRuns.length === 0) {
+      if (
+        !canRunInspections ||
+        !canDeleteHistory ||
+        filteredRuns.length === 0
+      ) {
         return prev;
       }
       const visibleIds = filteredRuns.map((run) => run.id);
@@ -2295,7 +2342,7 @@ const HistoryView = ({
       visibleIds.forEach((id) => merged.add(id));
       return Array.from(merged);
     });
-  }, [filteredRuns, canRunInspections]);
+  }, [filteredRuns, canRunInspections, canDeleteHistory]);
 
   const handlePageChange = useCallback(
     (offset: number) => {
@@ -2331,14 +2378,14 @@ const HistoryView = ({
   }, [pageInput, totalPages]);
 
   const handleDeleteSelectedRuns = useCallback(() => {
-    if (!canRunInspections) {
+    if (!canRunInspections || !canDeleteHistory) {
       return;
     }
     if (selectedRunIds.length === 0) {
       return;
     }
     void onDeleteRunsBulk(selectedRunIds);
-  }, [onDeleteRunsBulk, selectedRunIds, canRunInspections]);
+  }, [onDeleteRunsBulk, selectedRunIds, canRunInspections, canDeleteHistory]);
 
   const handleHistoryStatusFilterChange = (
     event: ChangeEvent<HTMLSelectElement>
@@ -2396,28 +2443,30 @@ const HistoryView = ({
         </div>
       </div>
       <div className="history-toolbar">
-        <div className="history-selection">
-          <label className="table-checkbox">
-            <input
-              type="checkbox"
-              checked={allSelected}
-              onChange={handleToggleAllRuns}
-              disabled={!canRunInspections}
-            />
-            <span>当前页全选</span>
-          </label>
-          <span className="selection-hint">
-            已选 {visibleSelectedCount} / {filteredRuns.length}
-          </span>
-          <button
-            type="button"
-            className="secondary danger"
-            onClick={handleDeleteSelectedRuns}
-            disabled={selectedRunIds.length === 0 || !canRunInspections}
-          >
-            删除所选
-          </button>
-        </div>
+        {canDeleteHistory && (
+          <div className="history-selection">
+            <label className="table-checkbox">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={handleToggleAllRuns}
+                disabled={!canRunInspections}
+              />
+              <span>当前页全选</span>
+            </label>
+            <span className="selection-hint">
+              已选 {visibleSelectedCount} / {filteredRuns.length}
+            </span>
+            <button
+              type="button"
+              className="secondary danger"
+              onClick={handleDeleteSelectedRuns}
+              disabled={selectedRunIds.length === 0 || !canRunInspections}
+            >
+              删除所选
+            </button>
+          </div>
+        )}
         <div className="history-pagination-controls">
           <label>
             每页
@@ -2518,15 +2567,19 @@ const HistoryView = ({
                 return (
                   <tr key={run.id}>
                     <td>
-                      <label className="table-checkbox">
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => handleToggleRun(run.id)}
-                          disabled={!canRunInspections}
-                        />
+                      {canDeleteHistory ? (
+                        <label className="table-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleToggleRun(run.id)}
+                            disabled={!canRunInspections}
+                          />
+                          <span>{runSlug}</span>
+                        </label>
+                      ) : (
                         <span>{runSlug}</span>
-                      </label>
+                      )}
                     </td>
                     <td>{clusterLabel}</td>
                     <td>{run.operator || "-"}</td>
@@ -2591,7 +2644,7 @@ const HistoryView = ({
                           )}
                         </>
                       )}
-                      {run.status === "running" && (
+                      {run.status === "running" && canUpdateHistory && (
                         <button
                           type="button"
                           className="link-button"
@@ -2601,14 +2654,16 @@ const HistoryView = ({
                           取消
                         </button>
                       )}
-                      <button
-                        type="button"
-                        className="link-button danger"
-                        onClick={() => void onDeleteRun(run)}
-                        disabled={!canDelete || !canRunInspections}
-                      >
-                        删除
-                      </button>
+                      {canDeleteHistory && (
+                        <button
+                          type="button"
+                          className="link-button danger"
+                          onClick={() => void onDeleteRun(run)}
+                          disabled={!canDelete || !canRunInspections}
+                        >
+                          删除
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -2653,6 +2708,9 @@ interface ClusterDetailViewProps {
   canUpdateClusters: boolean;
   canDeleteClusters: boolean;
   canTestClusterAgents: boolean;
+  canCreateHistory: boolean;
+  canUpdateHistory: boolean;
+  canDeleteHistory: boolean;
 }
 
 const ClusterDetailView = ({
@@ -2681,6 +2739,9 @@ const ClusterDetailView = ({
   canUpdateClusters,
   canDeleteClusters,
   canTestClusterAgents,
+  canCreateHistory,
+  canUpdateHistory,
+  canDeleteHistory,
 }: ClusterDetailViewProps) => {
   const enableServerConnectionTest = true;
   const { clusterKey } = useParams<{ clusterKey?: string }>();
@@ -2708,6 +2769,8 @@ const ClusterDetailView = ({
   const canRemoveClusters = canManageClusters && canDeleteClusters;
   const canRunInspections = license.canRunInspections;
   const canDownloadReports = license.canDownloadReports;
+  const canManageHistory =
+    canCreateHistory || canUpdateHistory || canDeleteHistory;
 
   const resolvedClusterId = useMemo(
     () =>
@@ -2776,8 +2839,12 @@ const ClusterDetailView = ({
     if (!canRunInspections) {
       setSelectedIds(() => []);
       setSelectedRunIds([]);
+      return;
     }
-  }, [canRunInspections, setSelectedIds, setSelectedRunIds]);
+    if (!canDeleteHistory) {
+      setSelectedRunIds([]);
+    }
+  }, [canRunInspections, canDeleteHistory, setSelectedIds, setSelectedRunIds]);
 
   const totalClusterRunPages = useMemo(
     () =>
@@ -2965,7 +3032,7 @@ const ClusterDetailView = ({
 
   const handleToggleRunSelection = useCallback(
     (runId: number) => {
-      if (!canRunInspections) {
+      if (!canRunInspections || !canDeleteHistory) {
         return;
       }
       setSelectedRunIds((prev) =>
@@ -2974,12 +3041,16 @@ const ClusterDetailView = ({
           : [...prev, runId]
       );
     },
-    [canRunInspections]
+    [canRunInspections, canDeleteHistory]
   );
 
   const handleToggleAllRuns = useCallback(() => {
     setSelectedRunIds((prev) => {
-      if (!canRunInspections || pagedClusterRuns.length === 0) {
+      if (
+        !canRunInspections ||
+        !canDeleteHistory ||
+        pagedClusterRuns.length === 0
+      ) {
         return prev;
       }
       const visibleIds = pagedClusterRuns.map((run) => run.id);
@@ -2993,10 +3064,10 @@ const ClusterDetailView = ({
       visibleIds.forEach((id) => merged.add(id));
       return Array.from(merged);
     });
-  }, [pagedClusterRuns, canRunInspections]);
+  }, [pagedClusterRuns, canRunInspections, canDeleteHistory]);
 
   const handleDeleteSelectedRuns = useCallback(() => {
-    if (!canRunInspections) {
+    if (!canRunInspections || !canDeleteHistory) {
       return;
     }
     if (selectedRunIds.length === 0) {
@@ -3009,7 +3080,13 @@ const ClusterDetailView = ({
       return;
     }
     void onDeleteRunsBulk(targetIds);
-  }, [clusterRuns, onDeleteRunsBulk, selectedRunIds, canRunInspections]);
+  }, [
+    clusterRuns,
+    onDeleteRunsBulk,
+    selectedRunIds,
+    canRunInspections,
+    canDeleteHistory,
+  ]);
 
   const handleStart = useCallback(() => {
     if (!cluster) {
@@ -3134,7 +3211,7 @@ const ClusterDetailView = ({
           >
             节点
           </button>
-          {enableServerConnectionTest && (
+          {enableServerConnectionTest && canTestClusterAgents && (
             <button
               type="button"
               className="secondary"
@@ -3263,26 +3340,30 @@ const ClusterDetailView = ({
                 placeholder="关键字筛选"
                 disabled={!canRunInspections}
               />
-              <button
-                type="button"
-                className="secondary"
-                onClick={handleToggleAllItems}
-                disabled={!canRunInspections}
-              >
-                {allItemsSelected ? "清除选择" : "全选"}
-              </button>
-              <button
-                type="button"
-                className="primary"
-                onClick={handleStart}
-                disabled={
-                  inspectionLoading ||
-                  selectedIds.length === 0 ||
-                  !canRunInspections
-                }
-              >
-                {inspectionLoading ? "巡检中..." : "开始巡检"}
-              </button>
+              {canCreateHistory && (
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={handleToggleAllItems}
+                  disabled={!canRunInspections}
+                >
+                  {allItemsSelected ? "清除选择" : "全选"}
+                </button>
+              )}
+              {canCreateHistory && (
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={handleStart}
+                  disabled={
+                    inspectionLoading ||
+                    selectedIds.length === 0 ||
+                    !canRunInspections
+                  }
+                >
+                  {inspectionLoading ? "巡检中..." : "开始巡检"}
+                </button>
+              )}
             </div>
           </div>
           <div className="inspection-version-hint">
@@ -3449,34 +3530,38 @@ const ClusterDetailView = ({
         <div className="card-header">
           <h2>{cluster.name} · 巡检记录</h2>
           <div className="card-actions">
-            <label className="table-checkbox">
-              <input
-                type="checkbox"
-                checked={
-                  pagedClusterRuns.length > 0 &&
-                  pagedClusterRuns.every((run) =>
-                    selectedRunIds.includes(run.id)
-                  )
-                }
-                onChange={handleToggleAllRuns}
-                disabled={!canRunInspections}
-              />
-              <span>全选</span>
-            </label>
-            <span className="selection-hint">
-              已选 {selectedRunIds.filter((id) =>
-                clusterRuns.some((run) => run.id === id)
-              ).length}{" "}
-              / {clusterRuns.length}
-            </span>
-            <button
-              type="button"
-              className="secondary danger"
-              onClick={handleDeleteSelectedRuns}
-              disabled={selectedRunIds.length === 0 || !canRunInspections}
-            >
-              删除所选
-            </button>
+            {canDeleteHistory && (
+              <>
+                <label className="table-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={
+                      pagedClusterRuns.length > 0 &&
+                      pagedClusterRuns.every((run) =>
+                        selectedRunIds.includes(run.id)
+                      )
+                    }
+                    onChange={handleToggleAllRuns}
+                    disabled={!canRunInspections}
+                  />
+                  <span>全选</span>
+                </label>
+                <span className="selection-hint">
+                  已选 {selectedRunIds.filter((id) =>
+                    clusterRuns.some((run) => run.id === id)
+                  ).length}{" "}
+                  / {clusterRuns.length}
+                </span>
+                <button
+                  type="button"
+                  className="secondary danger"
+                  onClick={handleDeleteSelectedRuns}
+                  disabled={selectedRunIds.length === 0 || !canRunInspections}
+                >
+                  删除所选
+                </button>
+              </>
+            )}
           </div>
         </div>
         <div className="table-wrapper">
@@ -3503,15 +3588,19 @@ const ClusterDetailView = ({
                   return (
                     <tr key={run.id}>
                       <td>
-                        <label className="table-checkbox">
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => handleToggleRunSelection(run.id)}
-                            disabled={!canRunInspections}
-                          />
+                        {canDeleteHistory ? (
+                          <label className="table-checkbox">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleToggleRunSelection(run.id)}
+                              disabled={!canRunInspections}
+                            />
+                            <span>{runSlug}</span>
+                          </label>
+                        ) : (
                           <span>{runSlug}</span>
-                        </label>
+                        )}
                       </td>
                       <td>{run.operator || "-"}</td>
                       <td>
@@ -3579,7 +3668,7 @@ const ClusterDetailView = ({
                             )}
                           </>
                         )}
-                        {run.status === "running" && (
+                        {run.status === "running" && canUpdateHistory && (
                           <button
                             type="button"
                             className="link-button"
@@ -3589,7 +3678,7 @@ const ClusterDetailView = ({
                             暂停
                           </button>
                         )}
-                        {run.status === "paused" && (
+                        {run.status === "paused" && canUpdateHistory && (
                           <button
                             type="button"
                             className="link-button"
@@ -3600,7 +3689,8 @@ const ClusterDetailView = ({
                           </button>
                         )}
                         {(run.status === "running" ||
-                          run.status === "paused") && (
+                          run.status === "paused") &&
+                          canUpdateHistory && (
                           <button
                             type="button"
                             className="link-button"
@@ -3610,14 +3700,16 @@ const ClusterDetailView = ({
                             取消
                           </button>
                         )}
-                        <button
-                          type="button"
-                          className="link-button danger"
-                          onClick={() => void onDeleteRun(run)}
-                          disabled={!canDelete || !canRunInspections}
-                        >
-                          删除
-                        </button>
+                        {canDeleteHistory && (
+                          <button
+                            type="button"
+                            className="link-button danger"
+                            onClick={() => void onDeleteRun(run)}
+                            disabled={!canDelete || !canRunInspections}
+                          >
+                            删除
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -4597,7 +4689,7 @@ const InspectionSettingsPanel = ({
             type="button"
             className="secondary"
             onClick={() => onExport("json")}
-            disabled={submitting || readOnly}
+            disabled={submitting}
           >
             导出 JSON
           </button>
@@ -4605,25 +4697,29 @@ const InspectionSettingsPanel = ({
             type="button"
             className="secondary"
             onClick={() => onExport("yaml")}
-            disabled={submitting || readOnly}
+            disabled={submitting}
           >
             导出 YAML
           </button>
-          <button
-            type="button"
-            className="secondary"
-            onClick={handleImportClick}
-            disabled={submitting || readOnly}
-          >
-            导入
-          </button>
-          <input
-            ref={importInputRef}
-            type="file"
-            accept=".json,.yaml,.yml"
-            hidden
-            onChange={handleImportChange}
-          />
+          {!readOnly && (
+            <>
+              <button
+                type="button"
+                className="secondary"
+                onClick={handleImportClick}
+                disabled={submitting}
+              >
+                导入
+              </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".json,.yaml,.yml"
+                hidden
+                onChange={handleImportChange}
+              />
+            </>
+          )}
         </div>
       </div>
       {notice && <div className="feedback success">{notice}</div>}
@@ -4646,27 +4742,30 @@ const InspectionSettingsPanel = ({
           <div className="settings-list">
             <div className="settings-list-header">
               <div className="settings-actions">
-                <label className="table-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={
-                      filteredItems.length > 0 &&
-                      selectedFilteredCount === filteredItems.length
-                    }
-                    onChange={toggleSelectAll}
-                    disabled={readOnly}
-                  />
-                  <span>全选</span>
-                </label>
-                <span>已选 {selectedFilteredCount} / {totalItems}</span>
-                <button
-                  type="button"
-                  className="link-button danger"
-                  onClick={handleDeleteSelected}
-                  disabled={selectedFilteredCount === 0 || readOnly}
-                >
-                  批量删除
-                </button>
+                {!readOnly && (
+                  <>
+                    <label className="table-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={
+                          filteredItems.length > 0 &&
+                          selectedFilteredCount === filteredItems.length
+                        }
+                        onChange={toggleSelectAll}
+                      />
+                      <span>全选</span>
+                    </label>
+                    <span>已选 {selectedFilteredCount} / {totalItems}</span>
+                    <button
+                      type="button"
+                      className="link-button danger"
+                      onClick={handleDeleteSelected}
+                      disabled={selectedFilteredCount === 0}
+                    >
+                      批量删除
+                    </button>
+                  </>
+                )}
                 {itemFilterType === "promql" && (
                   <label className="settings-filter">
                     Prometheus 版本
@@ -4729,15 +4828,18 @@ const InspectionSettingsPanel = ({
                     {pagedItems.map((item) => (
                       <tr key={item.id}>
                         <td>
-                          <label className="table-checkbox">
-                            <input
-                              type="checkbox"
-                              checked={selectedIds.includes(item.id)}
-                              onChange={() => toggleSelection(item.id)}
-                              disabled={readOnly}
-                            />
+                          {readOnly ? (
                             <span>{item.name}</span>
-                          </label>
+                          ) : (
+                            <label className="table-checkbox">
+                              <input
+                                type="checkbox"
+                                checked={selectedIds.includes(item.id)}
+                                onChange={() => toggleSelection(item.id)}
+                              />
+                              <span>{item.name}</span>
+                            </label>
+                          )}
                         </td>
                         {showVersionColumn && (
                           <td>
@@ -4752,22 +4854,26 @@ const InspectionSettingsPanel = ({
                         <td>{item.check_type}</td>
                         <td>{formatDate(item.updated_at)}</td>
                         <td className="actions">
-                          <button
-                            type="button"
-                            className="link-button"
-                            onClick={() => startEdit(item)}
-                            disabled={readOnly}
-                          >
-                            编辑
-                          </button>
-                          <button
-                            type="button"
-                            className="link-button danger"
-                            onClick={() => onDelete(item)}
-                            disabled={readOnly}
-                          >
-                            删除
-                          </button>
+                          {!readOnly ? (
+                            <>
+                              <button
+                                type="button"
+                                className="link-button"
+                                onClick={() => startEdit(item)}
+                              >
+                                编辑
+                              </button>
+                              <button
+                                type="button"
+                                className="link-button danger"
+                                onClick={() => onDelete(item)}
+                              >
+                                删除
+                              </button>
+                            </>
+                          ) : (
+                            <span>-</span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -4840,208 +4946,210 @@ const InspectionSettingsPanel = ({
             )}
           </div>
         </section>
-        <section className="inspection-section inspection-section-form">
-          <div className="inspection-section-header">
-            <div>
-              <h4>{editingItem ? "编辑巡检项" : "新增巡检项"}</h4>
-              <span className="inspection-section-hint">
-                选择类型后填写配置，保存后立即生效
-              </span>
+        {!readOnly && (
+          <section className="inspection-section inspection-section-form">
+            <div className="inspection-section-header">
+              <div>
+                <h4>{editingItem ? "编辑巡检项" : "新增巡检项"}</h4>
+                <span className="inspection-section-hint">
+                  选择类型后填写配置，保存后立即生效
+                </span>
+              </div>
             </div>
-          </div>
-          <form className="settings-form inspection-form" onSubmit={handleSubmit}>
-            <label>
-              名称
-              <input
-                type="text"
-                value={formName}
-                onChange={(event) => setFormName(event.target.value)}
-                disabled={submitting || readOnly}
-                placeholder="例如：etcd-health"
-              />
-            </label>
-            {formTypeMode === "promql" && (
+            <form className="settings-form inspection-form" onSubmit={handleSubmit}>
               <label>
-                Prometheus 版本
+                名称
+                <input
+                  type="text"
+                  value={formName}
+                  onChange={(event) => setFormName(event.target.value)}
+                  disabled={submitting}
+                  placeholder="例如：etcd-health"
+                />
+              </label>
+              {formTypeMode === "promql" && (
+                <label>
+                  Prometheus 版本
+                  <select
+                    value={prometheusVersion}
+                    onChange={(event) => setPrometheusVersion(event.target.value)}
+                    disabled={submitting}
+                  >
+                    {prometheusVersionOptions.map((version) => (
+                      <option key={version} value={version}>
+                        {version}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <label>
+                类型
                 <select
-                  value={prometheusVersion}
-                  onChange={(event) => setPrometheusVersion(event.target.value)}
-                  disabled={submitting || readOnly}
+                  value={formTypeMode}
+                  onChange={(event) =>
+                    setFormTypeMode(
+                      event.target.value as "command" | "promql" | "other"
+                    )
+                  }
+                  disabled={submitting}
                 >
-                  {prometheusVersionOptions.map((version) => (
-                    <option key={version} value={version}>
-                      {version}
-                    </option>
-                  ))}
+                  <option value="command">命令行</option>
+                  <option value="promql">PromQL</option>
+                  <option value="other">其他</option>
                 </select>
               </label>
-            )}
-            <label>
-              类型
-              <select
-                value={formTypeMode}
-                onChange={(event) =>
-                  setFormTypeMode(
-                    event.target.value as "command" | "promql" | "other"
-                  )
-                }
-                disabled={submitting || readOnly}
-              >
-                <option value="command">命令行</option>
-                <option value="promql">PromQL</option>
-                <option value="other">其他</option>
-              </select>
-            </label>
-            {formTypeMode === "other" && (
-              <label>
-                自定义类型
-                <input
-                  type="text"
-                  value={customCheckType}
-                  onChange={(event) => setCustomCheckType(event.target.value)}
-                  disabled={submitting || readOnly}
-                  placeholder="custom"
-                />
-              </label>
-            )}
-            <label>
-              描述
-              <input
-                type="text"
-                value={formDescription}
-                onChange={(event) => setFormDescription(event.target.value)}
-                disabled={submitting || readOnly}
-                placeholder="可选"
-              />
-            </label>
-            {formTypeMode === "command" && (
-              <label>
-                命令
-                <input
-                  type="text"
-                  value={commandText}
-                  onChange={(event) => setCommandText(event.target.value)}
-                  disabled={submitting || readOnly}
-                  placeholder="例如：kubectl get nodes"
-                />
-              </label>
-            )}
-            {formTypeMode === "command" && (
-              <label>
-                告警建议
-                <textarea
-                  value={commandSuggestion}
-                  onChange={(event) => setCommandSuggestion(event.target.value)}
-                  disabled={submitting || readOnly}
-                  rows={3}
-                  placeholder="例如：检查证书是否临近过期"
-                />
-              </label>
-            )}
-            {formTypeMode === "promql" && (
-              <>
+              {formTypeMode === "other" && (
                 <label>
-                  PromQL 表达式
+                  自定义类型
                   <input
                     type="text"
-                    value={promqlExpression}
-                    onChange={(event) => setPromqlExpression(event.target.value)}
-                    disabled={submitting || readOnly}
-                    placeholder="例如：sum(rate(container_cpu_usage_seconds_total[5m]))"
+                    value={customCheckType}
+                    onChange={(event) => setCustomCheckType(event.target.value)}
+                    disabled={submitting}
+                    placeholder="custom"
                   />
                 </label>
-                <div className="field-row">
+              )}
+              <label>
+                描述
+                <input
+                  type="text"
+                  value={formDescription}
+                  onChange={(event) => setFormDescription(event.target.value)}
+                  disabled={submitting}
+                  placeholder="可选"
+                />
+              </label>
+              {formTypeMode === "command" && (
+                <label>
+                  命令
+                  <input
+                    type="text"
+                    value={commandText}
+                    onChange={(event) => setCommandText(event.target.value)}
+                    disabled={submitting}
+                    placeholder="例如：kubectl get nodes"
+                  />
+                </label>
+              )}
+              {formTypeMode === "command" && (
+                <label>
+                  告警建议
+                  <textarea
+                    value={commandSuggestion}
+                    onChange={(event) => setCommandSuggestion(event.target.value)}
+                    disabled={submitting}
+                    rows={3}
+                    placeholder="例如：检查证书是否临近过期"
+                  />
+                </label>
+              )}
+              {formTypeMode === "promql" && (
+                <>
                   <label>
-                    严重程度
-                    <select
-                      value={promqlSeverity}
-                      onChange={(event) =>
-                        setPromqlSeverity(
-                          event.target.value as "warning" | "critical"
-                        )
-                      }
-                      disabled={submitting || readOnly}
-                    >
-                      <option value="warning">告警</option>
-                      <option value="critical">Critical（严重）</option>
-                    </select>
-                  </label>
-                  <label>
-                    比较符
-                    <select
-                      value={promqlComparison}
-                      onChange={(event) =>
-                        setPromqlComparison(event.target.value)
-                      }
-                      disabled={submitting || readOnly}
-                    >
-                      {[
-                        ">",
-                        "<",
-                        "=",
-                        ">=",
-                        "<=",
-                        "!=",
-                      ].map((symbol) => (
-                        <option key={symbol} value={symbol === "=" ? "==" : symbol}>
-                          {symbol}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    {promqlSeverityLabel}阈值
+                    PromQL 表达式
                     <input
-                      type="number"
-                      value={promqlThreshold}
-                      onChange={(event) => setPromqlThreshold(event.target.value)}
-                      disabled={submitting || readOnly}
-                      placeholder="例如：0.8"
+                      type="text"
+                      value={promqlExpression}
+                      onChange={(event) => setPromqlExpression(event.target.value)}
+                      disabled={submitting}
+                      placeholder="例如：sum(rate(container_cpu_usage_seconds_total[5m]))"
                     />
                   </label>
-                </div>
-                <label>
-                  {promqlSeverityLabel}建议
-                  <textarea
-                    value={promqlDescribe}
-                    onChange={(event) => setPromqlDescribe(event.target.value)}
-                    disabled={submitting || readOnly}
-                    rows={3}
-                    placeholder="达到阈值时写入巡检建议，例如：检查集群负载或扩容"
-                  />
-                </label>
-              </>
+                  <div className="field-row">
+                    <label>
+                      严重程度
+                      <select
+                        value={promqlSeverity}
+                        onChange={(event) =>
+                          setPromqlSeverity(
+                            event.target.value as "warning" | "critical"
+                          )
+                        }
+                        disabled={submitting}
+                      >
+                        <option value="warning">告警</option>
+                        <option value="critical">Critical（严重）</option>
+                      </select>
+                    </label>
+                    <label>
+                      比较符
+                      <select
+                        value={promqlComparison}
+                        onChange={(event) =>
+                          setPromqlComparison(event.target.value)
+                        }
+                        disabled={submitting}
+                      >
+                        {[
+                          ">",
+                          "<",
+                          "=",
+                          ">=",
+                          "<=",
+                          "!=",
+                        ].map((symbol) => (
+                          <option key={symbol} value={symbol === "=" ? "==" : symbol}>
+                            {symbol}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      {promqlSeverityLabel}阈值
+                      <input
+                        type="number"
+                        value={promqlThreshold}
+                        onChange={(event) => setPromqlThreshold(event.target.value)}
+                        disabled={submitting}
+                        placeholder="例如：0.8"
+                      />
+                    </label>
+                  </div>
+                  <label>
+                    {promqlSeverityLabel}建议
+                    <textarea
+                      value={promqlDescribe}
+                      onChange={(event) => setPromqlDescribe(event.target.value)}
+                      disabled={submitting}
+                      rows={3}
+                      placeholder="达到阈值时写入巡检建议，例如：检查集群负载或扩容"
+                    />
+                  </label>
+                </>
+              )}
+            {formTypeMode === "other" && (
+              <label>
+                配置 (JSON)
+                <textarea
+                  value={configText}
+                  onChange={(event) => setConfigText(event.target.value)}
+                  rows={6}
+                  disabled={submitting}
+                />
+              </label>
             )}
-          {formTypeMode === "other" && (
-            <label>
-              配置 (JSON)
-              <textarea
-                value={configText}
-                onChange={(event) => setConfigText(event.target.value)}
-                rows={6}
-                disabled={submitting || readOnly}
-              />
-            </label>
-          )}
-          <div className="settings-actions">
-            <button
-              type="button"
-              className="secondary"
-              onClick={resetForm}
-              disabled={submitting || readOnly}
-            >
-              重置
-            </button>
-            <button
-              type="submit"
-              className="primary"
-              disabled={submitting || readOnly}
-            >
-              {editingItem ? "保存修改" : "新增"}
-            </button>
-          </div>
-          </form>
-        </section>
+            <div className="settings-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={resetForm}
+                disabled={submitting}
+              >
+                重置
+              </button>
+              <button
+                type="submit"
+                className="primary"
+                disabled={submitting}
+              >
+                {editingItem ? "保存修改" : "新增"}
+              </button>
+            </div>
+            </form>
+          </section>
+        )}
       </div>
     </div>
   );
@@ -5143,7 +5251,7 @@ const PrometheusVersionSettingsPanel = ({
       </div>
       {readOnly && (
         <div className="feedback warning">
-          {license.reason ?? "当前 License 不支持版本管理。"}
+          {readOnlyMessage}
         </div>
       )}
       {notice && <div className="feedback success">{notice}</div>}
@@ -5157,16 +5265,17 @@ const PrometheusVersionSettingsPanel = ({
                 默认版本用于未填写 Prometheus 版本的 PromQL 巡检项
               </span>
             </div>
-            <div className="inspection-section-actions">
-              <button
-                type="button"
-                className="secondary version-manager-toggle"
-                onClick={() => setShowDeleteControls((prev) => !prev)}
-                disabled={readOnly}
-              >
-                {showDeleteControls ? "完成" : "编辑删除"}
-              </button>
-            </div>
+            {!readOnly && (
+              <div className="inspection-section-actions">
+                <button
+                  type="button"
+                  className="secondary version-manager-toggle"
+                  onClick={() => setShowDeleteControls((prev) => !prev)}
+                >
+                  {showDeleteControls ? "完成" : "编辑删除"}
+                </button>
+              </div>
+            )}
           </div>
           <div className="version-manager">
             <div className="version-manager-row">
@@ -5213,26 +5322,27 @@ const PrometheusVersionSettingsPanel = ({
                 })}
               </div>
             </div>
-            <form className="version-manager-form" onSubmit={handleSubmit}>
-              <label>
-                新增版本
-                <input
-                  type="text"
-                  value={versionInput}
-                  onChange={(event) => {
-                    setVersionInput(event.target.value);
-                    if (error) {
-                      setError(null);
-                    }
-                  }}
-                  placeholder="例如：3.2"
-                  disabled={readOnly}
-                />
-              </label>
-              <button type="submit" className="secondary" disabled={readOnly}>
-                添加版本
-              </button>
-            </form>
+            {!readOnly && (
+              <form className="version-manager-form" onSubmit={handleSubmit}>
+                <label>
+                  新增版本
+                  <input
+                    type="text"
+                    value={versionInput}
+                    onChange={(event) => {
+                      setVersionInput(event.target.value);
+                      if (error) {
+                        setError(null);
+                      }
+                    }}
+                    placeholder="例如：3.2"
+                  />
+                </label>
+                <button type="submit" className="secondary">
+                  添加版本
+                </button>
+              </form>
+            )}
           </div>
         </section>
       </div>
@@ -5250,6 +5360,7 @@ interface ScheduleSettingsPanelProps {
   notice: string | null;
   error: string | null;
   license: LicenseCapabilities;
+  canManage: boolean;
   onSave: (payload: {
     id?: number;
     name?: string;
@@ -5273,12 +5384,16 @@ const ScheduleSettingsPanel = ({
   notice,
   error,
   license,
+  canManage,
   onSave,
   onDelete,
   onDeleteMany,
   onToggleEnabled,
 }: ScheduleSettingsPanelProps) => {
-  const readOnly = !license.canRunInspections;
+  const readOnly = !license.canRunInspections || !canManage;
+  const readOnlyMessage = !license.canRunInspections
+    ? license.reason ?? "当前 License 不支持定时巡检。"
+    : "当前账号无定时巡检管理权限。";
   const [editingSchedule, setEditingSchedule] =
     useState<InspectionSchedule | null>(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -5397,10 +5512,10 @@ const ScheduleSettingsPanel = ({
   }, [schedules]);
 
   useEffect(() => {
-    if (!license.canRunInspections) {
+    if (readOnly) {
       setSelectedScheduleIds([]);
     }
-  }, [license.canRunInspections]);
+  }, [readOnly]);
 
   const handleOpenCreate = () => {
     setEditingSchedule(null);
@@ -5420,7 +5535,7 @@ const ScheduleSettingsPanel = ({
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (readOnly) {
-      setFormError(license.reason ?? "当前 License 不支持定时巡检。");
+      setFormError(readOnlyMessage);
       return;
     }
     const parts = [
@@ -5817,21 +5932,23 @@ const ScheduleSettingsPanel = ({
           <p className="card-caption">基于 Cron 表达式定时触发巡检任务</p>
         </div>
         <div className="card-actions">
-          <button
-            type="button"
-            className="primary"
-            onClick={handleOpenCreate}
-            disabled={submitting || readOnly}
-          >
-            创建定时任务
-          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              className="primary"
+              onClick={handleOpenCreate}
+              disabled={submitting}
+            >
+              创建定时任务
+            </button>
+          )}
         </div>
       </div>
       {notice && <div className="feedback success">{notice}</div>}
       {error && <div className="feedback error">{error}</div>}
       {readOnly && (
         <div className="feedback warning">
-          {license.reason ?? "当前 License 不支持定时巡检。"}
+          {readOnlyMessage}
         </div>
       )}
       <div className="inspection-settings-body">
@@ -5849,28 +5966,29 @@ const ScheduleSettingsPanel = ({
           </div>
           <div className="settings-list">
             <div className="history-toolbar">
-              <div className="history-selection">
-                <label className="table-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={allSchedulesSelected}
-                    onChange={handleToggleAllSchedules}
-                    disabled={readOnly}
-                  />
-                  <span>当前页全选</span>
-                </label>
-                <span className="selection-hint">
-                  已选 {visibleSelectedScheduleCount} / {filteredSchedules.length}
-                </span>
-                <button
-                  type="button"
-                  className="secondary danger"
-                  onClick={handleDeleteSelectedSchedules}
-                  disabled={selectedScheduleIds.length === 0 || readOnly}
-                >
-                  删除所选
-                </button>
-              </div>
+              {!readOnly && (
+                <div className="history-selection">
+                  <label className="table-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={allSchedulesSelected}
+                      onChange={handleToggleAllSchedules}
+                    />
+                    <span>当前页全选</span>
+                  </label>
+                  <span className="selection-hint">
+                    已选 {visibleSelectedScheduleCount} / {filteredSchedules.length}
+                  </span>
+                  <button
+                    type="button"
+                    className="secondary danger"
+                    onClick={handleDeleteSelectedSchedules}
+                    disabled={selectedScheduleIds.length === 0}
+                  >
+                    删除所选
+                  </button>
+                </div>
+              )}
               <div className="history-filter-row">
                 <div className="history-chip history-chip-select">
                   <span className="history-chip-label">状态筛选</span>
@@ -5939,14 +6057,15 @@ const ScheduleSettingsPanel = ({
                       return (
                         <tr key={schedule.id}>
                           <td>
-                            <label className="table-checkbox">
-                              <input
-                                type="checkbox"
-                                checked={selectedScheduleIds.includes(schedule.id)}
-                                onChange={() => handleToggleSchedule(schedule.id)}
-                                disabled={readOnly}
-                              />
-                            </label>
+                            {!readOnly && (
+                              <label className="table-checkbox">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedScheduleIds.includes(schedule.id)}
+                                  onChange={() => handleToggleSchedule(schedule.id)}
+                                />
+                              </label>
+                            )}
                           </td>
                           <td>{label}</td>
                           <td className="th-nowrap">{schedule.cron}</td>
@@ -5983,35 +6102,38 @@ const ScheduleSettingsPanel = ({
                               : "-"}
                           </td>
                           <td className="actions">
-                            <button
-                              type="button"
-                              className="link-button"
-                              onClick={() => handleOpenEdit(schedule)}
-                              disabled={readOnly}
-                            >
-                              编辑
-                            </button>
-                            <button
-                              type="button"
-                              className="link-button"
-                              onClick={() =>
-                                onToggleEnabled(
-                                  schedule,
-                                  !schedule.is_enabled
-                                )
-                              }
-                              disabled={readOnly}
-                            >
-                              {schedule.is_enabled ? "停用" : "启用"}
-                            </button>
-                            <button
-                              type="button"
-                              className="link-button danger"
-                              onClick={() => onDelete(schedule)}
-                              disabled={readOnly}
-                            >
-                              删除
-                            </button>
+                            {!readOnly ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="link-button"
+                                  onClick={() => handleOpenEdit(schedule)}
+                                >
+                                  编辑
+                                </button>
+                                <button
+                                  type="button"
+                                  className="link-button"
+                                  onClick={() =>
+                                    onToggleEnabled(
+                                      schedule,
+                                      !schedule.is_enabled
+                                    )
+                                  }
+                                >
+                                  {schedule.is_enabled ? "停用" : "启用"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="link-button danger"
+                                  onClick={() => onDelete(schedule)}
+                                >
+                                  删除
+                                </button>
+                              </>
+                            ) : (
+                              <span>-</span>
+                            )}
                           </td>
                         </tr>
                       );
@@ -6440,6 +6562,7 @@ interface SchedulePageProps {
   notice: string | null;
   error: string | null;
   license: LicenseCapabilities;
+  canManage: boolean;
   onSave: (payload: {
     id?: number;
     name?: string;
@@ -6463,6 +6586,7 @@ const SchedulePage = ({
   notice,
   error,
   license,
+  canManage,
   onSave,
   onDelete,
   onDeleteMany,
@@ -6479,6 +6603,7 @@ const SchedulePage = ({
       notice={notice}
       error={error}
       license={license}
+      canManage={canManage}
       onSave={onSave}
       onDelete={onDelete}
       onDeleteMany={onDeleteMany}
@@ -6600,14 +6725,16 @@ const RoleSettingsPanel = ({
           >
             刷新
           </button>
-          <button
-            type="button"
-            className="primary"
-            onClick={openCreate}
-            disabled={!canCreate || loading || submitting}
-          >
-            创建角色
-          </button>
+          {canCreate && (
+            <button
+              type="button"
+              className="primary"
+              onClick={openCreate}
+              disabled={loading || submitting}
+            >
+              创建角色
+            </button>
+          )}
         </div>
       </div>
       {notice && <div className="feedback success">{notice}</div>}
@@ -6653,22 +6780,26 @@ const RoleSettingsPanel = ({
                     <td>{permissionLabel}</td>
                     <td>
                       <div className="table-actions">
-                        <button
-                          type="button"
-                          className="link-button"
-                          onClick={() => openEdit(role)}
-                          disabled={!canUpdate || role.is_system}
-                        >
-                          编辑
-                        </button>
-                        <button
-                          type="button"
-                          className="link-button danger"
-                          onClick={() => onDelete(role)}
-                          disabled={!canDelete || role.is_system}
-                        >
-                          删除
-                        </button>
+                        {canUpdate && (
+                          <button
+                            type="button"
+                            className="link-button"
+                            onClick={() => openEdit(role)}
+                            disabled={role.is_system}
+                          >
+                            编辑
+                          </button>
+                        )}
+                        {canDelete && (
+                          <button
+                            type="button"
+                            className="link-button danger"
+                            onClick={() => onDelete(role)}
+                            disabled={role.is_system}
+                          >
+                            删除
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -7075,14 +7206,16 @@ const UserSettingsPanel = ({
           >
             刷新
           </button>
-          <button
-            type="button"
-            className="primary"
-            onClick={openCreate}
-            disabled={!canCreate || loading || submitting}
-          >
-            创建用户
-          </button>
+          {canCreate && (
+            <button
+              type="button"
+              className="primary"
+              onClick={openCreate}
+              disabled={loading || submitting}
+            >
+              创建用户
+            </button>
+          )}
         </div>
       </div>
       {notice && <div className="feedback success">{notice}</div>}
@@ -7140,22 +7273,26 @@ const UserSettingsPanel = ({
                   <td>{user.is_active === false ? "停用" : "启用"}</td>
                   <td>
                     <div className="table-actions">
-                      <button
-                        type="button"
-                        className="link-button"
-                        onClick={() => openEdit(user)}
-                        disabled={!canUpdate || submitting}
-                      >
-                        编辑
-                      </button>
-                      <button
-                        type="button"
-                        className="link-button danger"
-                        onClick={() => onDelete(user)}
-                        disabled={!canDelete || submitting || isAdminUser(user)}
-                      >
-                        删除
-                      </button>
+                      {canUpdate && (
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={() => openEdit(user)}
+                          disabled={submitting}
+                        >
+                          编辑
+                        </button>
+                      )}
+                      {canDelete && (
+                        <button
+                          type="button"
+                          className="link-button danger"
+                          onClick={() => onDelete(user)}
+                          disabled={submitting || isAdminUser(user)}
+                        >
+                          删除
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -7438,42 +7575,44 @@ const LicenseSettingsPanel = ({
           </tbody>
         </table>
       </section>
-      <div className="license-detail-grid">
-        <section className="settings-form license-form">
-          <h4>License 文件</h4>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".lic,.txt,.json"
-            onChange={handleFileChange}
-            disabled={uploading || !canUpload}
-          />
-          <p className="settings-overview-hint">
-            支持 .lic / .txt / .json 文件，上传后立即生效。
-          </p>
-        </section>
-        <section className="settings-form license-form">
-          <h4>License 文本</h4>
-          <form onSubmit={handleSubmitText}>
-            <textarea
-              rows={6}
-              value={textValue}
-              onChange={(event) => setTextValue(event.target.value)}
-              placeholder="-----BEGIN LICENSE-----"
-              disabled={textUploading || !canUpload}
+      {canUpload && (
+        <div className="license-detail-grid">
+          <section className="settings-form license-form">
+            <h4>License 文件</h4>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".lic,.txt,.json"
+              onChange={handleFileChange}
+              disabled={uploading}
             />
-            <div className="settings-actions">
-              <button
-                type="submit"
-                className="primary"
-                disabled={textUploading || !canUpload}
-              >
-                {textUploading ? "导入中..." : "导入文本"}
-              </button>
-            </div>
-          </form>
-        </section>
-      </div>
+            <p className="settings-overview-hint">
+              支持 .lic / .txt / .json 文件，上传后立即生效。
+            </p>
+          </section>
+          <section className="settings-form license-form">
+            <h4>License 文本</h4>
+            <form onSubmit={handleSubmitText}>
+              <textarea
+                rows={6}
+                value={textValue}
+                onChange={(event) => setTextValue(event.target.value)}
+                placeholder="-----BEGIN LICENSE-----"
+                disabled={textUploading}
+              />
+              <div className="settings-actions">
+                <button
+                  type="submit"
+                  className="primary"
+                  disabled={textUploading}
+                >
+                  {textUploading ? "导入中..." : "导入文本"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
     </div>
   );
 };
@@ -7490,6 +7629,8 @@ interface RunDetailViewProps {
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
   license: LicenseCapabilities;
+  canUpdateHistory: boolean;
+  canDeleteHistory: boolean;
 }
 
 const RunDetailView = ({
@@ -7504,6 +7645,8 @@ const RunDetailView = ({
   clusterDisplayIds,
   runDisplayIds,
   license,
+  canUpdateHistory,
+  canDeleteHistory,
 }: RunDetailViewProps) => {
   const { clusterKey, runKey } = useParams<{
     clusterKey?: string;
@@ -7526,6 +7669,8 @@ const RunDetailView = ({
   const [resultPageInput, setResultPageInput] = useState("");
   const canRunInspections = license.canRunInspections;
   const canDownloadReports = license.canDownloadReports;
+  const canManageHistoryActions = canUpdateHistory;
+  const canRemoveHistory = canDeleteHistory;
 
   const resolvedClusterId = useMemo(
     () =>
@@ -7788,6 +7933,10 @@ const RunDetailView = ({
       setError(license.reason ?? "当前 License 不支持巡检功能。");
       return;
     }
+    if (!canRemoveHistory) {
+      setError("当前账号无巡检记录删除权限。");
+      return;
+    }
     void onDeleteRun(resolvedRunId, backTarget);
   };
 
@@ -7797,6 +7946,10 @@ const RunDetailView = ({
     }
     if (!canRunInspections) {
       setError(license.reason ?? "当前 License 不支持巡检功能。");
+      return;
+    }
+    if (!canManageHistoryActions) {
+      setError("当前账号无巡检记录操作权限。");
       return;
     }
     void onCancelRun(resolvedRunId);
@@ -7810,6 +7963,10 @@ const RunDetailView = ({
       setError(license.reason ?? "当前 License 不支持巡检功能。");
       return;
     }
+    if (!canManageHistoryActions) {
+      setError("当前账号无巡检记录操作权限。");
+      return;
+    }
     void onPauseRun(resolvedRunId).then(() => {
       setRefreshIndex((prev) => prev + 1);
     });
@@ -7821,6 +7978,10 @@ const RunDetailView = ({
     }
     if (!canRunInspections) {
       setError(license.reason ?? "当前 License 不支持巡检功能。");
+      return;
+    }
+    if (!canManageHistoryActions) {
+      setError("当前账号无巡检记录操作权限。");
       return;
     }
     void onResumeRun(resolvedRunId).then(() => {
@@ -7924,7 +8085,7 @@ const RunDetailView = ({
           >
             {loading ? "刷新中..." : "刷新"}
           </button>
-          {summaryRun?.status === "running" && (
+          {summaryRun?.status === "running" && canUpdateHistory && (
             <button
               type="button"
               className="secondary"
@@ -7934,7 +8095,7 @@ const RunDetailView = ({
               暂停
             </button>
           )}
-          {summaryRun?.status === "paused" && (
+          {summaryRun?.status === "paused" && canUpdateHistory && (
             <button
               type="button"
               className="secondary"
@@ -7945,7 +8106,8 @@ const RunDetailView = ({
             </button>
           )}
           {(summaryRun?.status === "running" ||
-            summaryRun?.status === "paused") && (
+            summaryRun?.status === "paused") &&
+            canUpdateHistory && (
             <button
               type="button"
               className="secondary"
@@ -7955,14 +8117,16 @@ const RunDetailView = ({
               取消任务
             </button>
           )}
-          <button
-            type="button"
-            className="secondary danger"
-            onClick={handleDelete}
-            disabled={!canDelete || !canRunInspections}
-          >
-            删除
-          </button>
+          {canDeleteHistory && (
+            <button
+              type="button"
+              className="secondary danger"
+              onClick={handleDelete}
+              disabled={!canDelete || !canRunInspections}
+            >
+              删除
+            </button>
+          )}
         </div>
       </div>
 
@@ -8916,6 +9080,8 @@ const App = () => {
   const canCreateSchedule = hasPermission("schedule.create");
   const canUpdateSchedule = hasPermission("schedule.update");
   const canDeleteSchedule = hasPermission("schedule.delete");
+  const canManageSchedule =
+    canCreateSchedule || canUpdateSchedule || canDeleteSchedule;
   const canViewHistory =
     hasPermission("history.read") || hasPermission("runRecord.read");
   const canUpdateHistory = hasPermission("history.update");
@@ -9170,6 +9336,18 @@ const App = () => {
   const [licenseLoading, setLicenseLoading] = useState(false);
   const [licenseUploading, setLicenseUploading] = useState(false);
   const [licenseTextUploading, setLicenseTextUploading] = useState(false);
+
+  useAutoClearError(authError, setAuthError);
+  useAutoClearError(passwordError, setPasswordError);
+  useAutoClearError(clusterError, setClusterError);
+  useAutoClearError(inspectionError, setInspectionError);
+  useAutoClearError(scheduleError, setScheduleError);
+  useAutoClearError(clusterEditError, setClusterEditError);
+  useAutoClearError(agentError, setAgentError);
+  useAutoClearError(settingsError, setSettingsError);
+  useAutoClearError(rolesError, setRolesError);
+  useAutoClearError(usersError, setUsersError);
+  useAutoClearError(licenseError, setLicenseError);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -12351,6 +12529,9 @@ const hasManualKubeconfig = useMemo(
                   clusterDisplayIds={clusterDisplayIds}
                   runDisplayIds={runDisplayIds}
                   license={licenseCapabilities}
+                  canCreateHistory={canCreateHistory}
+                  canUpdateHistory={canUpdateHistory}
+                  canDeleteHistory={canDeleteHistory}
                 />
               ) : (
                 <NoPermissionPanel title="无权限访问历史巡检" />
@@ -12371,6 +12552,7 @@ const hasManualKubeconfig = useMemo(
                   notice={scheduleNotice}
                   error={scheduleError}
                   license={licenseCapabilities}
+                  canManage={canManageSchedule}
                   onSave={handleSaveSchedule}
                   onDelete={handleDeleteSchedule}
                   onDeleteMany={handleDeleteSchedulesBulk}
@@ -12412,6 +12594,9 @@ const hasManualKubeconfig = useMemo(
                 canUpdateClusters={canUpdateClusterAgents}
                 canDeleteClusters={canDeleteClusterAgents}
                 canTestClusterAgents={canTestClusterAgents}
+                canCreateHistory={canCreateHistory}
+                canUpdateHistory={canUpdateHistory}
+                canDeleteHistory={canDeleteHistory}
               />
             }
           />
@@ -12440,6 +12625,8 @@ const hasManualKubeconfig = useMemo(
                 clusterDisplayIds={clusterDisplayIds}
                 runDisplayIds={runDisplayIds}
                 license={licenseCapabilities}
+                canUpdateHistory={canUpdateHistory}
+                canDeleteHistory={canDeleteHistory}
               />
             }
           />
