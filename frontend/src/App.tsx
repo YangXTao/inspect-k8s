@@ -8706,7 +8706,7 @@ interface LoginViewProps {
 }
 
 const LoginView = ({ loading, error, onSubmit }: LoginViewProps) => {
-  const [username, setUsername] = useState("admin");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -8737,7 +8737,7 @@ const LoginView = ({ loading, error, onSubmit }: LoginViewProps) => {
               type="text"
               value={username}
               onChange={(event) => setUsername(event.target.value)}
-              placeholder="请输入账号"
+              placeholder="例如：admin"
               disabled={loading}
               autoFocus
             />
