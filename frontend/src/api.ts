@@ -108,9 +108,6 @@ async function buildLoginProof(
   password: string,
   challenge: AuthLoginChallenge
 ): Promise<string> {
-  if (!globalThis.crypto?.subtle) {
-    throw new Error("浏览器不支持安全登录，请更换浏览器");
-  }
   const encoder = new TextEncoder();
   const keyMaterial = await globalThis.crypto.subtle.importKey(
     "raw",
@@ -144,6 +141,14 @@ async function buildLoginProof(
   return bufferToBase64(signature);
 }
 
+function supportsSecureLogin(): boolean {
+  const secureContext =
+    typeof globalThis.isSecureContext === "boolean"
+      ? globalThis.isSecureContext
+      : true;
+  return Boolean(globalThis.crypto?.subtle) && secureContext;
+}
+
 export function getCurrentUser(): Promise<AuthUser> {
   return request<AuthUser>("/auth/me");
 }
@@ -152,21 +157,31 @@ export async function login(
   username: string,
   password: string
 ): Promise<AuthUser> {
-  const challenge = await request<AuthLoginChallenge>(
-    "/auth/login-challenge",
-    {
+  if (supportsSecureLogin()) {
+    const challenge = await request<AuthLoginChallenge>(
+      "/auth/login-challenge",
+      {
+        method: "POST",
+        body: JSON.stringify({ username }),
+      }
+    );
+    const proof = await buildLoginProof(password, challenge);
+    return request<AuthUser>("/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username }),
-    }
-  );
-  const proof = await buildLoginProof(password, challenge);
+      body: JSON.stringify({
+        username,
+        nonce: challenge.nonce,
+        proof,
+        scheme: challenge.scheme,
+      }),
+    });
+  }
   return request<AuthUser>("/auth/login", {
     method: "POST",
     body: JSON.stringify({
       username,
-      nonce: challenge.nonce,
-      proof,
-      scheme: challenge.scheme,
+      password,
+      scheme: "password",
     }),
   });
 }
