@@ -90,6 +90,10 @@ def describe_inspection_run(
     return f"{cluster_display}集群的{run_display}"
 
 
+def _should_log_run(run: models.InspectionRun) -> bool:
+    return (run.operator or "") != CONNECTION_TEST_OPERATOR
+
+
 def list_clusters(db: Session) -> List[models.ClusterConfig]:
     return (
         db.query(models.ClusterConfig)
@@ -455,6 +459,7 @@ def create_inspection_run(
     executor: str = "server",
     agent_status: Optional[str] = None,
     agent_id: Optional[int] = None,
+    log_action: bool = True,
 ) -> models.InspectionRun:
     run = models.InspectionRun(
         operator=operator,
@@ -471,14 +476,15 @@ def create_inspection_run(
     db.add(run)
     db.commit()
     db.refresh(run)
-    run_label = describe_inspection_run(db, run, cluster)
-    log_action(
-        db,
-        action="create",
-        entity_type="inspection_run",
-        entity_id=run.id,
-        description=f"创建巡检记录：{run_label}",
-    )
+    if log_action and (operator or "") != CONNECTION_TEST_OPERATOR:
+        run_label = describe_inspection_run(db, run, cluster)
+        log_action(
+            db,
+            action="create",
+            entity_type="inspection_run",
+            entity_id=run.id,
+            description=f"创建巡检记录：{run_label}",
+        )
     return run
 
 
@@ -505,14 +511,15 @@ def finalize_inspection_run(
     db.add(run)
     db.commit()
     db.refresh(run)
-    run_label = describe_inspection_run(db, run)
-    log_action(
-        db,
-        action="update",
-        entity_type="inspection_run",
-        entity_id=run.id,
-        description=f"更新巡检记录（状态 {status}）：{run_label}",
-    )
+    if _should_log_run(run):
+        run_label = describe_inspection_run(db, run)
+        log_action(
+            db,
+            action="update",
+            entity_type="inspection_run",
+            entity_id=run.id,
+            description=f"更新巡检记录（状态 {status}）：{run_label}",
+        )
     return run
 
 
@@ -846,14 +853,15 @@ def pause_inspection_run(
     db.add(run)
     db.commit()
     db.refresh(run)
-    run_label = describe_inspection_run(db, run)
-    log_action(
-        db,
-        action="update",
-        entity_type="inspection_run",
-        entity_id=run.id,
-        description=f"暂停巡检记录：{run_label}",
-    )
+    if _should_log_run(run):
+        run_label = describe_inspection_run(db, run)
+        log_action(
+            db,
+            action="update",
+            entity_type="inspection_run",
+            entity_id=run.id,
+            description=f"暂停巡检记录：{run_label}",
+        )
     return run
 
 
@@ -868,14 +876,15 @@ def resume_inspection_run(
     db.add(run)
     db.commit()
     db.refresh(run)
-    run_label = describe_inspection_run(db, run)
-    log_action(
-        db,
-        action="update",
-        entity_type="inspection_run",
-        entity_id=run.id,
-        description=f"恢复巡检记录：{run_label}",
-    )
+    if _should_log_run(run):
+        run_label = describe_inspection_run(db, run)
+        log_action(
+            db,
+            action="update",
+            entity_type="inspection_run",
+            entity_id=run.id,
+            description=f"恢复巡检记录：{run_label}",
+        )
     return run
 
 
@@ -896,14 +905,15 @@ def cancel_inspection_run(
     db.add(run)
     db.commit()
     db.refresh(run)
-    run_label = describe_inspection_run(db, run)
-    log_action(
-        db,
-        action="update",
-        entity_type="inspection_run",
-        entity_id=run.id,
-        description=f"取消巡检记录：{run_label}",
-    )
+    if _should_log_run(run):
+        run_label = describe_inspection_run(db, run)
+        log_action(
+            db,
+            action="update",
+            entity_type="inspection_run",
+            entity_id=run.id,
+            description=f"取消巡检记录：{run_label}",
+        )
     return run
 
 
@@ -939,13 +949,14 @@ def delete_inspection_run(db: Session, run: models.InspectionRun) -> None:
     run_label = describe_inspection_run(db, run)
     db.delete(run)
     db.commit()
-    log_action(
-        db,
-        action="delete",
-        entity_type="inspection_run",
-        entity_id=run_id,
-        description=f"删除巡检记录：{run_label}",
-    )
+    if _should_log_run(run):
+        log_action(
+            db,
+            action="delete",
+            entity_type="inspection_run",
+            entity_id=run_id,
+            description=f"删除巡检记录：{run_label}",
+        )
 
 
 def list_inspection_schedules(db: Session) -> List[models.InspectionSchedule]:
