@@ -413,7 +413,6 @@ const AUDIT_ENTITY_OPTIONS = [
   { value: "inspection_run", label: "巡检记录" },
   { value: "inspection_item", label: "巡检项" },
   { value: "prometheus_version", label: "Prometheus版本" },
-  { value: "other", label: "其他" },
 ];
 const SETTINGS_BASE_PATH = "/setting";
 const SETTINGS_TAB_IDS = [
