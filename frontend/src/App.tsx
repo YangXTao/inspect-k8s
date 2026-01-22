@@ -616,6 +616,7 @@ const resolveAuditEntityLabel = (entityType?: string | null) => {
   mapping.set("inspection_agent", "集群");
   mapping.set("auth_role", "角色");
   mapping.set("inspection_result", "巡检结果");
+  mapping.set("audit_log", "审计日志");
   return mapping.get(normalized) ?? "其他";
 };
 
@@ -10035,6 +10036,40 @@ const loginRedirectState = useMemo(
       backgroundLocationRef.current = backgroundLocation;
     }
   }, [backgroundLocation]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+    const pathname = location.pathname;
+    let description: string | null = null;
+    let entityType: string | null = null;
+    if (pathname.startsWith("/history")) {
+      description = "查询巡检记录列表";
+      entityType = "inspection_run";
+    } else if (pathname.startsWith("/schedule")) {
+      description = "查询定时巡检列表";
+      entityType = "inspection_schedule";
+    } else if (pathname.startsWith("/audit")) {
+      description = "查询审计日志列表";
+      entityType = "audit_log";
+    }
+
+    if (!description || !entityType) {
+      return;
+    }
+    void recordAuditLog({
+      action: "query",
+      entity_type: entityType,
+      description,
+    }).catch((err) => {
+      logWithTimestamp(
+        "warn",
+        "记录审计查询失败: %s",
+        err instanceof Error ? err.message : String(err)
+      );
+    });
+  }, [isAuthenticated, location.pathname]);
 
   useEffect(() => {
     if (!isAuthenticated) {
