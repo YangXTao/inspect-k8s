@@ -8,6 +8,7 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   replicas: {{ .Values.frontend.replicaCount }}
+  {{- $httpsEnabled := include "inspection-center.frontendHttpsEnabled" . -}}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "inspection-center.name" . }}
@@ -34,13 +35,35 @@ spec:
             - containerPort: {{ .Values.frontend.service.targetPort }}
               name: http
               protocol: TCP
+            {{- if $httpsEnabled }}
+            - containerPort: {{ .Values.frontend.service.httpsTargetPort | default 443 }}
+              name: https
+              protocol: TCP
+            {{- end }}
           env:
             {{- range $name, $value := .Values.frontend.env }}
             - name: {{ $name }}
               value: {{ $value | quote }}
             {{- end }}
+          {{- if $httpsEnabled }}
+          volumeMounts:
+            - name: frontend-tls
+              mountPath: {{ .Values.frontend.tls.mountPath | quote }}
+              readOnly: true
+          {{- end }}
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
+      {{- if $httpsEnabled }}
+      volumes:
+        - name: frontend-tls
+          secret:
+            secretName: {{ include "inspection-center.frontendTlsSecretName" . }}
+            items:
+              - key: {{ .Values.frontend.tls.certKey }}
+                path: tls.crt
+              - key: {{ .Values.frontend.tls.keyKey }}
+                path: tls.key
+      {{- end }}
       nodeSelector:
         {{- toYaml .Values.frontend.nodeSelector | nindent 8 }}
       tolerations:

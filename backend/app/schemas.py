@@ -492,3 +492,87 @@ class LicenseStatusOut(BaseModel):
 
 class LicenseImportPayload(BaseModel):
     content: str = Field(..., min_length=1, description="加密或明文 License 内容")
+
+
+class AuthLoginIn(BaseModel):
+    username: str = Field(..., min_length=1, max_length=100)
+    password: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    nonce: Optional[str] = Field(default=None, min_length=1, max_length=256)
+    proof: Optional[str] = Field(default=None, min_length=1, max_length=512)
+    scheme: Optional[str] = Field(default=None, min_length=1, max_length=50)
+
+
+class AuthLoginChallengeIn(BaseModel):
+    username: str = Field(..., min_length=1, max_length=100)
+
+
+class AuthLoginChallengeOut(BaseModel):
+    salt: str
+    iterations: int
+    nonce: str
+    scheme: str
+
+
+class AuthUserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str
+    display_name: Optional[str] = None
+    role: str
+    roles: List[str] = Field(default_factory=list)
+    permissions: List[str] = Field(default_factory=list)
+
+
+class AuthUserListOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str
+    display_name: Optional[str] = None
+    role: str
+    roles: List[str] = Field(default_factory=list)
+    is_active: bool
+
+
+class AuthUserCreateIn(BaseModel):
+    username: str = Field(..., min_length=1, max_length=100)
+    display_name: Optional[str] = Field(default=None, max_length=100)
+    password: str = Field(..., min_length=6, max_length=128)
+    roles: List[str] = Field(default_factory=list)
+
+
+class AuthUserUpdateIn(BaseModel):
+    display_name: Optional[str] = Field(default=None, max_length=100)
+    password: Optional[str] = Field(default=None, min_length=6, max_length=128)
+    roles: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+
+
+class AuthPasswordChangeIn(BaseModel):
+    old_password: str = Field(..., min_length=1, max_length=128)
+    new_password: str = Field(..., min_length=6, max_length=128)
+
+
+class AuthRoleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    display_name: str
+    description: Optional[str] = None
+    permissions: List[str] = Field(default_factory=list)
+    is_system: bool
+
+
+class AuthRoleCreateIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    display_name: Optional[str] = Field(default=None, max_length=100)
+    description: Optional[str] = Field(default=None, max_length=255)
+    permissions: List[str] = Field(default_factory=list)
+
+
+class AuthRoleUpdateIn(BaseModel):
+    display_name: Optional[str] = Field(default=None, max_length=100)
+    description: Optional[str] = Field(default=None, max_length=255)
+    permissions: Optional[List[str]] = None

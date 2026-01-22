@@ -14,14 +14,50 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Any, Generator, Iterable
 from uuid import uuid4
 import yaml
-from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, UploadFile, Query, Header
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    Query,
+    Header,
+    Request,
+    Response,
+)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
 from . import crud, models, schemas
 from .cron import CronValidationError, parse_cron_expression
+from .auth import (
+    AUTH_COOKIE_NAME,
+    COOKIE_SAMESITE,
+    COOKIE_SECURE,
+    KNOWN_PERMISSIONS,
+    PASSWORD_ITERATIONS,
+    PASSWORD_SALT_BYTES,
+    SESSION_TTL_HOURS,
+    build_login_challenge,
+    create_session,
+    ensure_default_admin,
+    ensure_default_roles,
+    get_user_from_session,
+    get_user_permissions,
+    get_user_role_names,
+    hash_password,
+    normalize_permissions,
+    parse_password_hash,
+    parse_permissions_json,
+    user_has_any_permission,
+    user_has_permission,
+    verify_login_proof,
+    verify_password,
+)
 from .database import SessionLocal, ensure_runtime_directories, init_db
 from .inspections import CheckContext, DEFAULT_CHECKS, dispatch_checks
 from .license import LicenseError, license_manager
@@ -750,6 +786,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+PUBLIC_AUTH_PATHS = {
+    "/auth/login",
+    "/auth/login-challenge",
+    "/health",
+    "/system-agent-install.sh",
+    "/openapi.json",
+}
+
+
+def _is_public_path(path: str) -> bool:
+    if path in PUBLIC_AUTH_PATHS:
+        return True
+    if path == "/agent" or path.startswith("/agent/"):
+        return True
+    if path == "/docs" or path.startswith("/docs/"):
+        return True
+    if path == "/redoc" or path.startswith("/redoc/"):
+        return True
+    return False
+
+
+@app.middleware("http")
+async def require_authentication(request: Request, call_next):
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    path = request.url.path
+    if _is_public_path(path):
+        return await call_next(request)
+    with SessionLocal() as db:
+        user = get_user_from_session(db, request.cookies.get(AUTH_COOKIE_NAME))
+        if not user:
+            return JSONResponse(status_code=401, content={"detail": "未登录"})
+        request.state.user = user
+    return await call_next(request)
+
 
 def get_db() -> Session:
     db = SessionLocal()
@@ -757,6 +828,32 @@ def get_db() -> Session:
         yield db
     finally:
         db.close()
+
+
+def get_current_user(
+    request: Request, db: Session = Depends(get_db)
+) -> models.AuthUser:
+    user = get_user_from_session(db, request.cookies.get(AUTH_COOKIE_NAME))
+    if not user:
+        raise HTTPException(status_code=401, detail="未登录")
+    return user
+
+
+def _require_permission(
+    db: Session, user: models.AuthUser, permission: str, label: str
+) -> None:
+    if not user_has_permission(db, user, permission):
+        raise HTTPException(status_code=403, detail=f"无权限执行{label}")
+
+
+def _require_any_permission(
+    db: Session,
+    user: models.AuthUser,
+    permissions: list[str],
+    label: str,
+) -> None:
+    if not user_has_any_permission(db, user, permissions):
+        raise HTTPException(status_code=403, detail=f"无权限执行{label}")
 
 
 def _seed_defaults(db: Session) -> None:
@@ -1052,6 +1149,8 @@ def on_startup() -> None:
     init_db()
     with SessionLocal() as db:
         _seed_defaults(db)
+        ensure_default_admin(db)
+        ensure_default_roles(db)
     inspection_scheduler.start()
 
 
@@ -1065,19 +1164,415 @@ def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _serialize_auth_user(db: Session, user: models.AuthUser) -> schemas.AuthUserOut:
+    payload = schemas.AuthUserOut.model_validate(user)
+    return payload.model_copy(
+        update={
+            "permissions": get_user_permissions(db, user),
+            "roles": get_user_role_names(user),
+        }
+    )
+
+
+@app.post("/auth/login", response_model=schemas.AuthUserOut)
+def login(
+    payload: schemas.AuthLoginIn,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> schemas.AuthUserOut:
+    username = payload.username.strip()
+    user = (
+        db.query(models.AuthUser)
+        .filter(models.AuthUser.username == username)
+        .first()
+    )
+    if payload.proof and payload.nonce:
+        if not user or not verify_login_proof(
+            username, payload.nonce, payload.proof, user.password_hash
+        ):
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+    elif payload.password:
+        if not user or not verify_password(payload.password, user.password_hash):
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+    else:
+        raise HTTPException(status_code=400, detail="缺少登录凭据")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="账号已停用")
+    session = create_session(db, user)
+    user.last_login_at = datetime.utcnow()
+    db.add(user)
+    db.add(session)
+    db.commit()
+    max_age = SESSION_TTL_HOURS * 3600
+    cookie_samesite = (
+        COOKIE_SAMESITE
+        if COOKIE_SAMESITE in {"lax", "strict", "none"}
+        else "lax"
+    )
+    response.set_cookie(
+        AUTH_COOKIE_NAME,
+        session.id,
+        max_age=max_age,
+        httponly=True,
+        samesite=cookie_samesite,
+        secure=COOKIE_SECURE,
+    )
+    return _serialize_auth_user(db, user)
+
+
+@app.post("/auth/login-challenge", response_model=schemas.AuthLoginChallengeOut)
+def login_challenge(
+    payload: schemas.AuthLoginChallengeIn,
+    db: Session = Depends(get_db),
+) -> schemas.AuthLoginChallengeOut:
+    username = payload.username.strip()
+    salt = secrets.token_bytes(PASSWORD_SALT_BYTES).hex()
+    iterations = PASSWORD_ITERATIONS
+    user = (
+        db.query(models.AuthUser)
+        .filter(models.AuthUser.username == username)
+        .first()
+    )
+    if user:
+        parsed = parse_password_hash(user.password_hash)
+        if parsed:
+            iterations, salt, _ = parsed
+    nonce = build_login_challenge(username)
+    return schemas.AuthLoginChallengeOut(
+        salt=salt,
+        iterations=iterations,
+        nonce=nonce,
+        scheme="pbkdf2-hmac-sha256",
+    )
+
+
+@app.post("/auth/logout")
+def logout(
+    response: Response,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    session_id = request.cookies.get(AUTH_COOKIE_NAME)
+    if session_id:
+        session = (
+            db.query(models.AuthSession)
+            .filter(models.AuthSession.id == session_id)
+            .first()
+        )
+        if session:
+            db.delete(session)
+            db.commit()
+    response.delete_cookie(AUTH_COOKIE_NAME)
+    return {"status": "ok"}
+
+
+@app.get("/auth/me", response_model=schemas.AuthUserOut)
+def me(
+    current_user: models.AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> schemas.AuthUserOut:
+    return _serialize_auth_user(db, current_user)
+
+
+@app.post("/auth/password")
+def change_password(
+    payload: schemas.AuthPasswordChangeIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+) -> dict[str, str]:
+    if not verify_password(payload.old_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="当前密码不正确")
+    if payload.old_password == payload.new_password:
+        raise HTTPException(status_code=400, detail="新密码不能与当前密码相同")
+    current_user.password_hash = hash_password(payload.new_password)
+    current_user.updated_at = datetime.utcnow()
+    session_id = request.cookies.get(AUTH_COOKIE_NAME)
+    if session_id:
+        (
+            db.query(models.AuthSession)
+            .filter(
+                models.AuthSession.user_id == current_user.id,
+                models.AuthSession.id != session_id,
+            )
+            .delete(synchronize_session=False)
+        )
+    db.add(current_user)
+    db.commit()
+    return {"status": "ok"}
+
+
+def _serialize_role(role: models.AuthRole) -> schemas.AuthRoleOut:
+    return schemas.AuthRoleOut(
+        id=role.id,
+        name=role.name,
+        display_name=role.display_name or role.name,
+        description=role.description,
+        permissions=parse_permissions_json(role.permissions_json),
+        is_system=role.is_system,
+    )
+
+
+def _serialize_user(user: models.AuthUser) -> schemas.AuthUserListOut:
+    payload = schemas.AuthUserListOut.model_validate(user)
+    return payload.model_copy(update={"roles": get_user_role_names(user)})
+
+
+def _normalize_role_permissions(raw_permissions: list[str]) -> list[str]:
+    normalized = normalize_permissions(raw_permissions)
+    invalid = []
+    for value in raw_permissions:
+        if not isinstance(value, str):
+            continue
+        trimmed = value.strip()
+        if not trimmed:
+            continue
+        if trimmed == "*":
+            continue
+        if trimmed not in KNOWN_PERMISSIONS:
+            invalid.append(trimmed)
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"无效的权限标识：{', '.join(sorted(set(invalid)))}",
+        )
+    return normalized
+
+
+def _normalize_user_roles(db: Session, raw_roles: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for value in raw_roles:
+        if not isinstance(value, str):
+            continue
+        trimmed = value.strip()
+        if not trimmed:
+            continue
+        if trimmed not in normalized:
+            normalized.append(trimmed)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="至少选择一个角色")
+    existing_roles = {
+        role.name for role in db.query(models.AuthRole.name).all()
+    }
+    missing = [name for name in normalized if name not in existing_roles]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"包含不存在的角色：{', '.join(missing)}",
+        )
+    return normalized
+
+
+@app.get("/roles", response_model=List[schemas.AuthRoleOut])
+def list_roles(
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "role.read", "角色查看")
+    roles = db.query(models.AuthRole).order_by(models.AuthRole.id.asc()).all()
+    return [_serialize_role(role) for role in roles]
+
+
+@app.post("/roles", response_model=schemas.AuthRoleOut, status_code=201)
+def create_role(
+    payload: schemas.AuthRoleCreateIn,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "role.create", "角色创建")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="角色标识不能为空")
+    existing = (
+        db.query(models.AuthRole)
+        .filter(models.AuthRole.name == name)
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail="角色标识已存在")
+    permissions = _normalize_role_permissions(payload.permissions)
+    role = models.AuthRole(
+        name=name,
+        display_name=(payload.display_name or name).strip(),
+        description=payload.description,
+        permissions_json=json.dumps(permissions, ensure_ascii=True),
+        is_system=False,
+    )
+    db.add(role)
+    db.commit()
+    db.refresh(role)
+    return _serialize_role(role)
+
+
+@app.put("/roles/{role_id}", response_model=schemas.AuthRoleOut)
+def update_role(
+    role_id: int,
+    payload: schemas.AuthRoleUpdateIn,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "role.update", "角色编辑")
+    role = db.query(models.AuthRole).filter(models.AuthRole.id == role_id).first()
+    if not role:
+        raise HTTPException(status_code=404, detail="角色不存在")
+    if role.is_system:
+        raise HTTPException(status_code=400, detail="系统角色不允许修改")
+    update_payload = payload.model_dump(exclude_unset=True)
+    if "display_name" in update_payload:
+        role.display_name = (update_payload["display_name"] or role.name).strip()
+    if "description" in update_payload:
+        role.description = update_payload["description"]
+    if "permissions" in update_payload:
+        role.permissions_json = json.dumps(
+            _normalize_role_permissions(update_payload["permissions"] or []),
+            ensure_ascii=True,
+        )
+    db.add(role)
+    db.commit()
+    db.refresh(role)
+    return _serialize_role(role)
+
+
+@app.delete("/roles/{role_id}", status_code=204)
+def delete_role(
+    role_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "role.delete", "角色删除")
+    role = db.query(models.AuthRole).filter(models.AuthRole.id == role_id).first()
+    if not role:
+        raise HTTPException(status_code=404, detail="角色不存在")
+    if role.is_system:
+        raise HTTPException(status_code=400, detail="系统角色不允许删除")
+    users = db.query(models.AuthUser).all()
+    if any(role.name in get_user_role_names(user) for user in users):
+        raise HTTPException(status_code=400, detail="该角色正在被用户使用")
+    db.delete(role)
+    db.commit()
+    return {}
+
+
+@app.get("/users", response_model=List[schemas.AuthUserListOut])
+def list_users(
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "user.read", "用户查看")
+    users = db.query(models.AuthUser).order_by(models.AuthUser.id.asc()).all()
+    return [_serialize_user(user) for user in users]
+
+
+@app.post("/users", response_model=schemas.AuthUserListOut, status_code=201)
+def create_user(
+    payload: schemas.AuthUserCreateIn,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "user.create", "用户创建")
+    username = payload.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="用户名不能为空")
+    existing = (
+        db.query(models.AuthUser)
+        .filter(models.AuthUser.username == username)
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail="用户名已存在")
+    role_names = _normalize_user_roles(db, payload.roles)
+    display_name = (payload.display_name or username).strip()
+    user = models.AuthUser(
+        username=username,
+        display_name=display_name,
+        password_hash=hash_password(payload.password),
+        role=role_names[0],
+        roles_json=json.dumps(role_names, ensure_ascii=True),
+        is_active=True,
+        auth_provider="local",
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return _serialize_user(user)
+
+
+@app.put("/users/{user_id}", response_model=schemas.AuthUserListOut)
+def update_user(
+    user_id: int,
+    payload: schemas.AuthUserUpdateIn,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "user.update", "用户修改")
+    user = db.query(models.AuthUser).filter(models.AuthUser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    update_payload = payload.model_dump(exclude_unset=True)
+    is_admin = user.username == "admin"
+    if is_admin:
+        if "roles" in update_payload or "is_active" in update_payload:
+            raise HTTPException(status_code=400, detail="管理员账号不允许修改角色或状态")
+    if "display_name" in update_payload:
+        user.display_name = (update_payload["display_name"] or user.username).strip()
+    if "password" in update_payload and update_payload["password"]:
+        user.password_hash = hash_password(update_payload["password"])
+    if "roles" in update_payload:
+        role_names = _normalize_user_roles(db, update_payload["roles"] or [])
+        user.role = role_names[0]
+        user.roles_json = json.dumps(role_names, ensure_ascii=True)
+    if "is_active" in update_payload:
+        if user.id == current_user.id and not update_payload["is_active"]:
+            raise HTTPException(status_code=400, detail="不能停用当前登录账号")
+        if user.username == "admin" and not update_payload["is_active"]:
+            raise HTTPException(status_code=400, detail="管理员账号不能停用")
+        user.is_active = bool(update_payload["is_active"])
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return _serialize_user(user)
+
+
+@app.delete("/users/{user_id}", status_code=204)
+def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "user.delete", "用户删除")
+    user = db.query(models.AuthUser).filter(models.AuthUser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if user.username == "admin":
+        raise HTTPException(status_code=400, detail="管理员账号不能删除")
+    if user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="不能删除当前登录账号")
+    db.delete(user)
+    db.commit()
+    return {}
+
+
 @app.get("/system-agent-install.sh", response_class=PlainTextResponse)
 def system_agent_install_script() -> str:
     return _build_system_agent_install_script()
 
 
 @app.get("/license/status", response_model=schemas.LicenseStatusOut)
-def get_license_status() -> schemas.LicenseStatusOut:
+def get_license_status(
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+) -> schemas.LicenseStatusOut:
     status = license_manager.status()
     return schemas.LicenseStatusOut(**status)
 
 
 @app.post("/license/upload", response_model=schemas.LicenseStatusOut)
-async def upload_license(file: UploadFile = File(...)) -> schemas.LicenseStatusOut:
+async def upload_license(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+) -> schemas.LicenseStatusOut:
+    _require_permission(db, current_user, "license.upload", "License 上传")
     payload = await file.read()
     if not payload:
         raise HTTPException(status_code=400, detail="上传的 License 文件为空")
@@ -1089,7 +1584,12 @@ async def upload_license(file: UploadFile = File(...)) -> schemas.LicenseStatusO
 
 
 @app.post("/license/import-text", response_model=schemas.LicenseStatusOut)
-def upload_license_text(payload: schemas.LicenseImportPayload) -> schemas.LicenseStatusOut:
+def upload_license_text(
+    payload: schemas.LicenseImportPayload,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+) -> schemas.LicenseStatusOut:
+    _require_permission(db, current_user, "license.upload", "License 上传")
     try:
         status = license_manager.import_bytes(payload.content)
     except LicenseError as exc:
@@ -1138,7 +1638,11 @@ def _present_cluster(
 
 
 @app.get("/clusters", response_model=List[schemas.ClusterConfigOut])
-def list_clusters(db: Session = Depends(get_db)):
+def list_clusters(
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "clusterAgent.read", "集群查看")
     clusters = crud.list_clusters(db)
     return [_present_cluster(cluster) for cluster in clusters]
 
@@ -1149,8 +1653,10 @@ async def register_cluster(
     name: str | None = Form(None),
     prometheus_url: str | None = Form(None),
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("clusters")),
 ):
+    _require_permission(db, current_user, "clusterAgent.create", "集群新增")
     raise HTTPException(
         status_code=410,
         detail="Server 端已停用直接上传 kubeconfig，请通过 Agent 完成集群注册。",
@@ -1164,8 +1670,15 @@ async def register_cluster(
 def test_cluster_connection(
     cluster_id: int,
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("clusters")),
 ):
+    _require_any_permission(
+        db,
+        current_user,
+        ["clusterAgent.test", "clusterAgent.update"],
+        "集群连接测试",
+    )
     cluster = crud.get_cluster(db, cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="指定的集群不存在。")
@@ -1204,7 +1717,12 @@ def test_cluster_connection(
     "/clusters/{cluster_id}/nodes",
     response_model=schemas.ClusterNodesOut,
 )
-def get_cluster_nodes(cluster_id: int, db: Session = Depends(get_db)):
+def get_cluster_nodes(
+    cluster_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "clusterAgent.read", "集群节点查看")
     cluster = crud.get_cluster(db, cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="指定的集群不存在。")
@@ -1245,8 +1763,10 @@ def get_cluster_nodes(cluster_id: int, db: Session = Depends(get_db)):
 def refresh_cluster_nodes(
     cluster_id: int,
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("clusters")),
 ):
+    _require_permission(db, current_user, "clusterAgent.update", "集群节点刷新")
     cluster = crud.get_cluster(db, cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="指定的集群不存在。")
@@ -1273,8 +1793,10 @@ async def update_cluster(
     name: str | None = Form(None),
     prometheus_url: str | None = Form(None),
     default_agent_id: str | None = Form(None),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("clusters")),
 ):
+    _require_permission(db, current_user, "clusterAgent.update", "集群更新")
     cluster = crud.get_cluster(db, cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="指定的集群不存在。")
@@ -1335,7 +1857,9 @@ async def update_cluster(
 @app.get("/agents", response_model=List[schemas.InspectionAgentOut])
 def list_agents(
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
 ):
+    _require_permission(db, current_user, "clusterAgent.read", "Agent 查看")
     agents = crud.list_inspection_agents(db)
     return [_serialize_agent(agent) for agent in agents]
 
@@ -1344,8 +1868,10 @@ def list_agents(
 def register_agent(
     payload: schemas.InspectionAgentCreate,
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
+    _require_permission(db, current_user, "clusterAgent.create", "Agent 创建")
     trimmed_name = (payload.name or "").strip()
     if not trimmed_name:
         raise HTTPException(status_code=400, detail="Agent 名称不能为空。")
@@ -1860,8 +2386,10 @@ def delete_cluster(
         description="同时删除关联巡检记录及报告文件",
     ),
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("clusters")),
 ):
+    _require_permission(db, current_user, "clusterAgent.delete", "集群删除")
     cluster = crud.get_cluster(db, cluster_id)
     if not cluster:
         raise HTTPException(status_code=404, detail="指定的集群不存在。")
@@ -1901,7 +2429,11 @@ def list_audit_logs(limit: int = 100, db: Session = Depends(get_db)):
 
 
 @app.get("/inspection-items", response_model=List[schemas.InspectionItemOut])
-def list_inspection_items(db: Session = Depends(get_db)):
+def list_inspection_items(
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "inspectionItem.read", "巡检项查看")
     return crud.get_inspection_items(db)
 
 
@@ -1911,8 +2443,10 @@ def list_inspection_items(db: Session = Depends(get_db)):
 )
 def export_inspection_items(
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
+    _require_permission(db, current_user, "inspectionItem.read", "巡检项导出")
     items = crud.get_inspection_items(db)
     return {
         "exported_at": datetime.utcnow(),
@@ -1923,8 +2457,10 @@ def export_inspection_items(
 @app.get("/inspection-items/export-yaml")
 def export_inspection_items_yaml(
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
+    _require_permission(db, current_user, "inspectionItem.read", "巡检项导出")
     items = crud.get_inspection_items(db)
     export_payload = schemas.InspectionItemsExportOut(
         exported_at=datetime.utcnow(),
@@ -1950,8 +2486,10 @@ def export_inspection_items_yaml(
 async def import_inspection_items(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
+    _require_permission(db, current_user, "inspectionItem.create", "巡检项导入")
     raw_bytes = await file.read()
     if not raw_bytes:
         raise HTTPException(status_code=400, detail="导入文件为空")
@@ -2187,8 +2725,10 @@ async def import_inspection_items(
 def create_inspection_item(
     item_in: schemas.InspectionItemCreate,
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
+    _require_permission(db, current_user, "inspectionItem.create", "巡检项创建")
     trimmed_name = (item_in.name or "").strip()
     if not trimmed_name:
         raise HTTPException(status_code=400, detail="巡检项名称不能为空。")
@@ -2224,8 +2764,10 @@ def update_inspection_item(
     item_id: int,
     item_in: schemas.InspectionItemUpdate,
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
+    _require_permission(db, current_user, "inspectionItem.update", "巡检项更新")
     item = crud.get_inspection_item(db, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Inspection item not found.")
@@ -2273,8 +2815,10 @@ def update_inspection_item(
 def delete_inspection_item(
     item_id: int,
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
+    _require_permission(db, current_user, "inspectionItem.delete", "巡检项删除")
     item = crud.get_inspection_item(db, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Inspection item not found.")
@@ -2286,7 +2830,11 @@ def delete_inspection_item(
     "/inspection-schedules",
     response_model=List[schemas.InspectionScheduleOut],
 )
-def list_inspection_schedules(db: Session = Depends(get_db)):
+def list_inspection_schedules(
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "schedule.read", "定时巡检查看")
     schedules = crud.list_inspection_schedules(db)
     return [
         schemas.InspectionScheduleOut.model_validate(schedule)
@@ -2302,8 +2850,10 @@ def list_inspection_schedules(db: Session = Depends(get_db)):
 def create_inspection_schedule(
     payload: schemas.InspectionScheduleCreate,
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
+    _require_permission(db, current_user, "schedule.create", "定时巡检创建")
     try:
         cron = _normalize_cron_expression(payload.cron)
     except CronValidationError as exc:
@@ -2334,8 +2884,10 @@ def update_inspection_schedule(
     schedule_id: int,
     payload: schemas.InspectionScheduleUpdate,
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
+    _require_permission(db, current_user, "schedule.update", "定时巡检更新")
     schedule = crud.get_inspection_schedule(db, schedule_id)
     if not schedule:
         raise HTTPException(status_code=404, detail="定时巡检不存在。")
@@ -2369,8 +2921,10 @@ def update_inspection_schedule(
 def delete_inspection_schedule(
     schedule_id: int,
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
+    _require_permission(db, current_user, "schedule.delete", "定时巡检删除")
     schedule = crud.get_inspection_schedule(db, schedule_id)
     if not schedule:
         raise HTTPException(status_code=404, detail="定时巡检不存在。")
@@ -2444,8 +2998,10 @@ def _serialize_run_list(run: models.InspectionRun) -> schemas.InspectionRunListO
 def trigger_inspection(
     run_in: schemas.InspectionRunCreate,
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
+    _require_permission(db, current_user, "history.create", "历史巡检创建")
     if not run_in.item_ids:
         raise HTTPException(status_code=400, detail="No inspection items selected.")
 
@@ -2501,7 +3057,16 @@ def trigger_inspection(
 
 
 @app.get("/inspection-runs", response_model=List[schemas.InspectionRunListOut])
-def list_inspection_runs(db: Session = Depends(get_db)):
+def list_inspection_runs(
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_any_permission(
+        db,
+        current_user,
+        ["history.read", "runRecord.read"],
+        "巡检记录查看",
+    )
     _requeue_stale_agent_runs(db)
     runs = [
         run
@@ -2512,7 +3077,17 @@ def list_inspection_runs(db: Session = Depends(get_db)):
 
 
 @app.get("/inspection-runs/{run_id}", response_model=schemas.InspectionRunOut)
-def get_inspection_run(run_id: int, db: Session = Depends(get_db)):
+def get_inspection_run(
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_any_permission(
+        db,
+        current_user,
+        ["history.read", "runRecord.read", "result.read"],
+        "巡检结果查看",
+    )
     _requeue_stale_agent_runs(db)
     run = crud.get_inspection_run(db, run_id)
     if not run:
@@ -2527,8 +3102,10 @@ def get_inspection_run(run_id: int, db: Session = Depends(get_db)):
 def pause_inspection_run(
     run_id: int,
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
+    _require_permission(db, current_user, "history.update", "历史巡检更新")
     run = crud.get_inspection_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
@@ -2550,8 +3127,10 @@ def pause_inspection_run(
 def resume_inspection_run(
     run_id: int,
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
+    _require_permission(db, current_user, "history.update", "历史巡检更新")
     run = crud.get_inspection_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
@@ -2573,8 +3152,10 @@ def resume_inspection_run(
 def cancel_inspection_run(
     run_id: int,
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
+    _require_permission(db, current_user, "history.update", "历史巡检更新")
     run = crud.get_inspection_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
@@ -2595,8 +3176,15 @@ def delete_inspection_run(
         description="同时删除本地巡检报告文件",
     ),
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
+    _require_any_permission(
+        db,
+        current_user,
+        ["history.delete", "runRecord.delete", "result.delete", "report.delete"],
+        "巡检记录删除",
+    )
     run = crud.get_inspection_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
@@ -2617,8 +3205,10 @@ def download_report(
         description="下载格式，支持 pdf 或 md",
     ),
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("reports")),
 ):
+    _require_permission(db, current_user, "report.read", "巡检报告查看")
     run = crud.get_inspection_run(db, run_id)
     if not run or not run.report_path:
         raise HTTPException(status_code=404, detail="Report not found.")

@@ -13,7 +13,20 @@ spec:
     app.kubernetes.io/component: frontend
     app.kubernetes.io/instance: {{ .Release.Name }}
   ports:
+    {{- $httpsEnabled := include "inspection-center.frontendHttpsEnabled" . -}}
     - name: http
       port: {{ .Values.frontend.service.port }}
       targetPort: {{ .Values.frontend.service.targetPort }}
       protocol: TCP
+      {{- if .Values.frontend.service.nodePort }}
+      nodePort: {{ .Values.frontend.service.nodePort }}
+      {{- end }}
+    {{- if $httpsEnabled }}
+    - name: https
+      port: {{ .Values.frontend.service.httpsPort | default 443 }}
+      targetPort: {{ .Values.frontend.service.httpsTargetPort | default 443 }}
+      protocol: TCP
+      {{- if .Values.frontend.service.httpsNodePort }}
+      nodePort: {{ .Values.frontend.service.httpsNodePort }}
+      {{- end }}
+    {{- end }}

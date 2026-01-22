@@ -12,6 +12,9 @@ import {
   InspectionRunListItem,
   InspectionSchedule,
   LicenseStatus,
+  AuthRole,
+  AuthLoginChallenge,
+  AuthUser,
 } from "./types";
 
 const API_BASE = appConfig.apiBaseUrl.replace(/\/$/, "");
@@ -50,6 +53,7 @@ async function request<T>(
         ...headers,
         ...(init?.headers || {}),
       },
+      credentials: "include",
     });
   } catch (err) {
     if (
@@ -78,6 +82,200 @@ async function request<T>(
   return (await response.json()) as T;
 }
 
+function hexToBytes(hex: string): Uint8Array {
+  const normalized = hex.length % 2 === 0 ? hex : `0${hex}`;
+  const bytes = new Uint8Array(normalized.length / 2);
+  for (let i = 0; i < bytes.length; i += 1) {
+    const byte = Number.parseInt(normalized.slice(i * 2, i * 2 + 2), 16);
+    if (Number.isNaN(byte)) {
+      throw new Error("登录参数无效");
+    }
+    bytes[i] = byte;
+  }
+  return bytes;
+}
+
+function bufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return globalThis.btoa(binary);
+}
+
+async function buildLoginProof(
+  password: string,
+  challenge: AuthLoginChallenge
+): Promise<string> {
+  const encoder = new TextEncoder();
+  const keyMaterial = await globalThis.crypto.subtle.importKey(
+    "raw",
+    encoder.encode(password),
+    { name: "PBKDF2" },
+    false,
+    ["deriveBits"]
+  );
+  const derivedBits = await globalThis.crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: hexToBytes(challenge.salt),
+      iterations: challenge.iterations,
+      hash: "SHA-256",
+    },
+    keyMaterial,
+    256
+  );
+  const hmacKey = await globalThis.crypto.subtle.importKey(
+    "raw",
+    derivedBits,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = await globalThis.crypto.subtle.sign(
+    "HMAC",
+    hmacKey,
+    encoder.encode(challenge.nonce)
+  );
+  return bufferToBase64(signature);
+}
+
+function supportsSecureLogin(): boolean {
+  const secureContext =
+    typeof globalThis.isSecureContext === "boolean"
+      ? globalThis.isSecureContext
+      : true;
+  return Boolean(globalThis.crypto?.subtle) && secureContext;
+}
+
+export function getCurrentUser(): Promise<AuthUser> {
+  return request<AuthUser>("/auth/me");
+}
+
+export async function login(
+  username: string,
+  password: string
+): Promise<AuthUser> {
+  if (supportsSecureLogin()) {
+    const challenge = await request<AuthLoginChallenge>(
+      "/auth/login-challenge",
+      {
+        method: "POST",
+        body: JSON.stringify({ username }),
+      }
+    );
+    const proof = await buildLoginProof(password, challenge);
+    return request<AuthUser>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({
+        username,
+        nonce: challenge.nonce,
+        proof,
+        scheme: challenge.scheme,
+      }),
+    });
+  }
+  return request<AuthUser>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({
+      username,
+      password,
+      scheme: "password",
+    }),
+  });
+}
+
+export function logout(): Promise<Record<string, string>> {
+  return request<Record<string, string>>("/auth/logout", { method: "POST" });
+}
+
+export function changePassword(
+  oldPassword: string,
+  newPassword: string
+): Promise<Record<string, string>> {
+  return request<Record<string, string>>("/auth/password", {
+    method: "POST",
+    body: JSON.stringify({
+      old_password: oldPassword,
+      new_password: newPassword,
+    }),
+  });
+}
+
+export function getRoles(): Promise<AuthRole[]> {
+  return request<AuthRole[]>("/roles");
+}
+
+export function createRole(payload: {
+  name: string;
+  display_name?: string;
+  description?: string;
+  permissions: string[];
+}): Promise<AuthRole> {
+  return request<AuthRole>("/roles", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateRole(
+  roleId: number,
+  payload: {
+    display_name?: string;
+    description?: string;
+    permissions?: string[];
+  }
+): Promise<AuthRole> {
+  return request<AuthRole>(`/roles/${roleId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteRole(roleId: number): Promise<void> {
+  return request<void>(`/roles/${roleId}`, {
+    method: "DELETE",
+  });
+}
+
+export function getUsers(): Promise<AuthUser[]> {
+  return request<AuthUser[]>("/users");
+}
+
+export function createUser(payload: {
+  username: string;
+  display_name?: string;
+  password: string;
+  roles: string[];
+}): Promise<AuthUser> {
+  return request<AuthUser>("/users", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateUser(
+  userId: number,
+  payload: {
+    display_name?: string;
+    password?: string;
+    roles?: string[];
+    is_active?: boolean;
+  }
+): Promise<AuthUser> {
+  return request<AuthUser>(`/users/${userId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteUser(userId: number): Promise<void> {
+  return request<void>(`/users/${userId}`, {
+    method: "DELETE",
+  });
+}
+
 export function getInspectionItems(): Promise<InspectionItem[]> {
   return request<InspectionItem[]>("/inspection-items");
 }
@@ -89,6 +287,7 @@ export function exportInspectionItems(): Promise<InspectionItemsExportPayload> {
 export async function exportInspectionItemsYaml(): Promise<string> {
   const response = await fetch(`${API_BASE}/inspection-items/export-yaml`, {
     headers: { Accept: "text/yaml" },
+    credentials: "include",
   });
   if (!response.ok) {
     const message = await response.text();

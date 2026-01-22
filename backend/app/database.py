@@ -64,6 +64,7 @@ def init_db() -> None:
     from . import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    _ensure_auth_schema()
     _ensure_cluster_schema()
     _ensure_inspection_schema()
     _ensure_inspection_runs_schema()
@@ -90,6 +91,87 @@ def ensure_runtime_directories() -> None:
     (base / "configs").mkdir(parents=True, exist_ok=True)
     (base / "state").mkdir(parents=True, exist_ok=True)
     ensure_license_directory()
+
+
+def _ensure_auth_schema() -> None:
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    if not table_names:
+        return
+
+    dialect = engine.dialect.name
+    statements: list[str] = []
+    if "auth_users" in table_names:
+        columns = {column["name"] for column in inspector.get_columns("auth_users")}
+        if "roles_json" not in columns:
+            column_type = "TEXT" if dialect == "sqlite" else "TEXT"
+            statements.append(
+                f"ALTER TABLE auth_users ADD COLUMN roles_json {column_type} NULL"
+            )
+
+    if dialect == "sqlite":
+        if not statements:
+            return
+        with engine.begin() as connection:
+            for statement in statements:
+                connection.execute(text(statement))
+        return
+
+    # MySQL charset normalization
+    if "auth_roles" in table_names:
+        statements.extend(
+            [
+                "ALTER TABLE auth_roles CONVERT TO CHARACTER SET utf8mb4 "
+                "COLLATE utf8mb4_unicode_ci",
+                "ALTER TABLE auth_roles MODIFY name VARCHAR(100) "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+                "ALTER TABLE auth_roles MODIFY display_name VARCHAR(100) "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+                "ALTER TABLE auth_roles MODIFY description TEXT "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
+                "ALTER TABLE auth_roles MODIFY permissions_json TEXT "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+            ]
+        )
+
+    if "auth_users" in table_names:
+        statements.extend(
+            [
+                "ALTER TABLE auth_users CONVERT TO CHARACTER SET utf8mb4 "
+                "COLLATE utf8mb4_unicode_ci",
+                "ALTER TABLE auth_users MODIFY username VARCHAR(100) "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+                "ALTER TABLE auth_users MODIFY display_name VARCHAR(100) "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+                "ALTER TABLE auth_users MODIFY password_hash VARCHAR(255) "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+                "ALTER TABLE auth_users MODIFY role VARCHAR(50) "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+                "ALTER TABLE auth_users MODIFY roles_json TEXT "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
+                "ALTER TABLE auth_users MODIFY auth_provider VARCHAR(20) "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+                "ALTER TABLE auth_users MODIFY external_id VARCHAR(150) "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
+            ]
+        )
+
+    if "auth_sessions" in table_names:
+        statements.extend(
+            [
+                "ALTER TABLE auth_sessions CONVERT TO CHARACTER SET utf8mb4 "
+                "COLLATE utf8mb4_unicode_ci",
+                "ALTER TABLE auth_sessions MODIFY id VARCHAR(64) "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+            ]
+        )
+
+    if not statements:
+        return
+
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
 
 
 def _ensure_cluster_schema() -> None:

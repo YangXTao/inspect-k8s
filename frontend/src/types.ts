@@ -11,6 +11,32 @@
 
 export type ExecutionMode = "server" | "agent";
 
+export type AuthUser = {
+  id: number;
+  username: string;
+  display_name?: string | null;
+  role: string;
+  roles?: string[];
+  permissions?: string[];
+  is_active?: boolean;
+};
+
+export type AuthRole = {
+  id: number;
+  name: string;
+  display_name: string;
+  description?: string | null;
+  permissions: string[];
+  is_system: boolean;
+};
+
+export type AuthLoginChallenge = {
+  salt: string;
+  iterations: number;
+  nonce: string;
+  scheme: string;
+};
+
 export type ClusterConfig = {
   id: number;
   name: string;

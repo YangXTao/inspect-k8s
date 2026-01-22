@@ -17,6 +17,10 @@ spec:
         - env:
             - name: API_SERVER
               value: <API_SERVER>
+            - name: SSL_CN
+              value: <SSL_CN>
+            # - name: FRONTEND_ENABLE_HTTPS
+            #   value: "true"
           image: <NAME>:<image-tag>
           imagePullPolicy: Always
           name: frontend
@@ -24,3 +28,19 @@ spec:
             - containerPort: 80
               name: http
               protocol: TCP
+            - containerPort: 443
+              name: https
+              protocol: TCP
+          # volumeMounts:
+          #   - name: frontend-tls
+          #     mountPath: /etc/nginx/certs
+          #     readOnly: true
+      # volumes:
+      #   - name: frontend-tls
+      #     secret:
+      #       secretName: <TLS_SECRET_NAME>
+      #       items:
+      #         - key: <TLS_CERT_KEY>
+      #           path: tls.crt
+      #         - key: <TLS_KEY_KEY>
+      #           path: tls.key
