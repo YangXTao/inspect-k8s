@@ -816,16 +816,20 @@ async def require_authentication(request: Request, call_next):
     if _is_public_path(path):
         return await call_next(request)
     audit_token = None
+    user_id = None
+    username = None
     with SessionLocal() as db:
         user = get_user_from_session(db, request.cookies.get(AUTH_COOKIE_NAME))
         if not user:
             return JSONResponse(status_code=401, content={"detail": "未登录"})
+        user_id = user.id
+        username = user.username
         request.state.user = user
     try:
         audit_token = set_audit_actor(
             AuditActor(
-                user_id=user.id,
-                username=user.username,
+                user_id=user_id,
+                username=username,
                 ip_address=request.client.host if request.client else None,
                 user_agent=request.headers.get("user-agent"),
             )
