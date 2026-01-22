@@ -617,6 +617,9 @@ const resolveAuditEntityLabel = (entityType?: string | null) => {
   mapping.set("auth_role", "角色");
   mapping.set("inspection_result", "巡检结果");
   mapping.set("audit_log", "审计日志");
+  mapping.set("overview", "首页");
+  mapping.set("setting", "设置");
+  mapping.set("license", "License");
   return mapping.get(normalized) ?? "其他";
 };
 
@@ -10042,17 +10045,53 @@ const loginRedirectState = useMemo(
       return;
     }
     const pathname = location.pathname;
+    if (pathname.startsWith("/audit")) {
+      return;
+    }
     let description: string | null = null;
     let entityType: string | null = null;
-    if (pathname.startsWith("/history")) {
+    let entityId: number | null | undefined = undefined;
+    if (pathname === "/" || pathname === "") {
+      description = "查询首页";
+      entityType = "overview";
+    } else if (pathname.startsWith("/history")) {
       description = "查询巡检记录列表";
       entityType = "inspection_run";
     } else if (pathname.startsWith("/schedule")) {
       description = "查询定时巡检列表";
       entityType = "inspection_schedule";
-    } else if (pathname.startsWith("/audit")) {
-      description = "查询审计日志列表";
-      entityType = "audit_log";
+    } else if (pathname.startsWith("/setting")) {
+      const segments = pathname.split("/").filter(Boolean);
+      const tab = (segments[1] ?? "overview").toLowerCase();
+      if (tab === "inspection") {
+        description = "查询巡检项设置";
+        entityType = "inspection_item";
+      } else if (tab === "prometheus-version") {
+        description = "查询 Prometheus 版本设置";
+        entityType = "prometheus_version";
+      } else if (tab === "users") {
+        description = "查询用户管理";
+        entityType = "auth_user";
+      } else if (tab === "license") {
+        description = "查询 License 设置";
+        entityType = "license";
+      } else {
+        description = "查询设置总览";
+        entityType = "setting";
+      }
+    } else if (pathname.startsWith("/clusters/")) {
+      const segments = pathname.split("/").filter(Boolean);
+      const clusterKey = segments[1] ?? "";
+      if (segments[2] === "runs" && segments[3]) {
+        description = `查看巡检记录详情：${clusterKey}/${segments[3]}`;
+        entityType = "inspection_run";
+      } else if (segments[2] === "nodes") {
+        description = `查看集群节点：${clusterKey}`;
+        entityType = "cluster_config";
+      } else {
+        description = `查看集群概览：${clusterKey}`;
+        entityType = "cluster_config";
+      }
     }
 
     if (!description || !entityType) {
@@ -10061,6 +10100,7 @@ const loginRedirectState = useMemo(
     void recordAuditLog({
       action: "query",
       entity_type: entityType,
+      entity_id: entityId,
       description,
     }).catch((err) => {
       logWithTimestamp(
