@@ -10418,41 +10418,10 @@ const loginRedirectState = useMemo(
         setClusterError(null);
       }
       setClusterTesting((prev) => ({ ...prev, [clusterId]: true }));
-      const cluster = clusters.find((item) => item.id === clusterId);
-      const displayId = getClusterDisplayId(
-        clusterDisplayIds,
-        clusterId,
-        cluster
-      );
       try {
-        void recordAuditLog({
-          action: "create",
-          entity_type: "cluster_config",
-          entity_id: clusterId,
-          description: `测试连接集群：${displayId}`,
-        }).catch((err) => {
-          logWithTimestamp(
-            "warn",
-            "记录集群连接测试审计失败: %s",
-            err instanceof Error ? err.message : String(err)
-          );
-        });
         logWithTimestamp("info", "开始测试集群连接: %s", clusterId);
         await testClusterConnection(clusterId);
         logWithTimestamp("info", "连接测试请求已下发: %s", clusterId);
-        void recordAuditLog({
-          action: "update",
-          entity_type: "cluster_config",
-          entity_id: clusterId,
-          status: "success",
-          description: `测试连接成功：${displayId}`,
-        }).catch((err) => {
-          logWithTimestamp(
-            "warn",
-            "记录集群连接测试结果审计失败: %s",
-            err instanceof Error ? err.message : String(err)
-          );
-        });
         setPendingRefreshTargets((prev) => ({
           ...prev,
           [clusterId]: Date.now(),
@@ -10467,19 +10436,6 @@ const loginRedirectState = useMemo(
         const message =
           err instanceof Error ? err.message : "测试集群连接失败";
         logWithTimestamp("error", "测试集群连接失败: %s", message);
-        void recordAuditLog({
-          action: "update",
-          entity_type: "cluster_config",
-          entity_id: clusterId,
-          status: "failed",
-          description: `测试连接失败：${displayId}`,
-        }).catch((auditErr) => {
-          logWithTimestamp(
-            "warn",
-            "记录集群连接测试失败审计失败: %s",
-            auditErr instanceof Error ? auditErr.message : String(auditErr)
-          );
-        });
         showClusterNotice(quiet ? "overview" : currentNoticeScope, message, "error");
       } finally {
         setClusterTesting((prev) => ({ ...prev, [clusterId]: false }));
@@ -10492,8 +10448,6 @@ const loginRedirectState = useMemo(
       showClusterNotice,
       licenseCapabilities,
       canTestClusterAgents,
-      clusterDisplayIds,
-      clusters,
     ]
   );
 

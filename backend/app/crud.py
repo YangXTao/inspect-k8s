@@ -90,6 +90,10 @@ def describe_inspection_run(
     return f"{cluster_display}集群的{run_display}"
 
 
+def get_cluster_display_id(cluster: models.ClusterConfig) -> str:
+    return _build_cluster_display_id(cluster.id, cluster.name)
+
+
 def _should_log_run(run: models.InspectionRun) -> bool:
     return (run.operator or "") != CONNECTION_TEST_OPERATOR
 
@@ -177,6 +181,7 @@ def update_cluster(
     default_agent_id: Any = UNSET,
     is_archived: Any = UNSET,
     description: Optional[str] = None,
+    log_audit: bool = True,
 ) -> models.ClusterConfig:
     if name is not None:
         cluster.name = name
@@ -206,13 +211,14 @@ def update_cluster(
     db.add(cluster)
     db.commit()
     db.refresh(cluster)
-    log_action(
-        db,
-        action="update",
-        entity_type="cluster_config",
-        entity_id=cluster.id,
-        description=f"Updated cluster '{cluster.name}'.",
-    )
+    if log_audit:
+        log_action(
+            db,
+            action="update",
+            entity_type="cluster_config",
+            entity_id=cluster.id,
+            description=f"Updated cluster '{cluster.name}'.",
+        )
     return cluster
 
 

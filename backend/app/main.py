@@ -1765,11 +1765,20 @@ def test_cluster_connection(
             detail="已有连接测试任务执行中，请稍候再试。",
         )
     _enqueue_connection_test_run(db, cluster, agent)
+    display_id = crud.get_cluster_display_id(cluster)
+    crud.log_action(
+        db,
+        action="create",
+        entity_type="cluster_config",
+        entity_id=cluster.id,
+        description=f"测试连接集群：{display_id}",
+    )
     cluster = crud.update_cluster(
         db,
         cluster,
         connection_status="warning",
         connection_message="已下发连接测试请求，等待 Agent 返回结果。",
+        log_audit=False,
     )
     return _present_cluster(cluster)
 
@@ -2337,13 +2346,30 @@ def _apply_connection_test_result(
         message = (run.summary or "").strip()
     if not message:
         message = "Agent 未返回详细信息。"
+    display_id = crud.get_cluster_display_id(cluster)
+    is_success = connection_status == "connected"
     crud.update_cluster(
         db,
         cluster,
         connection_status=connection_status,
         connection_message=message[:500],
         last_checked_at=datetime.utcnow(),
+        log_audit=False,
     )
+    crud.log_action(
+        db,
+        action="update",
+        entity_type="cluster_config",
+        entity_id=cluster.id,
+        description=(
+            f"测试连接成功：{display_id}"
+            if is_success
+            else f"测试连接失败：{display_id}"
+        ),
+        status="success" if is_success else "failed",
+    )
+
+
 @agent_router.post("/runs/{run_id}/results", response_model=schemas.InspectionRunOut)
 def agent_submit_results(
     run_id: int,
