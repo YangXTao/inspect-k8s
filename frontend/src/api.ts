@@ -15,6 +15,7 @@ import {
   AuthRole,
   AuthLoginChallenge,
   AuthUser,
+  AuditLogList,
 } from "./types";
 
 const API_BASE = appConfig.apiBaseUrl.replace(/\/$/, "");
@@ -274,6 +275,41 @@ export function deleteUser(userId: number): Promise<void> {
   return request<void>(`/users/${userId}`, {
     method: "DELETE",
   });
+}
+
+export function getAuditLogs(params: {
+  page?: number;
+  page_size?: number;
+  action?: string;
+  entity_type?: string;
+  keyword?: string;
+  start?: string;
+  end?: string;
+}): Promise<AuditLogList> {
+  const search = new URLSearchParams();
+  if (params.page) {
+    search.set("page", String(params.page));
+  }
+  if (params.page_size) {
+    search.set("page_size", String(params.page_size));
+  }
+  if (params.action) {
+    search.set("action", params.action);
+  }
+  if (params.entity_type) {
+    search.set("entity_type", params.entity_type);
+  }
+  if (params.keyword) {
+    search.set("keyword", params.keyword);
+  }
+  if (params.start) {
+    search.set("start", params.start);
+  }
+  if (params.end) {
+    search.set("end", params.end);
+  }
+  const query = search.toString();
+  return request<AuditLogList>(query ? `/audit-logs?${query}` : "/audit-logs");
 }
 
 export function getInspectionItems(): Promise<InspectionItem[]> {

@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
 from . import crud, models, schemas
+from .audit import AuditActor, set_audit_actor, reset_audit_actor
 from .cron import CronValidationError, parse_cron_expression
 from .auth import (
     AUTH_COOKIE_NAME,
@@ -814,12 +815,25 @@ async def require_authentication(request: Request, call_next):
     path = request.url.path
     if _is_public_path(path):
         return await call_next(request)
+    audit_token = None
     with SessionLocal() as db:
         user = get_user_from_session(db, request.cookies.get(AUTH_COOKIE_NAME))
         if not user:
             return JSONResponse(status_code=401, content={"detail": "未登录"})
         request.state.user = user
-    return await call_next(request)
+    try:
+        audit_token = set_audit_actor(
+            AuditActor(
+                user_id=user.id,
+                username=user.username,
+                ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+            )
+        )
+        return await call_next(request)
+    finally:
+        if audit_token is not None:
+            reset_audit_actor(audit_token)
 
 
 def get_db() -> Session:
@@ -1177,6 +1191,7 @@ def _serialize_auth_user(db: Session, user: models.AuthUser) -> schemas.AuthUser
 @app.post("/auth/login", response_model=schemas.AuthUserOut)
 def login(
     payload: schemas.AuthLoginIn,
+    request: Request,
     response: Response,
     db: Session = Depends(get_db),
 ) -> schemas.AuthUserOut:
@@ -1217,6 +1232,17 @@ def login(
         samesite=cookie_samesite,
         secure=COOKIE_SECURE,
     )
+    crud.log_action(
+        db,
+        action="login",
+        entity_type="auth_user",
+        entity_id=user.id,
+        description=f"用户 {user.username} 登录",
+        user_id=user.id,
+        username=user.username,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
     return _serialize_auth_user(db, user)
 
 
@@ -1251,6 +1277,7 @@ def logout(
     response: Response,
     request: Request,
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
 ) -> dict[str, str]:
     session_id = request.cookies.get(AUTH_COOKIE_NAME)
     if session_id:
@@ -1263,6 +1290,13 @@ def logout(
             db.delete(session)
             db.commit()
     response.delete_cookie(AUTH_COOKIE_NAME)
+    crud.log_action(
+        db,
+        action="logout",
+        entity_type="auth_user",
+        entity_id=current_user.id,
+        description=f"用户 {current_user.username} 退出登录",
+    )
     return {"status": "ok"}
 
 
@@ -2423,9 +2457,40 @@ def delete_cluster(
     return {}
 
 
-@app.get("/audit-logs", response_model=List[schemas.AuditLogOut])
-def list_audit_logs(limit: int = 100, db: Session = Depends(get_db)):
-    return crud.list_audit_logs(db, limit=limit)
+@app.get("/audit-logs", response_model=schemas.AuditLogListOut)
+def list_audit_logs(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    action: Optional[str] = Query(None),
+    entity_type: Optional[str] = Query(None),
+    keyword: Optional[str] = Query(None),
+    start: Optional[datetime] = Query(None),
+    end: Optional[datetime] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "audit.read", "审计日志查看")
+    if start and end and end < start:
+        raise HTTPException(status_code=400, detail="结束时间不能早于开始时间。")
+    normalized_action = None if action in (None, "", "all") else action
+    normalized_entity = None if entity_type in (None, "", "all") else entity_type
+    normalized_keyword = keyword.strip() if keyword else None
+    items, total = crud.list_audit_logs(
+        db,
+        page=page,
+        page_size=page_size,
+        action=normalized_action,
+        entity_type=normalized_entity,
+        keyword=normalized_keyword,
+        start=start,
+        end=end,
+    )
+    return schemas.AuditLogListOut(
+        items=[schemas.AuditLogOut.model_validate(item) for item in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @app.get("/inspection-items", response_model=List[schemas.InspectionItemOut])

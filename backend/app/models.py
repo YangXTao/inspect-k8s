@@ -251,10 +251,15 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=True)
+    username = Column(String(100), nullable=True)
     action = Column(String(50), nullable=False)
     entity_type = Column(String(50), nullable=False)
     entity_id = Column(Integer, nullable=True)
     description = Column(Text, nullable=True)
+    ip_address = Column(String(64), nullable=True)
+    user_agent = Column(String(255), nullable=True)
+    status = Column(String(20), nullable=False, default="success")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 

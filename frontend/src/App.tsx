@@ -45,6 +45,7 @@ import {
   getRoles,
   getReportDownloadUrl,
   getCurrentUser,
+  getAuditLogs,
   logout,
   changePassword,
   login,
@@ -87,6 +88,7 @@ import type {
   LicenseStatus,
   AuthUser,
   AuthRole,
+  AuditLog,
 } from "./types";
 
 type NoticeType = "success" | "warning" | "error" | null;
@@ -162,6 +164,7 @@ const CLUSTER_ID_STORAGE_KEY = "clusterDisplayIdMap.v1";
 const CLUSTER_PAGE_SIZE_OPTIONS = [10, 20, 50];
 const DEFAULT_CLUSTER_PAGE_SIZE = CLUSTER_PAGE_SIZE_OPTIONS[0];
 const RUN_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
+const AUDIT_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const CLUSTER_ITEM_PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
 const RESULT_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const SCHEDULE_REFRESH_INTERVAL = 15000;
@@ -212,6 +215,14 @@ const ROLE_PERMISSION_BLOCKS: RolePermissionBlock[] = [
           { key: "history.update", label: "修改" },
           { key: "history.delete", label: "删除" },
         ],
+      },
+    ],
+  },
+  {
+    rows: [
+      {
+        label: "审计",
+        options: [{ key: "audit.read", label: "查看" }],
       },
     ],
   },
@@ -382,6 +393,25 @@ const HISTORY_STATUS_OPTIONS: {
   { value: "finished", label: "已完成" },
   { value: "failed", label: "已失败" },
   { value: "cancelled", label: "已取消" },
+];
+const AUDIT_ACTION_OPTIONS = [
+  { value: "all", label: "全部" },
+  { value: "login", label: "登录" },
+  { value: "logout", label: "退出" },
+  { value: "create", label: "新增" },
+  { value: "update", label: "修改" },
+  { value: "delete", label: "删除" },
+];
+const AUDIT_ENTITY_OPTIONS = [
+  { value: "all", label: "全部对象" },
+  { value: "auth_user", label: "用户" },
+  { value: "auth_role", label: "角色" },
+  { value: "cluster_config", label: "集群" },
+  { value: "inspection_agent", label: "Agent" },
+  { value: "inspection_schedule", label: "定时巡检" },
+  { value: "inspection_run", label: "巡检记录" },
+  { value: "inspection_item", label: "巡检项" },
+  { value: "inspection_result", label: "巡检结果" },
 ];
 const SETTINGS_BASE_PATH = "/setting";
 const SETTINGS_TAB_IDS = [
@@ -556,6 +586,32 @@ const formatDate = (value?: string | null) => {
   }
 
   return BEIJING_TIME_FORMATTER.format(parsed);
+};
+
+const resolveAuditActionLabel = (action?: string | null) => {
+  const normalized = (action ?? "").trim();
+  if (!normalized) {
+    return "-";
+  }
+  const mapping = new Map(
+    AUDIT_ACTION_OPTIONS.filter((option) => option.value !== "all").map(
+      (option) => [option.value, option.label]
+    )
+  );
+  return mapping.get(normalized) ?? normalized;
+};
+
+const resolveAuditEntityLabel = (entityType?: string | null) => {
+  const normalized = (entityType ?? "").trim();
+  if (!normalized) {
+    return "-";
+  }
+  const mapping = new Map(
+    AUDIT_ENTITY_OPTIONS.filter((option) => option.value !== "all").map(
+      (option) => [option.value, option.label]
+    )
+  );
+  return mapping.get(normalized) ?? normalized;
 };
 
 const parseDateValue = (value?: string | null) => {
@@ -1021,10 +1077,12 @@ const logWithTimestamp = (
 
 const TopNavigation = ({
   onOpenSettings,
+  showAudit,
   showSchedule,
   showHistory,
 }: {
   onOpenSettings: () => void;
+  showAudit: boolean;
   showSchedule: boolean;
   showHistory: boolean;
 }) => {
@@ -1101,6 +1159,26 @@ const TopNavigation = ({
                 </svg>
               </span>
               <span>历史巡检</span>
+            </span>
+          </NavLink>
+        )}
+        {showAudit && (
+          <NavLink
+            to="/audit"
+            className={({ isActive }) =>
+              `top-navigation-link${isActive ? " active" : ""}`
+            }
+          >
+            <span className="top-navigation-link-inner">
+              <span className="top-navigation-link-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path
+                    d="M7 4.75A2.75 2.75 0 0 0 4.25 7.5v9A2.75 2.75 0 0 0 7 19.25h10A2.75 2.75 0 0 0 19.75 16.5v-9A2.75 2.75 0 0 0 17 4.75H7Zm0 1.5h10c.69 0 1.25.56 1.25 1.25v9c0 .69-.56 1.25-1.25 1.25H7c-.69 0-1.25-.56-1.25-1.25v-9c0-.69.56-1.25 1.25-1.25Zm1.5 2.5a.75.75 0 0 0 0 1.5h7a.75.75 0 0 0 0-1.5h-7Zm0 4a.75.75 0 0 0 0 1.5h7a.75.75 0 0 0 0-1.5h-7Z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </span>
+              <span>审计</span>
             </span>
           </NavLink>
         )}
@@ -2656,6 +2734,289 @@ const HistoryView = ({
                   </tr>
                 );
               })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </section>
+  );
+};
+
+const AuditView = () => {
+  const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [actionFilter, setActionFilter] = useState("all");
+  const [entityFilter, setEntityFilter] = useState("all");
+  const [keyword, setKeyword] = useState("");
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+  const [pageSize, setPageSize] = useState<number>(
+    AUDIT_PAGE_SIZE_OPTIONS[0]
+  );
+  const [page, setPage] = useState(1);
+  const [pageInput, setPageInput] = useState("");
+
+  useAutoClearError(error, setError);
+
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(total / Math.max(pageSize, 1))),
+    [total, pageSize]
+  );
+
+  useEffect(() => {
+    setPage((prev) => Math.min(Math.max(prev, 1), totalPages));
+  }, [totalPages]);
+
+  useEffect(() => {
+    setPage(1);
+    setPageInput("");
+  }, [actionFilter, entityFilter, keyword, startTime, endTime, pageSize]);
+
+  const toIsoString = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    const parsed = new Date(trimmed);
+    if (Number.isNaN(parsed.getTime())) {
+      return undefined;
+    }
+    return parsed.toISOString();
+  };
+
+  const refreshLogs = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await getAuditLogs({
+        page,
+        page_size: pageSize,
+        action: actionFilter === "all" ? undefined : actionFilter,
+        entity_type: entityFilter === "all" ? undefined : entityFilter,
+        keyword: keyword.trim() ? keyword.trim() : undefined,
+        start: toIsoString(startTime),
+        end: toIsoString(endTime),
+      });
+      setLogs(response.items ?? []);
+      setTotal(response.total ?? 0);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "获取审计日志失败";
+      setError(message);
+      setLogs([]);
+      setTotal(0);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, pageSize, actionFilter, entityFilter, keyword, startTime, endTime]);
+
+  useEffect(() => {
+    void refreshLogs();
+  }, [refreshLogs]);
+
+  const handlePageChange = useCallback(
+    (offset: number) => {
+      setPage((prev) => {
+        const next = prev + offset;
+        if (next < 1) {
+          return 1;
+        }
+        if (next > totalPages) {
+          return totalPages;
+        }
+        return next;
+      });
+    },
+    [totalPages]
+  );
+
+  const handlePageJump = useCallback(() => {
+    const trimmed = pageInput.trim();
+    if (!trimmed) {
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isNaN(parsed) && Number.isInteger(parsed)) {
+      const target = Math.min(Math.max(parsed, 1), totalPages);
+      setPage(target);
+    }
+    setPageInput("");
+  }, [pageInput, totalPages]);
+
+  const clearKeyword = () => setKeyword("");
+
+  const renderEntityLabel = (entry: AuditLog) => {
+    const entityLabel = resolveAuditEntityLabel(entry.entity_type);
+    if (entry.entity_id) {
+      return `${entityLabel} #${entry.entity_id}`;
+    }
+    return entityLabel;
+  };
+
+  return (
+    <section className="card history history-page audit-page">
+      <div className="card-header history-header">
+        <h2>审计</h2>
+        <div className="history-filter-row">
+          <div className="history-chip history-chip-select">
+            <span className="history-chip-label">操作类型</span>
+            <select
+              value={actionFilter}
+              onChange={(event) => setActionFilter(event.target.value)}
+            >
+              {AUDIT_ACTION_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="history-chip history-chip-select">
+            <span className="history-chip-label">对象类型</span>
+            <select
+              value={entityFilter}
+              onChange={(event) => setEntityFilter(event.target.value)}
+            >
+              {AUDIT_ENTITY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="history-chip history-chip-date">
+            <span className="history-chip-label">开始</span>
+            <input
+              type="datetime-local"
+              value={startTime}
+              onChange={(event) => setStartTime(event.target.value)}
+            />
+          </div>
+          <div className="history-chip history-chip-date">
+            <span className="history-chip-label">结束</span>
+            <input
+              type="datetime-local"
+              value={endTime}
+              onChange={(event) => setEndTime(event.target.value)}
+            />
+          </div>
+          <div className="history-chip history-chip-search">
+            <span className="history-chip-label">关键字</span>
+            <input
+              type="text"
+              value={keyword}
+              onChange={(event) => setKeyword(event.target.value)}
+              placeholder="按用户 / 对象 / 描述搜索"
+            />
+            {keyword && (
+              <button
+                type="button"
+                className="history-search-clear"
+                onClick={clearKeyword}
+                aria-label="清空关键字"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {error && <div className="feedback error">{error}</div>}
+
+      <div className="history-toolbar">
+        <div className="history-selection">
+          <span className="selection-hint">共 {total} 条</span>
+          {loading && <span className="selection-hint">加载中...</span>}
+        </div>
+        <div className="history-pagination-controls">
+          <label>
+            每页
+            <select
+              value={pageSize}
+              onChange={(event) =>
+                setPageSize(Number(event.target.value))
+              }
+            >
+              {AUDIT_PAGE_SIZE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="history-pagination-buttons">
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => handlePageChange(-1)}
+              disabled={page <= 1}
+            >
+              上一页
+            </button>
+            <span>
+              第 {page} / {totalPages} 页
+            </span>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => handlePageChange(1)}
+              disabled={page >= totalPages}
+            >
+              下一页
+            </button>
+          </div>
+          <label className="history-page-jump">
+            跳转
+            <input
+              type="number"
+              min={1}
+              value={pageInput}
+              onChange={(event) => setPageInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  handlePageJump();
+                }
+              }}
+            />
+          </label>
+          <button type="button" className="secondary" onClick={handlePageJump}>
+            确定
+          </button>
+        </div>
+      </div>
+
+      <div className="table-wrapper">
+        {loading ? (
+          <div className="placeholder">加载中...</div>
+        ) : logs.length === 0 ? (
+          <div className="placeholder">暂无审计记录</div>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>用户</th>
+                <th>操作类型</th>
+                <th>对象</th>
+                <th>描述</th>
+                <th>IP</th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map((entry) => (
+                <tr key={entry.id}>
+                  <td>{formatDate(entry.created_at)}</td>
+                  <td>{entry.username || "-"}</td>
+                  <td>{resolveAuditActionLabel(entry.action)}</td>
+                  <td>{renderEntityLabel(entry)}</td>
+                  <td>{entry.description || "-"}</td>
+                  <td>{entry.ip_address || "-"}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         )}
@@ -9058,6 +9419,7 @@ const App = () => {
   const canDeleteSchedule = hasPermission("schedule.delete");
   const canManageSchedule =
     canCreateSchedule || canUpdateSchedule || canDeleteSchedule;
+  const canViewAudit = hasPermission("audit.read");
   const canViewHistory =
     hasPermission("history.read") || hasPermission("runRecord.read");
   const canUpdateHistory = hasPermission("history.update");
@@ -12509,6 +12871,7 @@ const hasManualKubeconfig = useMemo(
       </Helmet>
       <TopNavigation
         onOpenSettings={handleOpenSettings}
+        showAudit={canViewAudit}
         showSchedule={canViewSchedule}
         showHistory={canViewHistory}
       />
@@ -12526,6 +12889,16 @@ const hasManualKubeconfig = useMemo(
           <Route path="/" element={overviewRouteElement} />
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/setting/*" element={overviewRouteElement} />
+          <Route
+            path="/audit"
+            element={
+              canViewAudit ? (
+                <AuditView />
+              ) : (
+                <NoPermissionPanel title="无权限访问审计日志" />
+              )
+            }
+          />
           <Route
             path="/history"
             element={

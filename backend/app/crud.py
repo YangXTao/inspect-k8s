@@ -3,10 +3,11 @@
 from datetime import datetime
 from typing import Iterable, List, Optional, Any
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 
 from . import models, schemas
+from .audit import get_audit_actor
 
 UNSET = object()
 
@@ -227,12 +228,32 @@ def log_action(
     entity_type: str,
     entity_id: Optional[int],
     description: Optional[str] = None,
+    user_id: Optional[int] = None,
+    username: Optional[str] = None,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    status: str = "success",
 ) -> models.AuditLog:
+    actor = get_audit_actor()
+    if actor:
+        if user_id is None:
+            user_id = actor.user_id
+        if username is None:
+            username = actor.username
+        if ip_address is None:
+            ip_address = actor.ip_address
+        if user_agent is None:
+            user_agent = actor.user_agent
     entry = models.AuditLog(
+        user_id=user_id,
+        username=username,
         action=action,
         entity_type=entity_type,
         entity_id=entity_id,
         description=description,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        status=status or "success",
     )
     db.add(entry)
     db.commit()
@@ -951,11 +972,45 @@ def delete_inspection_schedule(
     )
 
 
-def list_audit_logs(db: Session, limit: int = 100) -> List[models.AuditLog]:
-    return (
-        db.query(models.AuditLog)
-        .order_by(models.AuditLog.created_at.desc())
-        .limit(limit)
+def list_audit_logs(
+    db: Session,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+    action: Optional[str] = None,
+    entity_type: Optional[str] = None,
+    keyword: Optional[str] = None,
+    start: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+) -> tuple[List[models.AuditLog], int]:
+    query = db.query(models.AuditLog)
+
+    if action:
+        query = query.filter(models.AuditLog.action == action)
+    if entity_type:
+        query = query.filter(models.AuditLog.entity_type == entity_type)
+    if start:
+        query = query.filter(models.AuditLog.created_at >= start)
+    if end:
+        query = query.filter(models.AuditLog.created_at <= end)
+    if keyword:
+        normalized = f"%{keyword.strip().lower()}%"
+        query = query.filter(
+            or_(
+                func.lower(models.AuditLog.username).like(normalized),
+                func.lower(models.AuditLog.action).like(normalized),
+                func.lower(models.AuditLog.entity_type).like(normalized),
+                func.lower(models.AuditLog.description).like(normalized),
+            )
+        )
+
+    total = query.count()
+    offset = max(page - 1, 0) * max(page_size, 1)
+    items = (
+        query.order_by(models.AuditLog.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
         .all()
     )
+    return items, total
 

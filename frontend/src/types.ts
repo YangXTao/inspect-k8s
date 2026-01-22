@@ -30,6 +30,27 @@ export type AuthRole = {
   is_system: boolean;
 };
 
+export type AuditLog = {
+  id: number;
+  user_id?: number | null;
+  username?: string | null;
+  action: string;
+  entity_type: string;
+  entity_id?: number | null;
+  description?: string | null;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  status?: string | null;
+  created_at: string;
+};
+
+export type AuditLogList = {
+  items: AuditLog[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
 export type AuthLoginChallenge = {
   salt: string;
   iterations: number;
