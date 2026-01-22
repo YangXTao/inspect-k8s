@@ -15,6 +15,7 @@ import {
   AuthRole,
   AuthLoginChallenge,
   AuthUser,
+  AuditLog,
   AuditLogList,
 } from "./types";
 
@@ -310,6 +311,19 @@ export function getAuditLogs(params: {
   }
   const query = search.toString();
   return request<AuditLogList>(query ? `/audit-logs?${query}` : "/audit-logs");
+}
+
+export function recordAuditLog(payload: {
+  action: string;
+  entity_type: string;
+  entity_id?: number | null;
+  description?: string | null;
+  status?: string | null;
+}): Promise<AuditLog> {
+  return request<AuditLog>("/audit-logs/record", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function getInspectionItems(): Promise<InspectionItem[]> {

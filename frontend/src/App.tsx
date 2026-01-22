@@ -46,6 +46,7 @@ import {
   getReportDownloadUrl,
   getCurrentUser,
   getAuditLogs,
+  recordAuditLog,
   logout,
   changePassword,
   login,
@@ -396,6 +397,7 @@ const HISTORY_STATUS_OPTIONS: {
 ];
 const AUDIT_ACTION_OPTIONS = [
   { value: "all", label: "全部" },
+  { value: "query", label: "查询" },
   { value: "login", label: "登录" },
   { value: "logout", label: "退出" },
   { value: "create", label: "新增" },
@@ -410,6 +412,8 @@ const AUDIT_ENTITY_OPTIONS = [
   { value: "inspection_schedule", label: "定时巡检" },
   { value: "inspection_run", label: "巡检记录" },
   { value: "inspection_item", label: "巡检项" },
+  { value: "prometheus_version", label: "Prometheus版本" },
+  { value: "other", label: "其他" },
 ];
 const SETTINGS_BASE_PATH = "/setting";
 const SETTINGS_TAB_IDS = [
@@ -613,7 +617,7 @@ const resolveAuditEntityLabel = (entityType?: string | null) => {
   mapping.set("inspection_agent", "集群");
   mapping.set("auth_role", "角色");
   mapping.set("inspection_result", "巡检结果");
-  return mapping.get(normalized) ?? normalized;
+  return mapping.get(normalized) ?? "其他";
 };
 
 const parseDateValue = (value?: string | null) => {
@@ -12054,6 +12058,17 @@ const hasManualKubeconfig = useMemo(
         return { ok: false, message: "该版本已存在" };
       }
       setPrometheusVersionOptions((prev) => [...prev, trimmed]);
+      void recordAuditLog({
+        action: "create",
+        entity_type: "prometheus_version",
+        description: `新增 Prometheus 版本 ${trimmed}`,
+      }).catch((err) => {
+        logWithTimestamp(
+          "warn",
+          "记录 Prometheus 版本新增审计失败: %s",
+          err instanceof Error ? err.message : String(err)
+        );
+      });
       return { ok: true };
     },
     [prometheusVersionOptions, licenseCapabilities, canManagePrometheusVersions]
@@ -12096,6 +12111,17 @@ const hasManualKubeconfig = useMemo(
       setPrometheusVersionOptions((prev) =>
         prev.filter((version) => version !== trimmed)
       );
+      void recordAuditLog({
+        action: "delete",
+        entity_type: "prometheus_version",
+        description: `删除 Prometheus 版本 ${trimmed}`,
+      }).catch((err) => {
+        logWithTimestamp(
+          "warn",
+          "记录 Prometheus 版本删除审计失败: %s",
+          err instanceof Error ? err.message : String(err)
+        );
+      });
       return { ok: true };
     },
     [items, licenseCapabilities, canManagePrometheusVersions]

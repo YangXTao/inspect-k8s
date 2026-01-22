@@ -129,6 +129,14 @@ class ClusterUpdate(BaseModel):
     )
 
 
+class AuditLogCreateIn(BaseModel):
+    action: str = Field(..., min_length=1, max_length=50)
+    entity_type: str = Field(..., min_length=1, max_length=50)
+    entity_id: Optional[int] = None
+    description: Optional[str] = Field(None, max_length=500)
+    status: Optional[str] = Field(None, max_length=20)
+
+
 class AuditLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

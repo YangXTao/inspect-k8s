@@ -255,12 +255,13 @@ def _attach_run_report(db: Session, run: models.InspectionRun) -> models.Inspect
     db.add(run)
     db.commit()
     db.refresh(run)
+    run_label = crud.describe_inspection_run(db, run)
     crud.log_action(
         db,
         action="update",
         entity_type="inspection_run",
         entity_id=run.id,
-        description="生成巡检报告。",
+        description=f"生成巡检报告：{run_label}",
     )
     return run
 
@@ -1498,6 +1499,13 @@ def list_users(
 ):
     _require_permission(db, current_user, "user.read", "用户查看")
     users = db.query(models.AuthUser).order_by(models.AuthUser.id.asc()).all()
+    crud.log_action(
+        db,
+        action="query",
+        entity_type="auth_user",
+        entity_id=None,
+        description="查询用户列表",
+    )
     return [_serialize_user(user) for user in users]
 
 
@@ -1532,6 +1540,13 @@ def create_user(
     db.add(user)
     db.commit()
     db.refresh(user)
+    crud.log_action(
+        db,
+        action="create",
+        entity_type="auth_user",
+        entity_id=user.id,
+        description=f"创建用户 {user.username}",
+    )
     return _serialize_user(user)
 
 
@@ -1568,6 +1583,13 @@ def update_user(
     db.add(user)
     db.commit()
     db.refresh(user)
+    crud.log_action(
+        db,
+        action="update",
+        entity_type="auth_user",
+        entity_id=user.id,
+        description=f"更新用户 {user.username}",
+    )
     return _serialize_user(user)
 
 
@@ -1585,8 +1607,16 @@ def delete_user(
         raise HTTPException(status_code=400, detail="管理员账号不能删除")
     if user.id == current_user.id:
         raise HTTPException(status_code=400, detail="不能删除当前登录账号")
+    username = user.username
     db.delete(user)
     db.commit()
+    crud.log_action(
+        db,
+        action="delete",
+        entity_type="auth_user",
+        entity_id=user_id,
+        description=f"删除用户 {username}",
+    )
     return {}
 
 
@@ -2497,6 +2527,27 @@ def list_audit_logs(
     )
 
 
+@app.post("/audit-logs/record", response_model=schemas.AuditLogOut)
+def record_audit_log(
+    payload: schemas.AuditLogCreateIn,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    action = (payload.action or "").strip()
+    entity_type = (payload.entity_type or "").strip()
+    if not action or not entity_type:
+        raise HTTPException(status_code=400, detail="缺少审计日志参数。")
+    entry = crud.log_action(
+        db,
+        action=action,
+        entity_type=entity_type,
+        entity_id=payload.entity_id,
+        description=payload.description,
+        status=payload.status or "success",
+    )
+    return schemas.AuditLogOut.model_validate(entry)
+
+
 @app.get("/inspection-items", response_model=List[schemas.InspectionItemOut])
 def list_inspection_items(
     db: Session = Depends(get_db),
@@ -3142,6 +3193,13 @@ def list_inspection_runs(
         for run in crud.list_inspection_runs(db)
         if run.operator != CONNECTION_TEST_OPERATOR
     ]
+    crud.log_action(
+        db,
+        action="query",
+        entity_type="inspection_run",
+        entity_id=None,
+        description="查询巡检记录列表",
+    )
     return [_serialize_run_list(run) for run in runs]
 
 
@@ -3161,6 +3219,14 @@ def get_inspection_run(
     run = crud.get_inspection_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
+    run_label = crud.describe_inspection_run(db, run)
+    crud.log_action(
+        db,
+        action="query",
+        entity_type="inspection_run",
+        entity_id=run.id,
+        description=f"查看巡检记录：{run_label}",
+    )
     return _serialize_run(run)
 
 
@@ -3302,12 +3368,13 @@ def download_report(
             markdown_path = Path.cwd() / markdown_path
         if not markdown_path.exists():
             raise HTTPException(status_code=500, detail="Report file missing on server.")
+        run_label = crud.describe_inspection_run(db, run)
         crud.log_action(
             db,
             action="download",
             entity_type="inspection_run",
             entity_id=run.id,
-            description=f"Downloaded inspection report (format={requested_format}).",
+            description=f"下载巡检报告（{requested_format}）：{run_label}",
         )
         return FileResponse(
             markdown_path,
@@ -3317,12 +3384,13 @@ def download_report(
 
     if not pdf_path.exists():
         raise HTTPException(status_code=404, detail="Report file missing on server.")
+    run_label = crud.describe_inspection_run(db, run)
     crud.log_action(
         db,
         action="download",
         entity_type="inspection_run",
         entity_id=run.id,
-        description=f"Downloaded inspection report (format={requested_format}).",
+        description=f"下载巡检报告（{requested_format}）：{run_label}",
     )
     return FileResponse(
         pdf_path,
