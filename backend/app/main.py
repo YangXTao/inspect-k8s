@@ -1995,6 +1995,7 @@ def register_agent(
                         db,
                         cluster,
                         name=archived_name,
+                        log_audit=False,
                     )
                 placeholder_path = _build_agent_managed_kubeconfig_ref()
                 cluster = crud.create_cluster(
@@ -2513,7 +2514,7 @@ def delete_cluster(
 
     crud.archive_cluster(db, cluster)
     if archived_name and cluster.name != archived_name:
-        crud.update_cluster(db, cluster, name=archived_name)
+        crud.update_cluster(db, cluster, name=archived_name, log_audit=False)
 
     if delete_files:
         for report_path in report_paths:
