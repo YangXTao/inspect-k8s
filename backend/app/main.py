@@ -1499,13 +1499,6 @@ def list_users(
 ):
     _require_permission(db, current_user, "user.read", "用户查看")
     users = db.query(models.AuthUser).order_by(models.AuthUser.id.asc()).all()
-    crud.log_action(
-        db,
-        action="query",
-        entity_type="auth_user",
-        entity_id=None,
-        description="查询用户列表",
-    )
     return [_serialize_user(user) for user in users]
 
 
@@ -3193,13 +3186,6 @@ def list_inspection_runs(
         for run in crud.list_inspection_runs(db)
         if run.operator != CONNECTION_TEST_OPERATOR
     ]
-    crud.log_action(
-        db,
-        action="query",
-        entity_type="inspection_run",
-        entity_id=None,
-        description="查询巡检记录列表",
-    )
     return [_serialize_run_list(run) for run in runs]
 
 
