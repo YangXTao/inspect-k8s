@@ -3208,12 +3208,7 @@ def download_report(
     current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("reports")),
 ):
-    _require_any_permission(
-        db,
-        current_user,
-        ["report.read", "history.read"],
-        "巡检报告查看",
-    )
+    _require_permission(db, current_user, "report.read", "巡检报告查看")
     run = crud.get_inspection_run(db, run_id)
     if not run or not run.report_path:
         raise HTTPException(status_code=404, detail="Report not found.")

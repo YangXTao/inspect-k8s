@@ -82,7 +82,6 @@ READ_ONLY_PERMISSIONS = {
     "clusterAgent.read",
     "runRecord.read",
     "result.read",
-    "report.read",
 }
 
 

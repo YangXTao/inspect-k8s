@@ -9095,6 +9095,7 @@ const App = () => {
   const canCreateUsers = hasPermission("user.create");
   const canUpdateUsers = hasPermission("user.update");
   const canDeleteUsers = hasPermission("user.delete");
+  const canReadReports = hasPermission("report.read");
   const canViewLicense = hasPermission("license.view");
   const canManageLicense = hasPermission("license.upload");
   const canViewInspectionItems = hasPermission("inspectionItem.read");
@@ -9359,7 +9360,7 @@ const App = () => {
     licenseValid &&
     (licenseFeatureSet.has("agents") || licenseFeatureSet.has("inspections"));
   const canDownloadReports =
-    licenseValid && licenseFeatureSet.has("reports");
+    licenseValid && licenseFeatureSet.has("reports") && canReadReports;
   const licenseReason = licenseValid
     ? null
     : licenseStatus?.reason ?? licenseError ?? "当前 License 未生效或未安装。";
