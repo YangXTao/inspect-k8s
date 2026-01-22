@@ -462,13 +462,6 @@ def add_inspection_result(
     db.add(result)
     db.commit()
     db.refresh(result)
-    log_action(
-        db,
-        action="create",
-        entity_type="inspection_result",
-        entity_id=result.id,
-        description=f"Recorded result for item '{item_name}' with status={status}",
-    )
     return result
 
 
@@ -985,10 +978,26 @@ def list_audit_logs(
 ) -> tuple[List[models.AuditLog], int]:
     query = db.query(models.AuditLog)
 
-    if action:
-        query = query.filter(models.AuditLog.action == action)
     if entity_type:
-        query = query.filter(models.AuditLog.entity_type == entity_type)
+        if entity_type == "cluster":
+            query = query.filter(
+                models.AuditLog.entity_type.in_(
+                    ["cluster_config", "inspection_agent"]
+                )
+            )
+        else:
+            query = query.filter(models.AuditLog.entity_type == entity_type)
+
+    if entity_type == "inspection_run":
+        allowed_actions = {"create", "delete", "download"}
+        if action:
+            if action not in allowed_actions:
+                return [], 0
+            query = query.filter(models.AuditLog.action == action)
+        else:
+            query = query.filter(models.AuditLog.action.in_(allowed_actions))
+    elif action:
+        query = query.filter(models.AuditLog.action == action)
     if start:
         query = query.filter(models.AuditLog.created_at >= start)
     if end:

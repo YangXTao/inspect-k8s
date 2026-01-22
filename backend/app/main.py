@@ -3302,6 +3302,13 @@ def download_report(
             markdown_path = Path.cwd() / markdown_path
         if not markdown_path.exists():
             raise HTTPException(status_code=500, detail="Report file missing on server.")
+        crud.log_action(
+            db,
+            action="download",
+            entity_type="inspection_run",
+            entity_id=run.id,
+            description=f"Downloaded inspection report (format={requested_format}).",
+        )
         return FileResponse(
             markdown_path,
             media_type="text/markdown; charset=utf-8",
@@ -3310,6 +3317,13 @@ def download_report(
 
     if not pdf_path.exists():
         raise HTTPException(status_code=404, detail="Report file missing on server.")
+    crud.log_action(
+        db,
+        action="download",
+        entity_type="inspection_run",
+        entity_id=run.id,
+        description=f"Downloaded inspection report (format={requested_format}).",
+    )
     return FileResponse(
         pdf_path,
         media_type="application/pdf",

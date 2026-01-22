@@ -221,7 +221,7 @@ const ROLE_PERMISSION_BLOCKS: RolePermissionBlock[] = [
   {
     rows: [
       {
-        label: "审计",
+        label: "审计日志",
         options: [{ key: "audit.read", label: "查看" }],
       },
     ],
@@ -401,17 +401,15 @@ const AUDIT_ACTION_OPTIONS = [
   { value: "create", label: "新增" },
   { value: "update", label: "修改" },
   { value: "delete", label: "删除" },
+  { value: "download", label: "下载" },
 ];
 const AUDIT_ENTITY_OPTIONS = [
   { value: "all", label: "全部对象" },
   { value: "auth_user", label: "用户" },
-  { value: "auth_role", label: "角色" },
-  { value: "cluster_config", label: "集群" },
-  { value: "inspection_agent", label: "Agent" },
+  { value: "cluster", label: "集群" },
   { value: "inspection_schedule", label: "定时巡检" },
   { value: "inspection_run", label: "巡检记录" },
   { value: "inspection_item", label: "巡检项" },
-  { value: "inspection_result", label: "巡检结果" },
 ];
 const SETTINGS_BASE_PATH = "/setting";
 const SETTINGS_TAB_IDS = [
@@ -611,6 +609,10 @@ const resolveAuditEntityLabel = (entityType?: string | null) => {
       (option) => [option.value, option.label]
     )
   );
+  mapping.set("cluster_config", "集群");
+  mapping.set("inspection_agent", "集群");
+  mapping.set("auth_role", "角色");
+  mapping.set("inspection_result", "巡检结果");
   return mapping.get(normalized) ?? normalized;
 };
 
@@ -1178,7 +1180,7 @@ const TopNavigation = ({
                   />
                 </svg>
               </span>
-              <span>审计</span>
+              <span>审计日志</span>
             </span>
           </NavLink>
         )}
@@ -2757,6 +2759,7 @@ const AuditView = () => {
   );
   const [page, setPage] = useState(1);
   const [pageInput, setPageInput] = useState("");
+  const [yamlEntry, setYamlEntry] = useState<AuditLog | null>(null);
 
   useAutoClearError(error, setError);
 
@@ -2790,11 +2793,17 @@ const AuditView = () => {
     setLoading(true);
     setError(null);
     try {
+      const entityTypeParam =
+        entityFilter === "all"
+          ? undefined
+          : entityFilter === "cluster"
+            ? "cluster"
+            : entityFilter;
       const response = await getAuditLogs({
         page,
         page_size: pageSize,
         action: actionFilter === "all" ? undefined : actionFilter,
-        entity_type: entityFilter === "all" ? undefined : entityFilter,
+        entity_type: entityTypeParam,
         keyword: keyword.trim() ? keyword.trim() : undefined,
         start: toIsoString(startTime),
         end: toIsoString(endTime),
@@ -2847,18 +2856,40 @@ const AuditView = () => {
 
   const clearKeyword = () => setKeyword("");
 
-  const renderEntityLabel = (entry: AuditLog) => {
-    const entityLabel = resolveAuditEntityLabel(entry.entity_type);
-    if (entry.entity_id) {
-      return `${entityLabel} #${entry.entity_id}`;
+  const toYamlScalar = (value: unknown) => {
+    if (value === null || value === undefined || value === "") {
+      return "null";
     }
-    return entityLabel;
+    if (typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+    return JSON.stringify(String(value));
+  };
+
+  const buildAuditYaml = (entry: AuditLog) => {
+    const lines = [
+      `id: ${toYamlScalar(entry.id)}`,
+      `time: ${toYamlScalar(formatDate(entry.created_at))}`,
+      `user: ${toYamlScalar(entry.username ?? "")}`,
+      `action: ${toYamlScalar(resolveAuditActionLabel(entry.action))}`,
+      `entity_type: ${toYamlScalar(resolveAuditEntityLabel(entry.entity_type))}`,
+      `entity_id: ${toYamlScalar(entry.entity_id ?? "")}`,
+      `status: ${toYamlScalar(entry.status ?? "")}`,
+      `ip_address: ${toYamlScalar(entry.ip_address ?? "")}`,
+      `user_agent: ${toYamlScalar(entry.user_agent ?? "")}`,
+      `description: ${toYamlScalar(entry.description ?? "")}`,
+    ];
+    return `${lines.join("\n")}\n`;
+  };
+
+  const renderEntityLabel = (entry: AuditLog) => {
+    return resolveAuditEntityLabel(entry.entity_type);
   };
 
   return (
     <section className="card history history-page audit-page">
       <div className="card-header history-header">
-        <h2>审计</h2>
+        <h2>审计日志</h2>
         <div className="history-filter-row">
           <div className="history-chip history-chip-select">
             <span className="history-chip-label">操作类型</span>
@@ -3003,7 +3034,7 @@ const AuditView = () => {
                 <th>操作类型</th>
                 <th>对象</th>
                 <th>描述</th>
-                <th>IP</th>
+                <th>查看 YAML</th>
               </tr>
             </thead>
             <tbody>
@@ -3014,13 +3045,49 @@ const AuditView = () => {
                   <td>{resolveAuditActionLabel(entry.action)}</td>
                   <td>{renderEntityLabel(entry)}</td>
                   <td>{entry.description || "-"}</td>
-                  <td>{entry.ip_address || "-"}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => setYamlEntry(entry)}
+                    >
+                      查看
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </div>
+      {yamlEntry && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal audit-yaml-modal">
+            <div className="modal-header">
+              <h3>审计记录 YAML</h3>
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => setYamlEntry(null)}
+              >
+                关闭
+              </button>
+            </div>
+            <pre className="audit-yaml-content">
+              {buildAuditYaml(yamlEntry)}
+            </pre>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setYamlEntry(null)}
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 };
