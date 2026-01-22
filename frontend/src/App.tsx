@@ -2612,36 +2612,24 @@ const HistoryView = ({
                       >
                         查看详情
                       </button>
-                      {run.report_path && (
+                      {run.report_path && canDownloadReports && (
                         <>
-                          {canDownloadReports ? (
-                            <a
-                              className="link-button"
-                              href={getReportDownloadUrl(run.id, "pdf")}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              下载 PDF
-                            </a>
-                          ) : (
-                            <button type="button" className="link-button" disabled>
-                              下载 PDF
-                            </button>
-                          )}
-                          {canDownloadReports ? (
-                            <a
-                              className="link-button"
-                              href={getReportDownloadUrl(run.id, "md")}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              下载 MD
-                            </a>
-                          ) : (
-                            <button type="button" className="link-button" disabled>
-                              下载 MD
-                            </button>
-                          )}
+                          <a
+                            className="link-button"
+                            href={getReportDownloadUrl(run.id, "pdf")}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            下载 PDF
+                          </a>
+                          <a
+                            className="link-button"
+                            href={getReportDownloadUrl(run.id, "md")}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            下载 MD
+                          </a>
                         </>
                       )}
                       {run.status === "running" && canUpdateHistory && (
@@ -3636,36 +3624,24 @@ const ClusterDetailView = ({
                         >
                           查看详情
                         </button>
-                        {run.report_path && (
+                        {run.report_path && canDownloadReports && (
                           <>
-                            {canDownloadReports ? (
-                              <a
-                                className="link-button"
-                                href={getReportDownloadUrl(run.id, "pdf")}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                下载 PDF
-                              </a>
-                            ) : (
-                              <button type="button" className="link-button" disabled>
-                                下载 PDF
-                              </button>
-                            )}
-                            {canDownloadReports ? (
-                              <a
-                                className="link-button"
-                                href={getReportDownloadUrl(run.id, "md")}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                下载 MD
-                              </a>
-                            ) : (
-                              <button type="button" className="link-button" disabled>
-                                下载 MD
-                              </button>
-                            )}
+                            <a
+                              className="link-button"
+                              href={getReportDownloadUrl(run.id, "pdf")}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              下载 PDF
+                            </a>
+                            <a
+                              className="link-button"
+                              href={getReportDownloadUrl(run.id, "md")}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              下载 MD
+                            </a>
                           </>
                         )}
                         {run.status === "running" && canUpdateHistory && (
@@ -8045,7 +8021,7 @@ const RunDetailView = ({
           返回上一页
         </Link>
         <div className="detail-header-actions">
-          {reportPdfUrl ? (
+          {canDownloadReports && reportPdfUrl ? (
             <>
               <button
                 type="button"
@@ -8072,11 +8048,11 @@ const RunDetailView = ({
                 下载 MD
               </button>
             </>
-          ) : (
+          ) : canDownloadReports ? (
             <button type="button" className="secondary" disabled>
               无可下载报告
             </button>
-          )}
+          ) : null}
           <button
             type="button"
             className="secondary"
