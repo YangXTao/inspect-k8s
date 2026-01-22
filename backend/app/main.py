@@ -2348,6 +2348,17 @@ def _apply_connection_test_result(
         message = "Agent 未返回详细信息。"
     display_id = crud.get_cluster_display_id(cluster)
     is_success = connection_status == "connected"
+    actor_entry = (
+        db.query(models.AuditLog)
+        .filter(
+            models.AuditLog.entity_type == "cluster_config",
+            models.AuditLog.entity_id == cluster.id,
+            models.AuditLog.action == "create",
+            models.AuditLog.description.like("测试连接集群：%"),
+        )
+        .order_by(models.AuditLog.created_at.desc())
+        .first()
+    )
     crud.update_cluster(
         db,
         cluster,
@@ -2366,6 +2377,10 @@ def _apply_connection_test_result(
             if is_success
             else f"测试连接失败：{display_id}"
         ),
+        user_id=actor_entry.user_id if actor_entry else None,
+        username=actor_entry.username if actor_entry else None,
+        ip_address=actor_entry.ip_address if actor_entry else None,
+        user_agent=actor_entry.user_agent if actor_entry else None,
         status="success" if is_success else "failed",
     )
 
