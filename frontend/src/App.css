@@ -3216,6 +3216,7 @@ th {
   min-width: 180px;
   color: #475569;
   font-weight: 500;
+  -webkit-text-fill-color: #475569;
 }
 
 .audit-page .history-chip input[type="datetime-local"]::-webkit-datetime-edit,
@@ -3228,6 +3229,8 @@ th {
 .audit-page .history-chip input[type="datetime-local"]::-webkit-datetime-edit-minute-field {
   color: inherit;
   font-weight: inherit;
+  -webkit-text-fill-color: inherit;
+  opacity: 1;
 }
 
 .history-page .history-search-clear,
