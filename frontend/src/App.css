@@ -3214,6 +3214,20 @@ th {
 
 .audit-page .history-chip input[type="datetime-local"] {
   min-width: 180px;
+  color: #475569;
+  font-weight: 500;
+}
+
+.audit-page .history-chip input[type="datetime-local"]::-webkit-datetime-edit,
+.audit-page .history-chip input[type="datetime-local"]::-webkit-datetime-edit-fields-wrapper,
+.audit-page .history-chip input[type="datetime-local"]::-webkit-datetime-edit-text,
+.audit-page .history-chip input[type="datetime-local"]::-webkit-datetime-edit-month-field,
+.audit-page .history-chip input[type="datetime-local"]::-webkit-datetime-edit-day-field,
+.audit-page .history-chip input[type="datetime-local"]::-webkit-datetime-edit-year-field,
+.audit-page .history-chip input[type="datetime-local"]::-webkit-datetime-edit-hour-field,
+.audit-page .history-chip input[type="datetime-local"]::-webkit-datetime-edit-minute-field {
+  color: inherit;
+  font-weight: inherit;
 }
 
 .history-page .history-search-clear,
