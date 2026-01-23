@@ -29,6 +29,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, JSONResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
@@ -986,6 +987,41 @@ def _normalize_schedule_name(name: Optional[str]) -> Optional[str]:
         return None
     trimmed = name.strip()
     return trimmed or None
+
+
+def _ensure_unique_schedule_name(
+    db: Session,
+    name: Optional[str],
+    schedule_id: Optional[int] = None,
+) -> None:
+    if not name:
+        raise HTTPException(status_code=400, detail="定时巡检名称不能为空。")
+    query = (
+        db.query(models.InspectionSchedule)
+        .filter(models.InspectionSchedule.name.isnot(None))
+        .filter(func.lower(models.InspectionSchedule.name) == name.lower())
+    )
+    if schedule_id is not None:
+        query = query.filter(models.InspectionSchedule.id != schedule_id)
+    if query.first():
+        raise HTTPException(status_code=400, detail="定时巡检名称已存在，请更换名称。")
+
+
+def _resolve_schedule_last_run_at(
+    db: Session,
+    schedule: models.InspectionSchedule,
+) -> Optional[datetime]:
+    name = (schedule.name or "").strip()
+    if not name:
+        return None
+    pattern = f"{name}%"
+    return (
+        db.query(func.max(models.InspectionRun.created_at))
+        .filter(models.InspectionRun.operator.isnot(None))
+        .filter(models.InspectionRun.operator.like(pattern))
+        .filter(models.InspectionRun.operator != name)
+        .scalar()
+    )
 
 
 def _normalize_cron_expression(expression: str) -> str:
@@ -2993,6 +3029,16 @@ def list_inspection_schedules(
 ):
     _require_permission(db, current_user, "schedule.read", "定时巡检查看")
     schedules = crud.list_inspection_schedules(db)
+    needs_commit = False
+    for schedule in schedules:
+        latest_run_at = _resolve_schedule_last_run_at(db, schedule)
+        if not latest_run_at:
+            continue
+        if schedule.last_run_at is None or latest_run_at > schedule.last_run_at:
+            schedule.last_run_at = latest_run_at
+            needs_commit = True
+    if needs_commit:
+        db.commit()
     return [
         schemas.InspectionScheduleOut.model_validate(schedule)
         for schedule in schedules
@@ -3018,12 +3064,14 @@ def create_inspection_schedule(
             status_code=400,
             detail=f"Cron 表达式无效：{exc}",
         )
+    normalized_name = _normalize_schedule_name(payload.name)
+    _ensure_unique_schedule_name(db, normalized_name)
     cluster_ids = _normalize_id_list(payload.cluster_ids)
     item_ids = _normalize_id_list(payload.item_ids)
     _validate_schedule_clusters(db, cluster_ids)
     _validate_schedule_items(db, item_ids)
     sanitized = schemas.InspectionScheduleCreate(
-        name=_normalize_schedule_name(payload.name),
+        name=normalized_name,
         cron=cron,
         cluster_ids=cluster_ids,
         item_ids=item_ids,
@@ -3056,6 +3104,11 @@ def update_inspection_schedule(
     update_payload = payload.model_dump(exclude_unset=True)
     if "name" in update_payload:
         update_payload["name"] = _normalize_schedule_name(update_payload["name"])
+        _ensure_unique_schedule_name(
+            db,
+            update_payload["name"],
+            schedule_id=schedule.id,
+        )
     if "cron" in update_payload:
         try:
             update_payload["cron"] = _normalize_cron_expression(
