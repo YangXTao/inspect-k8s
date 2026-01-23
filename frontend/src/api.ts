@@ -23,6 +23,54 @@ interface RequestOptions {
   timeoutMs?: number;
 }
 
+function extractErrorMessage(raw: string, fallback: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+  try {
+    const payload: unknown = JSON.parse(trimmed);
+    if (typeof payload === "string") {
+      return payload.trim() || fallback;
+    }
+    if (payload && typeof payload === "object") {
+      const candidate =
+        (payload as { detail?: unknown }).detail ??
+        (payload as { message?: unknown }).message ??
+        (payload as { error?: unknown }).error;
+      if (typeof candidate === "string") {
+        return candidate.trim() || fallback;
+      }
+      if (Array.isArray(candidate)) {
+        const messages = candidate
+          .map((item) => {
+            if (typeof item === "string") {
+              return item.trim();
+            }
+            if (item && typeof item === "object") {
+              const detail =
+                (item as { msg?: unknown; message?: unknown; detail?: unknown })
+                  .msg ??
+                (item as { message?: unknown }).message ??
+                (item as { detail?: unknown }).detail;
+              if (typeof detail === "string") {
+                return detail.trim();
+              }
+            }
+            return "";
+          })
+          .filter(Boolean);
+        if (messages.length > 0) {
+          return messages.join("; ");
+        }
+      }
+    }
+  } catch {
+    // Keep original text when it is not JSON.
+  }
+  return trimmed;
+}
+
 async function request<T>(
   path: string,
   init?: RequestInit,
@@ -71,8 +119,12 @@ async function request<T>(
   }
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "Request failed");
+    const rawMessage = await response.text();
+    const message = extractErrorMessage(
+      rawMessage,
+      response.statusText || "Request failed"
+    );
+    throw new Error(message);
   }
 
   if (response.status === 204) {
@@ -290,18 +342,11 @@ export async function exportInspectionItemsYaml(): Promise<string> {
     credentials: "include",
   });
   if (!response.ok) {
-    const message = await response.text();
-    let errorMessage = message || response.statusText || "Request failed";
-    if (message) {
-      try {
-        const payload = JSON.parse(message) as { detail?: string };
-        if (payload && typeof payload.detail === "string" && payload.detail) {
-          errorMessage = payload.detail;
-        }
-      } catch {
-        // Keep original message when it is not JSON.
-      }
-    }
+    const rawMessage = await response.text();
+    const errorMessage = extractErrorMessage(
+      rawMessage,
+      response.statusText || "Request failed"
+    );
     throw new Error(errorMessage);
   }
   return response.text();
