@@ -2926,31 +2926,19 @@ const AuditView = () => {
           </div>
           <div className="history-chip history-chip-date">
             <span className="history-chip-label">开始</span>
-            <div className="datetime-field">
-              <input
-                type="datetime-local"
-                value={startTime}
-                onChange={(event) => setStartTime(event.target.value)}
-                className={startTime ? "" : "is-empty"}
-              />
-              {!startTime && (
-                <span className="datetime-placeholder">年 / 月 / 日 --:--</span>
-              )}
-            </div>
+            <input
+              type="datetime-local"
+              value={startTime}
+              onChange={(event) => setStartTime(event.target.value)}
+            />
           </div>
           <div className="history-chip history-chip-date">
             <span className="history-chip-label">结束</span>
-            <div className="datetime-field">
-              <input
-                type="datetime-local"
-                value={endTime}
-                onChange={(event) => setEndTime(event.target.value)}
-                className={endTime ? "" : "is-empty"}
-              />
-              {!endTime && (
-                <span className="datetime-placeholder">年 / 月 / 日 --:--</span>
-              )}
-            </div>
+            <input
+              type="datetime-local"
+              value={endTime}
+              onChange={(event) => setEndTime(event.target.value)}
+            />
           </div>
           <div className="history-chip history-chip-search">
             <span className="history-chip-label">关键字</span>

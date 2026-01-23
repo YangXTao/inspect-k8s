@@ -3214,32 +3214,6 @@ th {
 
 .audit-page .history-chip input[type="datetime-local"] {
   min-width: 180px;
-  color: #475569 !important;
-  font-weight: 500;
-  -webkit-text-fill-color: #475569 !important;
-}
-
-.audit-page .history-chip-date .datetime-field {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-}
-
-.audit-page .history-chip-date .datetime-field input.is-empty {
-  color: transparent !important;
-  -webkit-text-fill-color: transparent !important;
-}
-
-.audit-page .history-chip-date .datetime-placeholder {
-  position: absolute;
-  left: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 13px;
-  color: #475569;
-  font-weight: 500;
-  pointer-events: none;
-  white-space: nowrap;
 }
 
 .audit-page .history-chip input[type="datetime-local"]::-webkit-datetime-edit,
@@ -3250,10 +3224,9 @@ th {
 .audit-page .history-chip input[type="datetime-local"]::-webkit-datetime-edit-year-field,
 .audit-page .history-chip input[type="datetime-local"]::-webkit-datetime-edit-hour-field,
 .audit-page .history-chip input[type="datetime-local"]::-webkit-datetime-edit-minute-field {
-  color: #475569 !important;
-  font-weight: 500;
-  -webkit-text-fill-color: #475569 !important;
-  opacity: 1;
+  color: inherit;
+  font-weight: inherit;
+  -webkit-text-fill-color: inherit;
 }
 
 .history-page .history-search-clear,
