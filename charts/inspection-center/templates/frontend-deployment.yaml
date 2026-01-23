@@ -1,3 +1,4 @@
+{{- $httpsEnabled := include "inspection-center.frontendHttpsEnabled" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -8,7 +9,6 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   replicas: {{ .Values.frontend.replicaCount }}
-  {{- $httpsEnabled := include "inspection-center.frontendHttpsEnabled" . -}}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "inspection-center.name" . }}
