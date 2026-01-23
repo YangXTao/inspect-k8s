@@ -484,7 +484,7 @@ def create_inspection_run(
     executor: str = "server",
     agent_status: Optional[str] = None,
     agent_id: Optional[int] = None,
-    log_action: bool = True,
+    log_audit: bool = True,
     created_by_user_id: Optional[int] = None,
     created_by_username: Optional[str] = None,
 ) -> models.InspectionRun:
@@ -505,7 +505,7 @@ def create_inspection_run(
     db.add(run)
     db.commit()
     db.refresh(run)
-    if log_action and (operator or "") != CONNECTION_TEST_OPERATOR:
+    if log_audit and (operator or "") != CONNECTION_TEST_OPERATOR:
         run_label = describe_inspection_run(db, run, cluster)
         audit_override = _resolve_run_audit_override(run)
         log_action(

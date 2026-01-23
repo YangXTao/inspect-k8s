@@ -27,6 +27,7 @@ from fastapi import (
     Request,
     Response,
 )
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, JSONResponse
 from sqlalchemy import func
@@ -783,6 +784,21 @@ def _build_system_agent_install_script() -> str:
 app = FastAPI(title="K8s Inspection Service", version="0.3.0")
 agent_router = APIRouter(prefix="/agent", tags=["agent"])
 
+
+@app.exception_handler(HTTPException)
+async def handle_http_exception(
+    request: Request, exc: HTTPException
+) -> PlainTextResponse:
+    detail = exc.detail if exc.detail is not None else "请求失败"
+    return PlainTextResponse(str(detail), status_code=exc.status_code)
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_validation_error(
+    request: Request, exc: RequestValidationError
+) -> PlainTextResponse:
+    return PlainTextResponse("请求参数错误", status_code=422)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -825,7 +841,7 @@ async def require_authentication(request: Request, call_next):
     with SessionLocal() as db:
         user = get_user_from_session(db, request.cookies.get(AUTH_COOKIE_NAME))
         if not user:
-            return JSONResponse(status_code=401, content={"detail": "未登录"})
+            return PlainTextResponse("未登录", status_code=401)
         user_id = user.id
         username = user.username
         request.state.user = user
@@ -1679,6 +1695,17 @@ async def upload_license(
         status = license_manager.import_bytes(payload)
     except LicenseError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    licensee = (status.get("licensee") or "").strip()
+    description = f"修改 License（{licensee}）" if licensee else "修改 License"
+    crud.log_action(
+        db,
+        action="update",
+        entity_type="license",
+        entity_id=None,
+        description=description,
+        user_id=current_user.id,
+        username=current_user.username,
+    )
     return schemas.LicenseStatusOut(**status)
 
 
@@ -1693,6 +1720,17 @@ def upload_license_text(
         status = license_manager.import_bytes(payload.content)
     except LicenseError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    licensee = (status.get("licensee") or "").strip()
+    description = f"修改 License（{licensee}）" if licensee else "修改 License"
+    crud.log_action(
+        db,
+        action="update",
+        entity_type="license",
+        entity_id=None,
+        description=description,
+        user_id=current_user.id,
+        username=current_user.username,
+    )
     return schemas.LicenseStatusOut(**status)
 
 
@@ -2575,6 +2613,7 @@ def list_audit_logs(
     end: Optional[datetime] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.AuthUser = Depends(get_current_user),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
 ):
     _require_permission(db, current_user, "audit.read", "审计日志查看")
     if start and end and end < start:
