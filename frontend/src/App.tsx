@@ -4996,6 +4996,7 @@ interface ScheduleSettingsPanelProps {
   notice: string | null;
   error: string | null;
   license: LicenseCapabilities;
+  onClearError: () => void;
   onSave: (payload: {
     id?: number;
     name?: string;
@@ -5019,6 +5020,7 @@ const ScheduleSettingsPanel = ({
   notice,
   error,
   license,
+  onClearError,
   onSave,
   onDelete,
   onDeleteMany,
@@ -5149,6 +5151,7 @@ const ScheduleSettingsPanel = ({
   const handleCloseForm = () => {
     setFormOpen(false);
     resetForm();
+    onClearError();
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -6146,6 +6149,7 @@ interface SchedulePageProps {
   notice: string | null;
   error: string | null;
   license: LicenseCapabilities;
+  onClearError: () => void;
   onSave: (payload: {
     id?: number;
     name?: string;
@@ -6169,6 +6173,7 @@ const SchedulePage = ({
   notice,
   error,
   license,
+  onClearError,
   onSave,
   onDelete,
   onDeleteMany,
@@ -6185,6 +6190,7 @@ const SchedulePage = ({
       notice={notice}
       error={error}
       license={license}
+      onClearError={onClearError}
       onSave={onSave}
       onDelete={onDelete}
       onDeleteMany={onDeleteMany}
@@ -7668,6 +7674,9 @@ const [clusterUploading, setClusterUploading] = useState(false);
   const [scheduleNotice, setScheduleNotice] = useState<string | null>(null);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
+  const clearScheduleError = useCallback(() => {
+    setScheduleError(null);
+  }, []);
 
   const [selectedItemIds, setSelectedItemIdsState] = useState<number[]>([]);
   const [operator, setOperator] = useState("");
@@ -10213,6 +10222,7 @@ const hasManualKubeconfig = useMemo(
                 notice={scheduleNotice}
                 error={scheduleError}
                 license={licenseCapabilities}
+                onClearError={clearScheduleError}
                 onSave={handleSaveSchedule}
                 onDelete={handleDeleteSchedule}
                 onDeleteMany={handleDeleteSchedulesBulk}
