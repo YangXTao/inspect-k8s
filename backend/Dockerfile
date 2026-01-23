@@ -1,10 +1,7 @@
 FROM 192.168.10.51/base/zs-inspect-base-image:v0.2
 WORKDIR /app
 
-# 声明变量，有默认值即可
-ARG HTTP_PROXY=""
-ARG HTTPS_PROXY=""
-ARG NO_PROXY="localhost,127.0.0.1"
+
 # install fonts for PDF rendering
 RUN if command -v apt-get >/dev/null 2>&1; then \
       apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk && rm -rf /var/lib/apt/lists/*; \
