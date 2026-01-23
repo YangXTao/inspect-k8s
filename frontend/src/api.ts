@@ -68,7 +68,24 @@ async function request<T>(
 
   if (!response.ok) {
     const message = await response.text();
-    throw new Error(message || "Request failed");
+    let errorMessage = message || response.statusText || "Request failed";
+    if (message) {
+      try {
+        const payload = JSON.parse(message) as {
+          detail?: string;
+          message?: string;
+          error?: string;
+        };
+        const detail = typeof payload.detail === "string" ? payload.detail.trim() : "";
+        const payloadMessage =
+          typeof payload.message === "string" ? payload.message.trim() : "";
+        const payloadError = typeof payload.error === "string" ? payload.error.trim() : "";
+        errorMessage = detail || payloadMessage || payloadError || errorMessage;
+      } catch {
+        // Keep original message when it is not JSON.
+      }
+    }
+    throw new Error(errorMessage);
   }
 
   if (response.status === 204) {

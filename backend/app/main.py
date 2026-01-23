@@ -870,6 +870,25 @@ def _normalize_schedule_name(name: Optional[str]) -> Optional[str]:
     return trimmed or None
 
 
+def _validate_schedule_name_unique(
+    db: Session,
+    name: Optional[str],
+    exclude_id: Optional[int] = None,
+) -> None:
+    if not name:
+        return
+    query = db.query(models.InspectionSchedule).filter(
+        models.InspectionSchedule.name == name
+    )
+    if exclude_id is not None:
+        query = query.filter(models.InspectionSchedule.id != exclude_id)
+    if query.first():
+        raise HTTPException(
+            status_code=400,
+            detail="定时巡检名称已存在，请更换名称。",
+        )
+
+
 def _normalize_cron_expression(expression: str) -> str:
     normalized = " ".join((expression or "").strip().split())
     if not normalized:
@@ -2315,8 +2334,10 @@ def create_inspection_schedule(
     item_ids = _normalize_id_list(payload.item_ids)
     _validate_schedule_clusters(db, cluster_ids)
     _validate_schedule_items(db, item_ids)
+    normalized_name = _normalize_schedule_name(payload.name)
+    _validate_schedule_name_unique(db, normalized_name)
     sanitized = schemas.InspectionScheduleCreate(
-        name=_normalize_schedule_name(payload.name),
+        name=normalized_name,
         cron=cron,
         cluster_ids=cluster_ids,
         item_ids=item_ids,
@@ -2342,6 +2363,11 @@ def update_inspection_schedule(
     update_payload = payload.model_dump(exclude_unset=True)
     if "name" in update_payload:
         update_payload["name"] = _normalize_schedule_name(update_payload["name"])
+        _validate_schedule_name_unique(
+            db,
+            update_payload["name"],
+            exclude_id=schedule.id,
+        )
     if "cron" in update_payload:
         try:
             update_payload["cron"] = _normalize_cron_expression(

@@ -4246,6 +4246,13 @@ const InspectionSettingsPanel = ({
     if (targetIds.length === 0) {
       return;
     }
+    if (targetIds.length === 1) {
+      const targetItem = items.find((item) => item.id === targetIds[0]);
+      if (targetItem) {
+        onDelete(targetItem);
+        return;
+      }
+    }
     onDeleteMany(targetIds);
   };
 
@@ -4326,6 +4333,7 @@ const InspectionSettingsPanel = ({
   const promqlSeverityLabel = promqlSeverity === "critical" ? "严重" : "告警";
   const showVersionColumn =
     itemFilterType === "all" || itemFilterType === "promql";
+  const deleteSelectedLabel = selectedFilteredCount > 1 ? "批量删除" : "删除";
 
   return (
     <div className="inspection-settings-panel">
@@ -4409,7 +4417,7 @@ const InspectionSettingsPanel = ({
                   onClick={handleDeleteSelected}
                   disabled={selectedFilteredCount === 0 || readOnly}
                 >
-                  批量删除
+                  {deleteSelectedLabel}
                 </button>
                 {itemFilterType === "promql" && (
                   <label className="settings-filter">
