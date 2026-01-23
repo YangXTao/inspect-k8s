@@ -256,12 +256,14 @@ def _attach_run_report(db: Session, run: models.InspectionRun) -> models.Inspect
     db.commit()
     db.refresh(run)
     run_label = crud.describe_inspection_run(db, run)
+    audit_override = crud.get_run_audit_override(run)
     crud.log_action(
         db,
         action="update",
         entity_type="inspection_run",
         entity_id=run.id,
         description=f"生成巡检报告：{run_label}",
+        **audit_override,
     )
     return run
 
@@ -3027,7 +3029,12 @@ def create_inspection_schedule(
         item_ids=item_ids,
         is_enabled=payload.is_enabled,
     )
-    schedule = crud.create_inspection_schedule(db, sanitized)
+    schedule = crud.create_inspection_schedule(
+        db,
+        sanitized,
+        created_by_user_id=current_user.id,
+        created_by_username=current_user.username,
+    )
     return schemas.InspectionScheduleOut.model_validate(schedule)
 
 

@@ -401,6 +401,16 @@ def _ensure_inspection_runs_schema() -> None:
         statements.append(
             f"ALTER TABLE inspection_runs ADD COLUMN agent_id {column_type} NULL"
         )
+    if "created_by_user_id" not in existing_columns:
+        column_type = "INTEGER" if dialect == "sqlite" else "INT"
+        statements.append(
+            f"ALTER TABLE inspection_runs ADD COLUMN created_by_user_id {column_type} NULL"
+        )
+    if "created_by_username" not in existing_columns:
+        column_type = "TEXT" if dialect == "sqlite" else "VARCHAR(100)"
+        statements.append(
+            f"ALTER TABLE inspection_runs ADD COLUMN created_by_username {column_type} NULL"
+        )
 
     if dialect != "sqlite":
         statements.append(
@@ -673,6 +683,16 @@ def _ensure_inspection_schedules_schema() -> None:
         statements.append(
             f"ALTER TABLE inspection_schedules ADD COLUMN updated_at {column_type} NOT NULL"
         )
+    if "created_by_user_id" not in existing_columns:
+        column_type = "INTEGER" if dialect == "sqlite" else "INT"
+        statements.append(
+            f"ALTER TABLE inspection_schedules ADD COLUMN created_by_user_id {column_type} NULL"
+        )
+    if "created_by_username" not in existing_columns:
+        column_type = "TEXT" if dialect == "sqlite" else "VARCHAR(100)"
+        statements.append(
+            f"ALTER TABLE inspection_schedules ADD COLUMN created_by_username {column_type} NULL"
+        )
 
     if dialect != "sqlite":
         statements.extend(
@@ -683,6 +703,7 @@ def _ensure_inspection_schedules_schema() -> None:
                 "ALTER TABLE inspection_schedules MODIFY cluster_ids_json TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
                 "ALTER TABLE inspection_schedules MODIFY cluster_names_json TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
                 "ALTER TABLE inspection_schedules MODIFY item_ids_json TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+                "ALTER TABLE inspection_schedules MODIFY created_by_username VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
             ]
         )
 

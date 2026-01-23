@@ -104,6 +104,8 @@ class InspectionRun(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     operator = Column(String(100), nullable=True)
+    created_by_user_id = Column(Integer, nullable=True)
+    created_by_username = Column(String(100), nullable=True)
     cluster_id = Column(
         Integer,
         ForeignKey("cluster_configs.id", ondelete="CASCADE"),
@@ -144,6 +146,8 @@ class InspectionSchedule(Base):
     item_ids_json = Column(Text, nullable=False)
     is_enabled = Column(Boolean, nullable=False, default=True)
     last_run_at = Column(DateTime, nullable=True)
+    created_by_user_id = Column(Integer, nullable=True)
+    created_by_username = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False

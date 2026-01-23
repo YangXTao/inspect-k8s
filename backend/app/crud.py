@@ -11,6 +11,7 @@ from .audit import get_audit_actor
 
 UNSET = object()
 CONNECTION_TEST_OPERATOR = "__system_connection_test__"
+SCHEDULED_AUDIT_SUFFIX = "（定时巡检）"
 
 
 def _hash_string(value: str) -> int:
@@ -96,6 +97,24 @@ def get_cluster_display_id(cluster: models.ClusterConfig) -> str:
 
 def _should_log_run(run: models.InspectionRun) -> bool:
     return (run.operator or "") != CONNECTION_TEST_OPERATOR
+
+
+def _resolve_run_audit_override(
+    run: models.InspectionRun,
+) -> dict[str, Optional[object]]:
+    if get_audit_actor() is not None:
+        return {}
+    username = (getattr(run, "created_by_username", None) or "").strip()
+    if not username:
+        return {}
+    return {
+        "user_id": getattr(run, "created_by_user_id", None),
+        "username": f"{username}{SCHEDULED_AUDIT_SUFFIX}",
+    }
+
+
+def get_run_audit_override(run: models.InspectionRun) -> dict[str, Optional[object]]:
+    return _resolve_run_audit_override(run)
 
 
 def list_clusters(db: Session) -> List[models.ClusterConfig]:
@@ -466,9 +485,13 @@ def create_inspection_run(
     agent_status: Optional[str] = None,
     agent_id: Optional[int] = None,
     log_action: bool = True,
+    created_by_user_id: Optional[int] = None,
+    created_by_username: Optional[str] = None,
 ) -> models.InspectionRun:
     run = models.InspectionRun(
         operator=operator,
+        created_by_user_id=created_by_user_id,
+        created_by_username=created_by_username,
         cluster_id=cluster.id,
         status=status,
         total_items=max(0, total_items),
@@ -484,12 +507,14 @@ def create_inspection_run(
     db.refresh(run)
     if log_action and (operator or "") != CONNECTION_TEST_OPERATOR:
         run_label = describe_inspection_run(db, run, cluster)
+        audit_override = _resolve_run_audit_override(run)
         log_action(
             db,
             action="create",
             entity_type="inspection_run",
             entity_id=run.id,
             description=f"创建巡检记录：{run_label}",
+            **audit_override,
         )
     return run
 
@@ -519,12 +544,14 @@ def finalize_inspection_run(
     db.refresh(run)
     if _should_log_run(run):
         run_label = describe_inspection_run(db, run)
+        audit_override = _resolve_run_audit_override(run)
         log_action(
             db,
             action="update",
             entity_type="inspection_run",
             entity_id=run.id,
             description=f"更新巡检记录（状态 {status}）：{run_label}",
+            **audit_override,
         )
     return run
 
@@ -861,12 +888,14 @@ def pause_inspection_run(
     db.refresh(run)
     if _should_log_run(run):
         run_label = describe_inspection_run(db, run)
+        audit_override = _resolve_run_audit_override(run)
         log_action(
             db,
             action="update",
             entity_type="inspection_run",
             entity_id=run.id,
             description=f"暂停巡检记录：{run_label}",
+            **audit_override,
         )
     return run
 
@@ -884,12 +913,14 @@ def resume_inspection_run(
     db.refresh(run)
     if _should_log_run(run):
         run_label = describe_inspection_run(db, run)
+        audit_override = _resolve_run_audit_override(run)
         log_action(
             db,
             action="update",
             entity_type="inspection_run",
             entity_id=run.id,
             description=f"恢复巡检记录：{run_label}",
+            **audit_override,
         )
     return run
 
@@ -913,12 +944,14 @@ def cancel_inspection_run(
     db.refresh(run)
     if _should_log_run(run):
         run_label = describe_inspection_run(db, run)
+        audit_override = _resolve_run_audit_override(run)
         log_action(
             db,
             action="update",
             entity_type="inspection_run",
             entity_id=run.id,
             description=f"取消巡检记录：{run_label}",
+            **audit_override,
         )
     return run
 
@@ -956,12 +989,14 @@ def delete_inspection_run(db: Session, run: models.InspectionRun) -> None:
     db.delete(run)
     db.commit()
     if _should_log_run(run):
+        audit_override = _resolve_run_audit_override(run)
         log_action(
             db,
             action="delete",
             entity_type="inspection_run",
             entity_id=run_id,
             description=f"删除巡检记录：{run_label}",
+            **audit_override,
         )
 
 
@@ -984,7 +1019,11 @@ def get_inspection_schedule(
 
 
 def create_inspection_schedule(
-    db: Session, schedule_in: schemas.InspectionScheduleCreate
+    db: Session,
+    schedule_in: schemas.InspectionScheduleCreate,
+    *,
+    created_by_user_id: Optional[int] = None,
+    created_by_username: Optional[str] = None,
 ) -> models.InspectionSchedule:
     payload = schedule_in.model_dump()
     cluster_ids = payload.pop("cluster_ids", [])
@@ -996,6 +1035,8 @@ def create_inspection_schedule(
         .all()
     }
     schedule = models.InspectionSchedule(**payload)
+    schedule.created_by_user_id = created_by_user_id
+    schedule.created_by_username = created_by_username
     schedule.set_cluster_ids(cluster_ids)
     schedule.set_cluster_name_map(cluster_name_map)
     schedule.set_item_ids(item_ids)
