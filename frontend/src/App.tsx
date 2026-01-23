@@ -5177,15 +5177,21 @@ const ScheduleSettingsPanel = ({
       return;
     }
     setFormError(null);
-    await onSave({
-      id: editingSchedule?.id,
-      name: formName.trim(),
-      cron: parts.join(" "),
-      clusterIds: selectedClusterIds,
-      itemIds: selectedItemIds,
-      isEnabled: formEnabled,
-    });
-    handleCloseForm();
+    try {
+      await onSave({
+        id: editingSchedule?.id,
+        name: formName.trim(),
+        cron: parts.join(" "),
+        clusterIds: selectedClusterIds,
+        itemIds: selectedItemIds,
+        isEnabled: formEnabled,
+      });
+      handleCloseForm();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "保存定时巡检失败";
+      setFormError(message);
+    }
   };
 
   const filteredClusters = useMemo(() => {
@@ -5529,7 +5535,7 @@ const ScheduleSettingsPanel = ({
         </div>
       </div>
       {notice && <div className="feedback success">{notice}</div>}
-      {error && <div className="feedback error">{error}</div>}
+      {!formOpen && error && <div className="feedback error">{error}</div>}
       {readOnly && (
         <div className="feedback warning">
           {license.reason ?? "当前 License 不支持定时巡检。"}
