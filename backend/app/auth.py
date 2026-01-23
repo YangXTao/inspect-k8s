@@ -69,6 +69,7 @@ KNOWN_PERMISSIONS = {
     "result.delete",
     "report.read",
     "report.delete",
+    "audit.read",
 }
 
 READ_ONLY_PERMISSIONS = {
@@ -438,4 +439,10 @@ def get_user_from_session(
         session.last_seen_at = now
         db.add(session)
         db.commit()
+    # 避免会话关闭后访问用户字段触发 DetachedInstanceError
+    try:
+        db.refresh(user)
+    except Exception:
+        pass
+    db.expunge(user)
     return user

@@ -93,6 +93,32 @@ def _format_schedule_operator(
     return f"{base}{SCHEDULE_OPERATOR_SUFFIX}"
 
 
+def _resolve_schedule_creator(
+    db: Session,
+    schedule: models.InspectionSchedule,
+) -> tuple[Optional[int], Optional[str]]:
+    if schedule.created_by_user_id or schedule.created_by_username:
+        return schedule.created_by_user_id, schedule.created_by_username
+    entry = (
+        db.query(models.AuditLog)
+        .filter(
+            models.AuditLog.entity_type == "inspection_schedule",
+            models.AuditLog.entity_id == schedule.id,
+            models.AuditLog.action == "create",
+        )
+        .order_by(models.AuditLog.created_at.desc())
+        .first()
+    )
+    if not entry or not entry.username:
+        return None, None
+    schedule.created_by_user_id = entry.user_id
+    schedule.created_by_username = entry.username
+    schedule.updated_at = datetime.utcnow()
+    db.add(schedule)
+    db.commit()
+    return entry.user_id, entry.username
+
+
 def _should_skip_by_minute(schedule: models.InspectionSchedule, now: datetime) -> bool:
     if not schedule.last_run_at:
         return False
@@ -124,6 +150,7 @@ def _dispatch_schedule_runs(
     plan_json = _build_run_plan(items)
     prometheus_version = _derive_prometheus_version(items, multi_version_label)
     operator = _format_schedule_operator(schedule.name, operator_label)
+    created_by_user_id, created_by_username = _resolve_schedule_creator(db, schedule)
 
     created = 0
     for cluster_id in cluster_ids:
@@ -145,6 +172,8 @@ def _dispatch_schedule_runs(
             executor="agent",
             agent_status="queued",
             agent_id=agent.id,
+            created_by_user_id=created_by_user_id,
+            created_by_username=created_by_username,
         )
         created += 1
     return created

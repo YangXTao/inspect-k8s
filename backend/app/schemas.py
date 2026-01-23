@@ -129,15 +129,35 @@ class ClusterUpdate(BaseModel):
     )
 
 
+class AuditLogCreateIn(BaseModel):
+    action: str = Field(..., min_length=1, max_length=50)
+    entity_type: str = Field(..., min_length=1, max_length=50)
+    entity_id: Optional[int] = None
+    description: Optional[str] = Field(None, max_length=500)
+    status: Optional[str] = Field(None, max_length=20)
+
+
 class AuditLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    user_id: Optional[int] = None
+    username: Optional[str] = None
     action: str
     entity_type: str
     entity_id: Optional[int]
     description: Optional[str]
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    status: Optional[str] = None
     created_at: datetime
+
+
+class AuditLogListOut(BaseModel):
+    items: List[AuditLogOut]
+    total: int
+    page: int
+    page_size: int
 
 
 class InspectionItemBase(BaseModel):

@@ -15,6 +15,8 @@ import {
   AuthRole,
   AuthLoginChallenge,
   AuthUser,
+  AuditLog,
+  AuditLogList,
 } from "./types";
 
 const API_BASE = appConfig.apiBaseUrl.replace(/\/$/, "");
@@ -71,7 +73,24 @@ async function request<T>(
   }
 
   if (!response.ok) {
-    const message = await response.text();
+    const raw = await response.text();
+    let message = raw;
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as
+          | { detail?: string; message?: string }
+          | string;
+        if (typeof parsed === "string") {
+          message = parsed;
+        } else if (parsed.detail) {
+          message = parsed.detail;
+        } else if (parsed.message) {
+          message = parsed.message;
+        }
+      } catch {
+        // keep raw text
+      }
+    }
     throw new Error(message || "Request failed");
   }
 
@@ -273,6 +292,54 @@ export function updateUser(
 export function deleteUser(userId: number): Promise<void> {
   return request<void>(`/users/${userId}`, {
     method: "DELETE",
+  });
+}
+
+export function getAuditLogs(params: {
+  page?: number;
+  page_size?: number;
+  action?: string;
+  entity_type?: string;
+  keyword?: string;
+  start?: string;
+  end?: string;
+}): Promise<AuditLogList> {
+  const search = new URLSearchParams();
+  if (params.page) {
+    search.set("page", String(params.page));
+  }
+  if (params.page_size) {
+    search.set("page_size", String(params.page_size));
+  }
+  if (params.action) {
+    search.set("action", params.action);
+  }
+  if (params.entity_type) {
+    search.set("entity_type", params.entity_type);
+  }
+  if (params.keyword) {
+    search.set("keyword", params.keyword);
+  }
+  if (params.start) {
+    search.set("start", params.start);
+  }
+  if (params.end) {
+    search.set("end", params.end);
+  }
+  const query = search.toString();
+  return request<AuditLogList>(query ? `/audit-logs?${query}` : "/audit-logs");
+}
+
+export function recordAuditLog(payload: {
+  action: string;
+  entity_type: string;
+  entity_id?: number | null;
+  description?: string | null;
+  status?: string | null;
+}): Promise<AuditLog> {
+  return request<AuditLog>("/audit-logs/record", {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 

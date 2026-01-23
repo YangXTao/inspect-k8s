@@ -45,6 +45,8 @@ import {
   getRoles,
   getReportDownloadUrl,
   getCurrentUser,
+  getAuditLogs,
+  recordAuditLog,
   logout,
   changePassword,
   login,
@@ -87,6 +89,7 @@ import type {
   LicenseStatus,
   AuthUser,
   AuthRole,
+  AuditLog,
 } from "./types";
 
 type NoticeType = "success" | "warning" | "error" | null;
@@ -162,6 +165,7 @@ const CLUSTER_ID_STORAGE_KEY = "clusterDisplayIdMap.v1";
 const CLUSTER_PAGE_SIZE_OPTIONS = [10, 20, 50];
 const DEFAULT_CLUSTER_PAGE_SIZE = CLUSTER_PAGE_SIZE_OPTIONS[0];
 const RUN_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
+const AUDIT_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const CLUSTER_ITEM_PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
 const RESULT_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const SCHEDULE_REFRESH_INTERVAL = 15000;
@@ -212,6 +216,14 @@ const ROLE_PERMISSION_BLOCKS: RolePermissionBlock[] = [
           { key: "history.update", label: "修改" },
           { key: "history.delete", label: "删除" },
         ],
+      },
+    ],
+  },
+  {
+    rows: [
+      {
+        label: "审计日志",
+        options: [{ key: "audit.read", label: "查看" }],
       },
     ],
   },
@@ -382,6 +394,25 @@ const HISTORY_STATUS_OPTIONS: {
   { value: "finished", label: "已完成" },
   { value: "failed", label: "已失败" },
   { value: "cancelled", label: "已取消" },
+];
+const AUDIT_ACTION_OPTIONS = [
+  { value: "all", label: "全部" },
+  { value: "query", label: "查询" },
+  { value: "login", label: "登录" },
+  { value: "logout", label: "退出" },
+  { value: "create", label: "新增" },
+  { value: "update", label: "修改" },
+  { value: "delete", label: "删除" },
+  { value: "download", label: "下载" },
+];
+const AUDIT_ENTITY_OPTIONS = [
+  { value: "all", label: "全部对象" },
+  { value: "auth_user", label: "用户" },
+  { value: "cluster", label: "集群" },
+  { value: "inspection_schedule", label: "定时巡检" },
+  { value: "inspection_run", label: "巡检记录" },
+  { value: "inspection_item", label: "巡检项" },
+  { value: "prometheus_version", label: "Prometheus版本" },
 ];
 const SETTINGS_BASE_PATH = "/setting";
 const SETTINGS_TAB_IDS = [
@@ -556,6 +587,40 @@ const formatDate = (value?: string | null) => {
   }
 
   return BEIJING_TIME_FORMATTER.format(parsed);
+};
+
+const resolveAuditActionLabel = (action?: string | null) => {
+  const normalized = (action ?? "").trim();
+  if (!normalized) {
+    return "-";
+  }
+  const mapping = new Map(
+    AUDIT_ACTION_OPTIONS.filter((option) => option.value !== "all").map(
+      (option) => [option.value, option.label]
+    )
+  );
+  return mapping.get(normalized) ?? normalized;
+};
+
+const resolveAuditEntityLabel = (entityType?: string | null) => {
+  const normalized = (entityType ?? "").trim();
+  if (!normalized) {
+    return "-";
+  }
+  const mapping = new Map(
+    AUDIT_ENTITY_OPTIONS.filter((option) => option.value !== "all").map(
+      (option) => [option.value, option.label]
+    )
+  );
+  mapping.set("cluster_config", "集群");
+  mapping.set("inspection_agent", "集群");
+  mapping.set("auth_role", "角色");
+  mapping.set("inspection_result", "巡检结果");
+  mapping.set("audit_log", "审计日志");
+  mapping.set("overview", "首页");
+  mapping.set("setting", "设置");
+  mapping.set("license", "License");
+  return mapping.get(normalized) ?? "其他";
 };
 
 const parseDateValue = (value?: string | null) => {
@@ -1021,10 +1086,12 @@ const logWithTimestamp = (
 
 const TopNavigation = ({
   onOpenSettings,
+  showAudit,
   showSchedule,
   showHistory,
 }: {
   onOpenSettings: () => void;
+  showAudit: boolean;
   showSchedule: boolean;
   showHistory: boolean;
 }) => {
@@ -1101,6 +1168,26 @@ const TopNavigation = ({
                 </svg>
               </span>
               <span>历史巡检</span>
+            </span>
+          </NavLink>
+        )}
+        {showAudit && (
+          <NavLink
+            to="/audit"
+            className={({ isActive }) =>
+              `top-navigation-link${isActive ? " active" : ""}`
+            }
+          >
+            <span className="top-navigation-link-inner">
+              <span className="top-navigation-link-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path
+                    d="M7 4.75A2.75 2.75 0 0 0 4.25 7.5v9A2.75 2.75 0 0 0 7 19.25h10A2.75 2.75 0 0 0 19.75 16.5v-9A2.75 2.75 0 0 0 17 4.75H7Zm0 1.5h10c.69 0 1.25.56 1.25 1.25v9c0 .69-.56 1.25-1.25 1.25H7c-.69 0-1.25-.56-1.25-1.25v-9c0-.69.56-1.25 1.25-1.25Zm1.5 2.5a.75.75 0 0 0 0 1.5h7a.75.75 0 0 0 0-1.5h-7Zm0 4a.75.75 0 0 0 0 1.5h7a.75.75 0 0 0 0-1.5h-7Z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </span>
+              <span>审计日志</span>
             </span>
           </NavLink>
         )}
@@ -2660,6 +2747,362 @@ const HistoryView = ({
           </table>
         )}
       </div>
+    </section>
+  );
+};
+
+const AuditView = () => {
+  const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [actionFilter, setActionFilter] = useState("all");
+  const [entityFilter, setEntityFilter] = useState("all");
+  const [keyword, setKeyword] = useState("");
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+  const [pageSize, setPageSize] = useState<number>(
+    AUDIT_PAGE_SIZE_OPTIONS[0]
+  );
+  const [page, setPage] = useState(1);
+  const [pageInput, setPageInput] = useState("");
+  const [yamlEntry, setYamlEntry] = useState<AuditLog | null>(null);
+
+  useAutoClearError(error, setError);
+
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(total / Math.max(pageSize, 1))),
+    [total, pageSize]
+  );
+
+  useEffect(() => {
+    setPage((prev) => Math.min(Math.max(prev, 1), totalPages));
+  }, [totalPages]);
+
+  useEffect(() => {
+    setPage(1);
+    setPageInput("");
+  }, [actionFilter, entityFilter, keyword, startTime, endTime, pageSize]);
+
+  const toIsoString = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    const parsed = new Date(trimmed);
+    if (Number.isNaN(parsed.getTime())) {
+      return undefined;
+    }
+    return parsed.toISOString();
+  };
+
+  const refreshLogs = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const entityTypeParam =
+        entityFilter === "all"
+          ? undefined
+          : entityFilter === "cluster"
+            ? "cluster"
+            : entityFilter;
+      const response = await getAuditLogs({
+        page,
+        page_size: pageSize,
+        action: actionFilter === "all" ? undefined : actionFilter,
+        entity_type: entityTypeParam,
+        keyword: keyword.trim() ? keyword.trim() : undefined,
+        start: toIsoString(startTime),
+        end: toIsoString(endTime),
+      });
+      setLogs(response.items ?? []);
+      setTotal(response.total ?? 0);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "获取审计日志失败";
+      setError(message);
+      setLogs([]);
+      setTotal(0);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, pageSize, actionFilter, entityFilter, keyword, startTime, endTime]);
+
+  useEffect(() => {
+    void refreshLogs();
+  }, [refreshLogs]);
+
+  const handlePageChange = useCallback(
+    (offset: number) => {
+      setPage((prev) => {
+        const next = prev + offset;
+        if (next < 1) {
+          return 1;
+        }
+        if (next > totalPages) {
+          return totalPages;
+        }
+        return next;
+      });
+    },
+    [totalPages]
+  );
+
+  const handlePageJump = useCallback(() => {
+    const trimmed = pageInput.trim();
+    if (!trimmed) {
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isNaN(parsed) && Number.isInteger(parsed)) {
+      const target = Math.min(Math.max(parsed, 1), totalPages);
+      setPage(target);
+    }
+    setPageInput("");
+  }, [pageInput, totalPages]);
+
+  const clearKeyword = () => setKeyword("");
+
+  const toYamlScalar = (value: unknown) => {
+    if (value === null || value === undefined || value === "") {
+      return "null";
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+    return JSON.stringify(String(value));
+  };
+
+  const buildAuditYaml = (entry: AuditLog) => {
+    const lines = [
+      `id: ${toYamlScalar(entry.id)}`,
+      `time: ${toYamlScalar(formatDate(entry.created_at))}`,
+      `user: ${toYamlScalar(entry.username ?? "")}`,
+      `action: ${toYamlScalar(resolveAuditActionLabel(entry.action))}`,
+      `entity_type: ${toYamlScalar(resolveAuditEntityLabel(entry.entity_type))}`,
+      `entity_id: ${toYamlScalar(entry.entity_id ?? "")}`,
+      `status: ${toYamlScalar(entry.status ?? "")}`,
+      `ip_address: ${toYamlScalar(entry.ip_address ?? "")}`,
+      `user_agent: ${toYamlScalar(entry.user_agent ?? "")}`,
+      `description: ${toYamlScalar(entry.description ?? "")}`,
+    ];
+    return `${lines.join("\n")}\n`;
+  };
+
+  const renderEntityLabel = (entry: AuditLog) => {
+    return resolveAuditEntityLabel(entry.entity_type);
+  };
+
+  return (
+    <section className="card history history-page audit-page">
+      <div className="card-header history-header">
+        <h2>审计日志</h2>
+        <div className="history-filter-row">
+          <div className="history-chip history-chip-select">
+            <span className="history-chip-label">操作类型</span>
+            <select
+              value={actionFilter}
+              onChange={(event) => setActionFilter(event.target.value)}
+            >
+              {AUDIT_ACTION_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="history-chip history-chip-select">
+            <span className="history-chip-label">对象类型</span>
+            <select
+              value={entityFilter}
+              onChange={(event) => setEntityFilter(event.target.value)}
+            >
+              {AUDIT_ENTITY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="history-chip history-chip-date">
+            <span className="history-chip-label">开始</span>
+            <input
+              type="datetime-local"
+              value={startTime}
+              onChange={(event) => setStartTime(event.target.value)}
+            />
+          </div>
+          <div className="history-chip history-chip-date">
+            <span className="history-chip-label">结束</span>
+            <input
+              type="datetime-local"
+              value={endTime}
+              onChange={(event) => setEndTime(event.target.value)}
+            />
+          </div>
+          <div className="history-chip history-chip-search">
+            <span className="history-chip-label">关键字</span>
+            <input
+              type="text"
+              value={keyword}
+              onChange={(event) => setKeyword(event.target.value)}
+              placeholder="按用户 / 对象 / 描述搜索"
+            />
+            {keyword && (
+              <button
+                type="button"
+                className="history-search-clear"
+                onClick={clearKeyword}
+                aria-label="清空关键字"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {error && (
+        <div
+          className={`feedback ${
+            isLicenseRelatedMessage(error) ? "warning" : "error"
+          }`}
+        >
+          {error}
+        </div>
+      )}
+
+      <div className="history-toolbar">
+        <div className="history-selection">
+          <span className="selection-hint">共 {total} 条</span>
+          {loading && <span className="selection-hint">加载中...</span>}
+        </div>
+        <div className="history-pagination-controls">
+          <label>
+            每页
+            <select
+              value={pageSize}
+              onChange={(event) =>
+                setPageSize(Number(event.target.value))
+              }
+            >
+              {AUDIT_PAGE_SIZE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="history-pagination-buttons">
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => handlePageChange(-1)}
+              disabled={page <= 1}
+            >
+              上一页
+            </button>
+            <span>
+              第 {page} / {totalPages} 页
+            </span>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => handlePageChange(1)}
+              disabled={page >= totalPages}
+            >
+              下一页
+            </button>
+          </div>
+          <label className="history-page-jump">
+            跳转
+            <input
+              type="number"
+              min={1}
+              value={pageInput}
+              onChange={(event) => setPageInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  handlePageJump();
+                }
+              }}
+            />
+          </label>
+          <button type="button" className="secondary" onClick={handlePageJump}>
+            确定
+          </button>
+        </div>
+      </div>
+
+      <div className="table-wrapper">
+        {loading ? (
+          <div className="placeholder">加载中...</div>
+        ) : logs.length === 0 ? (
+          <div className="placeholder">暂无审计记录</div>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>用户</th>
+                <th>操作类型</th>
+                <th>对象</th>
+                <th>描述</th>
+                <th>查看 YAML</th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map((entry) => (
+                <tr key={entry.id}>
+                  <td>{formatDate(entry.created_at)}</td>
+                  <td>{entry.username || "-"}</td>
+                  <td>{resolveAuditActionLabel(entry.action)}</td>
+                  <td>{renderEntityLabel(entry)}</td>
+                  <td>{entry.description || "-"}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => setYamlEntry(entry)}
+                    >
+                      查看
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      {yamlEntry && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal audit-yaml-modal">
+            <div className="modal-header">
+              <h3>审计记录 YAML</h3>
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => setYamlEntry(null)}
+              >
+                关闭
+              </button>
+            </div>
+            <pre className="audit-yaml-content">
+              {buildAuditYaml(yamlEntry)}
+            </pre>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setYamlEntry(null)}
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 };
@@ -4738,7 +5181,7 @@ const InspectionSettingsPanel = ({
                       onClick={handleDeleteSelected}
                       disabled={selectedFilteredCount === 0}
                     >
-                      批量删除
+                      删除
                     </button>
                   </>
                 )}
@@ -9058,6 +9501,7 @@ const App = () => {
   const canDeleteSchedule = hasPermission("schedule.delete");
   const canManageSchedule =
     canCreateSchedule || canUpdateSchedule || canDeleteSchedule;
+  const canViewAudit = hasPermission("audit.read");
   const canViewHistory =
     hasPermission("history.read") || hasPermission("runRecord.read");
   const canUpdateHistory = hasPermission("history.update");
@@ -9603,6 +10047,77 @@ const loginRedirectState = useMemo(
       backgroundLocationRef.current = backgroundLocation;
     }
   }, [backgroundLocation]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+    const pathname = location.pathname;
+    if (pathname.startsWith("/audit")) {
+      return;
+    }
+    let description: string | null = null;
+    let entityType: string | null = null;
+    let entityId: number | null | undefined = undefined;
+    if (pathname === "/" || pathname === "") {
+      description = "查询首页";
+      entityType = "overview";
+    } else if (pathname.startsWith("/history")) {
+      description = "查询巡检记录列表";
+      entityType = "inspection_run";
+    } else if (pathname.startsWith("/schedule")) {
+      description = "查询定时巡检列表";
+      entityType = "inspection_schedule";
+    } else if (pathname.startsWith("/setting")) {
+      const segments = pathname.split("/").filter(Boolean);
+      const tab = (segments[1] ?? "overview").toLowerCase();
+      if (tab === "inspection") {
+        description = "查询巡检项设置";
+        entityType = "inspection_item";
+      } else if (tab === "prometheus-version") {
+        description = "查询 Prometheus 版本设置";
+        entityType = "prometheus_version";
+      } else if (tab === "users") {
+        description = "查询用户管理";
+        entityType = "auth_user";
+      } else if (tab === "license") {
+        description = "查询 License 设置";
+        entityType = "license";
+      } else {
+        description = "查询设置总览";
+        entityType = "setting";
+      }
+    } else if (pathname.startsWith("/clusters/")) {
+      const segments = pathname.split("/").filter(Boolean);
+      const clusterKey = segments[1] ?? "";
+      if (segments[2] === "runs" && segments[3]) {
+        description = `查看巡检记录详情：${clusterKey}/${segments[3]}`;
+        entityType = "inspection_run";
+      } else if (segments[2] === "nodes") {
+        description = `查看集群节点：${clusterKey}`;
+        entityType = "cluster_config";
+      } else {
+        description = `查看集群概览：${clusterKey}`;
+        entityType = "cluster_config";
+      }
+    }
+
+    if (!description || !entityType) {
+      return;
+    }
+    void recordAuditLog({
+      action: "query",
+      entity_type: entityType,
+      entity_id: entityId,
+      description,
+    }).catch((err) => {
+      logWithTimestamp(
+        "warn",
+        "记录审计查询失败: %s",
+        err instanceof Error ? err.message : String(err)
+      );
+    });
+  }, [isAuthenticated, location.pathname]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -11625,6 +12140,17 @@ const hasManualKubeconfig = useMemo(
         return { ok: false, message: "该版本已存在" };
       }
       setPrometheusVersionOptions((prev) => [...prev, trimmed]);
+      void recordAuditLog({
+        action: "create",
+        entity_type: "prometheus_version",
+        description: `新增 Prometheus 版本 ${trimmed}`,
+      }).catch((err) => {
+        logWithTimestamp(
+          "warn",
+          "记录 Prometheus 版本新增审计失败: %s",
+          err instanceof Error ? err.message : String(err)
+        );
+      });
       return { ok: true };
     },
     [prometheusVersionOptions, licenseCapabilities, canManagePrometheusVersions]
@@ -11667,6 +12193,17 @@ const hasManualKubeconfig = useMemo(
       setPrometheusVersionOptions((prev) =>
         prev.filter((version) => version !== trimmed)
       );
+      void recordAuditLog({
+        action: "delete",
+        entity_type: "prometheus_version",
+        description: `删除 Prometheus 版本 ${trimmed}`,
+      }).catch((err) => {
+        logWithTimestamp(
+          "warn",
+          "记录 Prometheus 版本删除审计失败: %s",
+          err instanceof Error ? err.message : String(err)
+        );
+      });
       return { ok: true };
     },
     [items, licenseCapabilities, canManagePrometheusVersions]
@@ -11760,16 +12297,22 @@ const hasManualKubeconfig = useMemo(
       if (targetIds.length === 0) {
         return;
       }
+      const targetCount = targetIds.length;
       setConfirmState({
-        title: "批量删除巡检项",
-        message: `确认删除当前筛选结果中选中的 ${targetIds.length} 条巡检项？该操作不可恢复。`,
+        title: "删除巡检项",
+        message:
+          targetCount === 1
+            ? "确认删除该巡检项？该操作不可恢复。"
+            : `确认删除选中的 ${targetCount} 条巡检项？该操作不可恢复。`,
         confirmLabel: "删除",
         variant: "danger",
         scope: "settings",
         onConfirm: () =>
           deleteInspectionItemsBatch(
             targetIds,
-            `已删除 ${targetIds.length} 个巡检项`
+            targetCount === 1
+              ? "巡检项已删除"
+              : `已删除 ${targetCount} 个巡检项`
           ),
       });
     },
@@ -12509,6 +13052,7 @@ const hasManualKubeconfig = useMemo(
       </Helmet>
       <TopNavigation
         onOpenSettings={handleOpenSettings}
+        showAudit={canViewAudit}
         showSchedule={canViewSchedule}
         showHistory={canViewHistory}
       />
@@ -12526,6 +13070,16 @@ const hasManualKubeconfig = useMemo(
           <Route path="/" element={overviewRouteElement} />
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/setting/*" element={overviewRouteElement} />
+          <Route
+            path="/audit"
+            element={
+              canViewAudit ? (
+                <AuditView />
+              ) : (
+                <NoPermissionPanel title="无权限访问审计日志" />
+              )
+            }
+          />
           <Route
             path="/history"
             element={

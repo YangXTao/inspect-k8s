@@ -27,12 +27,15 @@ from fastapi import (
     Request,
     Response,
 )
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, JSONResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
 from . import crud, models, schemas
+from .audit import AuditActor, set_audit_actor, reset_audit_actor
 from .cron import CronValidationError, parse_cron_expression
 from .auth import (
     AUTH_COOKIE_NAME,
@@ -254,12 +257,15 @@ def _attach_run_report(db: Session, run: models.InspectionRun) -> models.Inspect
     db.add(run)
     db.commit()
     db.refresh(run)
+    run_label = crud.describe_inspection_run(db, run)
+    audit_override = crud.get_run_audit_override(run)
     crud.log_action(
         db,
         action="update",
         entity_type="inspection_run",
         entity_id=run.id,
-        description="生成巡检报告。",
+        description=f"生成巡检报告：{run_label}",
+        **audit_override,
     )
     return run
 
@@ -778,6 +784,21 @@ def _build_system_agent_install_script() -> str:
 app = FastAPI(title="K8s Inspection Service", version="0.3.0")
 agent_router = APIRouter(prefix="/agent", tags=["agent"])
 
+
+@app.exception_handler(HTTPException)
+async def handle_http_exception(
+    request: Request, exc: HTTPException
+) -> PlainTextResponse:
+    detail = exc.detail if exc.detail is not None else "请求失败"
+    return PlainTextResponse(str(detail), status_code=exc.status_code)
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_validation_error(
+    request: Request, exc: RequestValidationError
+) -> PlainTextResponse:
+    return PlainTextResponse("请求参数错误", status_code=422)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -814,12 +835,29 @@ async def require_authentication(request: Request, call_next):
     path = request.url.path
     if _is_public_path(path):
         return await call_next(request)
+    audit_token = None
+    user_id = None
+    username = None
     with SessionLocal() as db:
         user = get_user_from_session(db, request.cookies.get(AUTH_COOKIE_NAME))
         if not user:
-            return JSONResponse(status_code=401, content={"detail": "未登录"})
+            return PlainTextResponse("未登录", status_code=401)
+        user_id = user.id
+        username = user.username
         request.state.user = user
-    return await call_next(request)
+    try:
+        audit_token = set_audit_actor(
+            AuditActor(
+                user_id=user_id,
+                username=username,
+                ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+            )
+        )
+        return await call_next(request)
+    finally:
+        if audit_token is not None:
+            reset_audit_actor(audit_token)
 
 
 def get_db() -> Session:
@@ -965,6 +1003,41 @@ def _normalize_schedule_name(name: Optional[str]) -> Optional[str]:
         return None
     trimmed = name.strip()
     return trimmed or None
+
+
+def _ensure_unique_schedule_name(
+    db: Session,
+    name: Optional[str],
+    schedule_id: Optional[int] = None,
+) -> None:
+    if not name:
+        raise HTTPException(status_code=400, detail="定时巡检名称不能为空。")
+    query = (
+        db.query(models.InspectionSchedule)
+        .filter(models.InspectionSchedule.name.isnot(None))
+        .filter(func.lower(models.InspectionSchedule.name) == name.lower())
+    )
+    if schedule_id is not None:
+        query = query.filter(models.InspectionSchedule.id != schedule_id)
+    if query.first():
+        raise HTTPException(status_code=400, detail="定时巡检名称已存在，请更换名称。")
+
+
+def _resolve_schedule_last_run_at(
+    db: Session,
+    schedule: models.InspectionSchedule,
+) -> Optional[datetime]:
+    name = (schedule.name or "").strip()
+    if not name:
+        return None
+    pattern = f"{name}%"
+    return (
+        db.query(func.max(models.InspectionRun.created_at))
+        .filter(models.InspectionRun.operator.isnot(None))
+        .filter(models.InspectionRun.operator.like(pattern))
+        .filter(models.InspectionRun.operator != name)
+        .scalar()
+    )
 
 
 def _normalize_cron_expression(expression: str) -> str:
@@ -1177,6 +1250,7 @@ def _serialize_auth_user(db: Session, user: models.AuthUser) -> schemas.AuthUser
 @app.post("/auth/login", response_model=schemas.AuthUserOut)
 def login(
     payload: schemas.AuthLoginIn,
+    request: Request,
     response: Response,
     db: Session = Depends(get_db),
 ) -> schemas.AuthUserOut:
@@ -1190,10 +1264,10 @@ def login(
         if not user or not verify_login_proof(
             username, payload.nonce, payload.proof, user.password_hash
         ):
-            raise HTTPException(status_code=401, detail="用户名或密码错误")
+            return PlainTextResponse("用户名或密码错误", status_code=401)
     elif payload.password:
         if not user or not verify_password(payload.password, user.password_hash):
-            raise HTTPException(status_code=401, detail="用户名或密码错误")
+            return PlainTextResponse("用户名或密码错误", status_code=401)
     else:
         raise HTTPException(status_code=400, detail="缺少登录凭据")
     if not user.is_active:
@@ -1216,6 +1290,17 @@ def login(
         httponly=True,
         samesite=cookie_samesite,
         secure=COOKIE_SECURE,
+    )
+    crud.log_action(
+        db,
+        action="login",
+        entity_type="auth_user",
+        entity_id=user.id,
+        description=f"用户 {user.username} 登录",
+        user_id=user.id,
+        username=user.username,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
     )
     return _serialize_auth_user(db, user)
 
@@ -1251,6 +1336,7 @@ def logout(
     response: Response,
     request: Request,
     db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
 ) -> dict[str, str]:
     session_id = request.cookies.get(AUTH_COOKIE_NAME)
     if session_id:
@@ -1263,6 +1349,13 @@ def logout(
             db.delete(session)
             db.commit()
     response.delete_cookie(AUTH_COOKIE_NAME)
+    crud.log_action(
+        db,
+        action="logout",
+        entity_type="auth_user",
+        entity_id=current_user.id,
+        description=f"用户 {current_user.username} 退出登录",
+    )
     return {"status": "ok"}
 
 
@@ -1494,6 +1587,13 @@ def create_user(
     db.add(user)
     db.commit()
     db.refresh(user)
+    crud.log_action(
+        db,
+        action="create",
+        entity_type="auth_user",
+        entity_id=user.id,
+        description=f"创建用户 {user.username}",
+    )
     return _serialize_user(user)
 
 
@@ -1530,6 +1630,13 @@ def update_user(
     db.add(user)
     db.commit()
     db.refresh(user)
+    crud.log_action(
+        db,
+        action="update",
+        entity_type="auth_user",
+        entity_id=user.id,
+        description=f"更新用户 {user.username}",
+    )
     return _serialize_user(user)
 
 
@@ -1547,8 +1654,16 @@ def delete_user(
         raise HTTPException(status_code=400, detail="管理员账号不能删除")
     if user.id == current_user.id:
         raise HTTPException(status_code=400, detail="不能删除当前登录账号")
+    username = user.username
     db.delete(user)
     db.commit()
+    crud.log_action(
+        db,
+        action="delete",
+        entity_type="auth_user",
+        entity_id=user_id,
+        description=f"删除用户 {username}",
+    )
     return {}
 
 
@@ -1580,6 +1695,17 @@ async def upload_license(
         status = license_manager.import_bytes(payload)
     except LicenseError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    licensee = (status.get("licensee") or "").strip()
+    description = f"修改 License（{licensee}）" if licensee else "修改 License"
+    crud.log_action(
+        db,
+        action="update",
+        entity_type="license",
+        entity_id=None,
+        description=description,
+        user_id=current_user.id,
+        username=current_user.username,
+    )
     return schemas.LicenseStatusOut(**status)
 
 
@@ -1594,6 +1720,17 @@ def upload_license_text(
         status = license_manager.import_bytes(payload.content)
     except LicenseError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    licensee = (status.get("licensee") or "").strip()
+    description = f"修改 License（{licensee}）" if licensee else "修改 License"
+    crud.log_action(
+        db,
+        action="update",
+        entity_type="license",
+        entity_id=None,
+        description=description,
+        user_id=current_user.id,
+        username=current_user.username,
+    )
     return schemas.LicenseStatusOut(**status)
 
 
@@ -1704,11 +1841,20 @@ def test_cluster_connection(
             detail="已有连接测试任务执行中，请稍候再试。",
         )
     _enqueue_connection_test_run(db, cluster, agent)
+    display_id = crud.get_cluster_display_id(cluster)
+    crud.log_action(
+        db,
+        action="create",
+        entity_type="cluster_config",
+        entity_id=cluster.id,
+        description=f"测试连接集群：{display_id}",
+    )
     cluster = crud.update_cluster(
         db,
         cluster,
         connection_status="warning",
         connection_message="已下发连接测试请求，等待 Agent 返回结果。",
+        log_audit=False,
     )
     return _present_cluster(cluster)
 
@@ -1925,6 +2071,7 @@ def register_agent(
                         db,
                         cluster,
                         name=archived_name,
+                        log_audit=False,
                     )
                 placeholder_path = _build_agent_managed_kubeconfig_ref()
                 cluster = crud.create_cluster(
@@ -2276,13 +2423,45 @@ def _apply_connection_test_result(
         message = (run.summary or "").strip()
     if not message:
         message = "Agent 未返回详细信息。"
+    display_id = crud.get_cluster_display_id(cluster)
+    is_success = connection_status == "connected"
+    actor_entry = (
+        db.query(models.AuditLog)
+        .filter(
+            models.AuditLog.entity_type == "cluster_config",
+            models.AuditLog.entity_id == cluster.id,
+            models.AuditLog.action == "create",
+            models.AuditLog.description.like("测试连接集群：%"),
+        )
+        .order_by(models.AuditLog.created_at.desc())
+        .first()
+    )
     crud.update_cluster(
         db,
         cluster,
         connection_status=connection_status,
         connection_message=message[:500],
         last_checked_at=datetime.utcnow(),
+        log_audit=False,
     )
+    crud.log_action(
+        db,
+        action="update",
+        entity_type="cluster_config",
+        entity_id=cluster.id,
+        description=(
+            f"测试连接成功：{display_id}"
+            if is_success
+            else f"测试连接失败：{display_id}"
+        ),
+        user_id=actor_entry.user_id if actor_entry else None,
+        username=actor_entry.username if actor_entry else None,
+        ip_address=actor_entry.ip_address if actor_entry else None,
+        user_agent=actor_entry.user_agent if actor_entry else None,
+        status="success" if is_success else "failed",
+    )
+
+
 @agent_router.post("/runs/{run_id}/results", response_model=schemas.InspectionRunOut)
 def agent_submit_results(
     run_id: int,
@@ -2411,7 +2590,7 @@ def delete_cluster(
 
     crud.archive_cluster(db, cluster)
     if archived_name and cluster.name != archived_name:
-        crud.update_cluster(db, cluster, name=archived_name)
+        crud.update_cluster(db, cluster, name=archived_name, log_audit=False)
 
     if delete_files:
         for report_path in report_paths:
@@ -2423,9 +2602,62 @@ def delete_cluster(
     return {}
 
 
-@app.get("/audit-logs", response_model=List[schemas.AuditLogOut])
-def list_audit_logs(limit: int = 100, db: Session = Depends(get_db)):
-    return crud.list_audit_logs(db, limit=limit)
+@app.get("/audit-logs", response_model=schemas.AuditLogListOut)
+def list_audit_logs(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    action: Optional[str] = Query(None),
+    entity_type: Optional[str] = Query(None),
+    keyword: Optional[str] = Query(None),
+    start: Optional[datetime] = Query(None),
+    end: Optional[datetime] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
+):
+    _require_permission(db, current_user, "audit.read", "审计日志查看")
+    if start and end and end < start:
+        raise HTTPException(status_code=400, detail="结束时间不能早于开始时间。")
+    normalized_action = None if action in (None, "", "all") else action
+    normalized_entity = None if entity_type in (None, "", "all") else entity_type
+    normalized_keyword = keyword.strip() if keyword else None
+    items, total = crud.list_audit_logs(
+        db,
+        page=page,
+        page_size=page_size,
+        action=normalized_action,
+        entity_type=normalized_entity,
+        keyword=normalized_keyword,
+        start=start,
+        end=end,
+    )
+    return schemas.AuditLogListOut(
+        items=[schemas.AuditLogOut.model_validate(item) for item in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@app.post("/audit-logs/record", response_model=schemas.AuditLogOut)
+def record_audit_log(
+    payload: schemas.AuditLogCreateIn,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    action = (payload.action or "").strip()
+    entity_type = (payload.entity_type or "").strip()
+    if not action or not entity_type:
+        raise HTTPException(status_code=400, detail="缺少审计日志参数。")
+    entry = crud.log_action(
+        db,
+        action=action,
+        entity_type=entity_type,
+        entity_id=payload.entity_id,
+        description=payload.description,
+        status=payload.status or "success",
+    )
+    return schemas.AuditLogOut.model_validate(entry)
 
 
 @app.get("/inspection-items", response_model=List[schemas.InspectionItemOut])
@@ -2836,6 +3068,16 @@ def list_inspection_schedules(
 ):
     _require_permission(db, current_user, "schedule.read", "定时巡检查看")
     schedules = crud.list_inspection_schedules(db)
+    needs_commit = False
+    for schedule in schedules:
+        latest_run_at = _resolve_schedule_last_run_at(db, schedule)
+        if not latest_run_at:
+            continue
+        if schedule.last_run_at is None or latest_run_at > schedule.last_run_at:
+            schedule.last_run_at = latest_run_at
+            needs_commit = True
+    if needs_commit:
+        db.commit()
     return [
         schemas.InspectionScheduleOut.model_validate(schedule)
         for schedule in schedules
@@ -2861,18 +3103,25 @@ def create_inspection_schedule(
             status_code=400,
             detail=f"Cron 表达式无效：{exc}",
         )
+    normalized_name = _normalize_schedule_name(payload.name)
+    _ensure_unique_schedule_name(db, normalized_name)
     cluster_ids = _normalize_id_list(payload.cluster_ids)
     item_ids = _normalize_id_list(payload.item_ids)
     _validate_schedule_clusters(db, cluster_ids)
     _validate_schedule_items(db, item_ids)
     sanitized = schemas.InspectionScheduleCreate(
-        name=_normalize_schedule_name(payload.name),
+        name=normalized_name,
         cron=cron,
         cluster_ids=cluster_ids,
         item_ids=item_ids,
         is_enabled=payload.is_enabled,
     )
-    schedule = crud.create_inspection_schedule(db, sanitized)
+    schedule = crud.create_inspection_schedule(
+        db,
+        sanitized,
+        created_by_user_id=current_user.id,
+        created_by_username=current_user.username,
+    )
     return schemas.InspectionScheduleOut.model_validate(schedule)
 
 
@@ -2894,6 +3143,11 @@ def update_inspection_schedule(
     update_payload = payload.model_dump(exclude_unset=True)
     if "name" in update_payload:
         update_payload["name"] = _normalize_schedule_name(update_payload["name"])
+        _ensure_unique_schedule_name(
+            db,
+            update_payload["name"],
+            schedule_id=schedule.id,
+        )
     if "cron" in update_payload:
         try:
             update_payload["cron"] = _normalize_cron_expression(
@@ -3092,6 +3346,14 @@ def get_inspection_run(
     run = crud.get_inspection_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
+    run_label = crud.describe_inspection_run(db, run)
+    crud.log_action(
+        db,
+        action="query",
+        entity_type="inspection_run",
+        entity_id=run.id,
+        description=f"查看巡检记录：{run_label}",
+    )
     return _serialize_run(run)
 
 
@@ -3233,6 +3495,14 @@ def download_report(
             markdown_path = Path.cwd() / markdown_path
         if not markdown_path.exists():
             raise HTTPException(status_code=500, detail="Report file missing on server.")
+        run_label = crud.describe_inspection_run(db, run)
+        crud.log_action(
+            db,
+            action="download",
+            entity_type="inspection_run",
+            entity_id=run.id,
+            description=f"下载巡检报告（{requested_format}）：{run_label}",
+        )
         return FileResponse(
             markdown_path,
             media_type="text/markdown; charset=utf-8",
@@ -3241,6 +3511,14 @@ def download_report(
 
     if not pdf_path.exists():
         raise HTTPException(status_code=404, detail="Report file missing on server.")
+    run_label = crud.describe_inspection_run(db, run)
+    crud.log_action(
+        db,
+        action="download",
+        entity_type="inspection_run",
+        entity_id=run.id,
+        description=f"下载巡检报告（{requested_format}）：{run_label}",
+    )
     return FileResponse(
         pdf_path,
         media_type="application/pdf",

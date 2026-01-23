@@ -401,6 +401,16 @@ def _ensure_inspection_runs_schema() -> None:
         statements.append(
             f"ALTER TABLE inspection_runs ADD COLUMN agent_id {column_type} NULL"
         )
+    if "created_by_user_id" not in existing_columns:
+        column_type = "INTEGER" if dialect == "sqlite" else "INT"
+        statements.append(
+            f"ALTER TABLE inspection_runs ADD COLUMN created_by_user_id {column_type} NULL"
+        )
+    if "created_by_username" not in existing_columns:
+        column_type = "TEXT" if dialect == "sqlite" else "VARCHAR(100)"
+        statements.append(
+            f"ALTER TABLE inspection_runs ADD COLUMN created_by_username {column_type} NULL"
+        )
 
     if dialect != "sqlite":
         statements.append(
@@ -673,6 +683,16 @@ def _ensure_inspection_schedules_schema() -> None:
         statements.append(
             f"ALTER TABLE inspection_schedules ADD COLUMN updated_at {column_type} NOT NULL"
         )
+    if "created_by_user_id" not in existing_columns:
+        column_type = "INTEGER" if dialect == "sqlite" else "INT"
+        statements.append(
+            f"ALTER TABLE inspection_schedules ADD COLUMN created_by_user_id {column_type} NULL"
+        )
+    if "created_by_username" not in existing_columns:
+        column_type = "TEXT" if dialect == "sqlite" else "VARCHAR(100)"
+        statements.append(
+            f"ALTER TABLE inspection_schedules ADD COLUMN created_by_username {column_type} NULL"
+        )
 
     if dialect != "sqlite":
         statements.extend(
@@ -683,6 +703,7 @@ def _ensure_inspection_schedules_schema() -> None:
                 "ALTER TABLE inspection_schedules MODIFY cluster_ids_json TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
                 "ALTER TABLE inspection_schedules MODIFY cluster_names_json TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
                 "ALTER TABLE inspection_schedules MODIFY item_ids_json TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+                "ALTER TABLE inspection_schedules MODIFY created_by_username VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
             ]
         )
 
@@ -768,15 +789,52 @@ def _ensure_audit_log_schema() -> None:
         return
 
     dialect = engine.dialect.name
-    if dialect == "sqlite":
-        return
+    columns = {column["name"] for column in inspector.get_columns("audit_logs")}
+    statements: list[str] = []
 
-    statements = [
-        "ALTER TABLE audit_logs CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
-        "ALTER TABLE audit_logs MODIFY action VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
-        "ALTER TABLE audit_logs MODIFY entity_type VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
-        "ALTER TABLE audit_logs MODIFY description TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
-    ]
+    if "user_id" not in columns:
+        column_type = "INTEGER" if dialect == "sqlite" else "INT"
+        statements.append(
+            f"ALTER TABLE audit_logs ADD COLUMN user_id {column_type} NULL"
+        )
+    if "username" not in columns:
+        column_type = "TEXT" if dialect == "sqlite" else "VARCHAR(100)"
+        statements.append(
+            f"ALTER TABLE audit_logs ADD COLUMN username {column_type} NULL"
+        )
+    if "ip_address" not in columns:
+        column_type = "TEXT" if dialect == "sqlite" else "VARCHAR(64)"
+        statements.append(
+            f"ALTER TABLE audit_logs ADD COLUMN ip_address {column_type} NULL"
+        )
+    if "user_agent" not in columns:
+        column_type = "TEXT" if dialect == "sqlite" else "VARCHAR(255)"
+        statements.append(
+            f"ALTER TABLE audit_logs ADD COLUMN user_agent {column_type} NULL"
+        )
+    if "status" not in columns:
+        if dialect == "sqlite":
+            statements.append(
+                "ALTER TABLE audit_logs ADD COLUMN status TEXT NOT NULL DEFAULT 'success'"
+            )
+        else:
+            statements.append(
+                "ALTER TABLE audit_logs ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'success'"
+            )
+
+    if dialect != "sqlite":
+        statements.extend(
+            [
+                "ALTER TABLE audit_logs CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+                "ALTER TABLE audit_logs MODIFY action VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+                "ALTER TABLE audit_logs MODIFY entity_type VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+                "ALTER TABLE audit_logs MODIFY description TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
+                "ALTER TABLE audit_logs MODIFY username VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
+                "ALTER TABLE audit_logs MODIFY ip_address VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
+                "ALTER TABLE audit_logs MODIFY user_agent VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
+                "ALTER TABLE audit_logs MODIFY status VARCHAR(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'success'",
+            ]
+        )
 
     with engine.begin() as connection:
         for statement in statements:

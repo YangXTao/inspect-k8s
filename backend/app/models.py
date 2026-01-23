@@ -104,6 +104,8 @@ class InspectionRun(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     operator = Column(String(100), nullable=True)
+    created_by_user_id = Column(Integer, nullable=True)
+    created_by_username = Column(String(100), nullable=True)
     cluster_id = Column(
         Integer,
         ForeignKey("cluster_configs.id", ondelete="CASCADE"),
@@ -144,6 +146,8 @@ class InspectionSchedule(Base):
     item_ids_json = Column(Text, nullable=False)
     is_enabled = Column(Boolean, nullable=False, default=True)
     last_run_at = Column(DateTime, nullable=True)
+    created_by_user_id = Column(Integer, nullable=True)
+    created_by_username = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
@@ -251,10 +255,15 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=True)
+    username = Column(String(100), nullable=True)
     action = Column(String(50), nullable=False)
     entity_type = Column(String(50), nullable=False)
     entity_id = Column(Integer, nullable=True)
     description = Column(Text, nullable=True)
+    ip_address = Column(String(64), nullable=True)
+    user_agent = Column(String(255), nullable=True)
+    status = Column(String(20), nullable=False, default="success")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 

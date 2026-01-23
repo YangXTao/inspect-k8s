@@ -3,12 +3,118 @@
 from datetime import datetime
 from typing import Iterable, List, Optional, Any
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 
 from . import models, schemas
+from .audit import get_audit_actor
 
 UNSET = object()
+CONNECTION_TEST_OPERATOR = "__system_connection_test__"
+SCHEDULED_AUDIT_SUFFIX = "（定时巡检）"
+
+
+def _hash_string(value: str) -> int:
+    hash_value = 0
+    for char in value:
+        hash_value = (hash_value * 33 + ord(char)) & 0xFFFFFFFF
+    if hash_value & 0x80000000:
+        hash_value = -((~hash_value + 1) & 0xFFFFFFFF)
+    return abs(hash_value)
+
+
+def _to_base36(value: int) -> str:
+    if value == 0:
+        return "0"
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    parts: list[str] = []
+    while value > 0:
+        value, remainder = divmod(value, 36)
+        parts.append(digits[remainder])
+    return "".join(reversed(parts)).upper()
+
+
+def _build_cluster_display_id(cluster_id: int, cluster_name: Optional[str]) -> str:
+    token = f"{cluster_id}:{cluster_name or ''}"
+    hashed = _hash_string(token)
+    base36 = _to_base36(hashed)
+    segment = base36[-4:].rjust(4, "0")
+    return f"C-{segment}"
+
+
+def _normalise_cluster_name(name: Optional[str]) -> str:
+    if not name:
+        return "cluster"
+    import re as _re
+    slug = _re.sub(r"\s+", "-", name.strip().lower())
+    return slug or "cluster"
+
+
+def _build_run_display_id(
+    db: Session, run: models.InspectionRun, cluster_name: Optional[str]
+) -> str:
+    slug = _normalise_cluster_name(cluster_name)
+    runs = (
+        db.query(models.InspectionRun)
+        .filter(models.InspectionRun.cluster_id == run.cluster_id)
+        .order_by(models.InspectionRun.created_at.asc(), models.InspectionRun.id.asc())
+        .all()
+    )
+    if (run.operator or "") != CONNECTION_TEST_OPERATOR:
+        runs = [
+            candidate
+            for candidate in runs
+            if (candidate.operator or "") != CONNECTION_TEST_OPERATOR
+        ]
+    for index, candidate in enumerate(runs, start=1):
+        if candidate.id == run.id:
+            return f"{slug}-{index:02d}"
+    return f"{slug}-{run.id:02d}"
+
+
+def describe_inspection_run(
+    db: Session,
+    run: models.InspectionRun,
+    cluster: Optional[models.ClusterConfig] = None,
+) -> str:
+    cluster_obj = cluster or getattr(run, "cluster", None)
+    if cluster_obj is None:
+        cluster_obj = get_cluster(db, run.cluster_id)
+    cluster_id = cluster_obj.id if cluster_obj else run.cluster_id
+    cluster_name = (
+        getattr(cluster_obj, "name", None)
+        or getattr(run, "cluster_name", None)
+        or "cluster"
+    )
+    cluster_display = _build_cluster_display_id(cluster_id, cluster_name)
+    run_display = _build_run_display_id(db, run, cluster_name)
+    return f"{cluster_display}集群的{run_display}"
+
+
+def get_cluster_display_id(cluster: models.ClusterConfig) -> str:
+    return _build_cluster_display_id(cluster.id, cluster.name)
+
+
+def _should_log_run(run: models.InspectionRun) -> bool:
+    return (run.operator or "") != CONNECTION_TEST_OPERATOR
+
+
+def _resolve_run_audit_override(
+    run: models.InspectionRun,
+) -> dict[str, Optional[object]]:
+    if get_audit_actor() is not None:
+        return {}
+    username = (getattr(run, "created_by_username", None) or "").strip()
+    if not username:
+        return {}
+    return {
+        "user_id": getattr(run, "created_by_user_id", None),
+        "username": f"{username}{SCHEDULED_AUDIT_SUFFIX}",
+    }
+
+
+def get_run_audit_override(run: models.InspectionRun) -> dict[str, Optional[object]]:
+    return _resolve_run_audit_override(run)
 
 
 def list_clusters(db: Session) -> List[models.ClusterConfig]:
@@ -94,6 +200,7 @@ def update_cluster(
     default_agent_id: Any = UNSET,
     is_archived: Any = UNSET,
     description: Optional[str] = None,
+    log_audit: bool = True,
 ) -> models.ClusterConfig:
     if name is not None:
         cluster.name = name
@@ -123,13 +230,14 @@ def update_cluster(
     db.add(cluster)
     db.commit()
     db.refresh(cluster)
-    log_action(
-        db,
-        action="update",
-        entity_type="cluster_config",
-        entity_id=cluster.id,
-        description=f"Updated cluster '{cluster.name}'.",
-    )
+    if log_audit:
+        log_action(
+            db,
+            action="update",
+            entity_type="cluster_config",
+            entity_id=cluster.id,
+            description=f"Updated cluster '{cluster.name}'.",
+        )
     return cluster
 
 
@@ -227,12 +335,32 @@ def log_action(
     entity_type: str,
     entity_id: Optional[int],
     description: Optional[str] = None,
+    user_id: Optional[int] = None,
+    username: Optional[str] = None,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    status: str = "success",
 ) -> models.AuditLog:
+    actor = get_audit_actor()
+    if actor:
+        if user_id is None:
+            user_id = actor.user_id
+        if username is None:
+            username = actor.username
+        if ip_address is None:
+            ip_address = actor.ip_address
+        if user_agent is None:
+            user_agent = actor.user_agent
     entry = models.AuditLog(
+        user_id=user_id,
+        username=username,
         action=action,
         entity_type=entity_type,
         entity_id=entity_id,
         description=description,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        status=status or "success",
     )
     db.add(entry)
     db.commit()
@@ -356,9 +484,14 @@ def create_inspection_run(
     executor: str = "server",
     agent_status: Optional[str] = None,
     agent_id: Optional[int] = None,
+    log_audit: bool = True,
+    created_by_user_id: Optional[int] = None,
+    created_by_username: Optional[str] = None,
 ) -> models.InspectionRun:
     run = models.InspectionRun(
         operator=operator,
+        created_by_user_id=created_by_user_id,
+        created_by_username=created_by_username,
         cluster_id=cluster.id,
         status=status,
         total_items=max(0, total_items),
@@ -372,13 +505,17 @@ def create_inspection_run(
     db.add(run)
     db.commit()
     db.refresh(run)
-    log_action(
-        db,
-        action="create",
-        entity_type="inspection_run",
-        entity_id=run.id,
-        description=f"Created inspection run (status={status})",
-    )
+    if log_audit and (operator or "") != CONNECTION_TEST_OPERATOR:
+        run_label = describe_inspection_run(db, run, cluster)
+        audit_override = _resolve_run_audit_override(run)
+        log_action(
+            db,
+            action="create",
+            entity_type="inspection_run",
+            entity_id=run.id,
+            description=f"创建巡检记录：{run_label}",
+            **audit_override,
+        )
     return run
 
 
@@ -405,13 +542,17 @@ def finalize_inspection_run(
     db.add(run)
     db.commit()
     db.refresh(run)
-    log_action(
-        db,
-        action="update",
-        entity_type="inspection_run",
-        entity_id=run.id,
-        description=f"Run finalized with status={status}",
-    )
+    if _should_log_run(run):
+        run_label = describe_inspection_run(db, run)
+        audit_override = _resolve_run_audit_override(run)
+        log_action(
+            db,
+            action="update",
+            entity_type="inspection_run",
+            entity_id=run.id,
+            description=f"更新巡检记录（状态 {status}）：{run_label}",
+            **audit_override,
+        )
     return run
 
 
@@ -441,13 +582,6 @@ def add_inspection_result(
     db.add(result)
     db.commit()
     db.refresh(result)
-    log_action(
-        db,
-        action="create",
-        entity_type="inspection_result",
-        entity_id=result.id,
-        description=f"Recorded result for item '{item_name}' with status={status}",
-    )
     return result
 
 
@@ -752,13 +886,17 @@ def pause_inspection_run(
     db.add(run)
     db.commit()
     db.refresh(run)
-    log_action(
-        db,
-        action="update",
-        entity_type="inspection_run",
-        entity_id=run.id,
-        description="Paused inspection run.",
-    )
+    if _should_log_run(run):
+        run_label = describe_inspection_run(db, run)
+        audit_override = _resolve_run_audit_override(run)
+        log_action(
+            db,
+            action="update",
+            entity_type="inspection_run",
+            entity_id=run.id,
+            description=f"暂停巡检记录：{run_label}",
+            **audit_override,
+        )
     return run
 
 
@@ -773,13 +911,17 @@ def resume_inspection_run(
     db.add(run)
     db.commit()
     db.refresh(run)
-    log_action(
-        db,
-        action="update",
-        entity_type="inspection_run",
-        entity_id=run.id,
-        description="Resumed inspection run.",
-    )
+    if _should_log_run(run):
+        run_label = describe_inspection_run(db, run)
+        audit_override = _resolve_run_audit_override(run)
+        log_action(
+            db,
+            action="update",
+            entity_type="inspection_run",
+            entity_id=run.id,
+            description=f"恢复巡检记录：{run_label}",
+            **audit_override,
+        )
     return run
 
 
@@ -800,13 +942,17 @@ def cancel_inspection_run(
     db.add(run)
     db.commit()
     db.refresh(run)
-    log_action(
-        db,
-        action="update",
-        entity_type="inspection_run",
-        entity_id=run.id,
-        description="Cancelled inspection run.",
-    )
+    if _should_log_run(run):
+        run_label = describe_inspection_run(db, run)
+        audit_override = _resolve_run_audit_override(run)
+        log_action(
+            db,
+            action="update",
+            entity_type="inspection_run",
+            entity_id=run.id,
+            description=f"取消巡检记录：{run_label}",
+            **audit_override,
+        )
     return run
 
 
@@ -839,15 +985,19 @@ def get_inspection_run(db: Session, run_id: int) -> Optional[models.InspectionRu
 
 def delete_inspection_run(db: Session, run: models.InspectionRun) -> None:
     run_id = run.id
+    run_label = describe_inspection_run(db, run)
     db.delete(run)
     db.commit()
-    log_action(
-        db,
-        action="delete",
-        entity_type="inspection_run",
-        entity_id=run_id,
-        description=f"Deleted inspection run {run_id}.",
-    )
+    if _should_log_run(run):
+        audit_override = _resolve_run_audit_override(run)
+        log_action(
+            db,
+            action="delete",
+            entity_type="inspection_run",
+            entity_id=run_id,
+            description=f"删除巡检记录：{run_label}",
+            **audit_override,
+        )
 
 
 def list_inspection_schedules(db: Session) -> List[models.InspectionSchedule]:
@@ -869,7 +1019,11 @@ def get_inspection_schedule(
 
 
 def create_inspection_schedule(
-    db: Session, schedule_in: schemas.InspectionScheduleCreate
+    db: Session,
+    schedule_in: schemas.InspectionScheduleCreate,
+    *,
+    created_by_user_id: Optional[int] = None,
+    created_by_username: Optional[str] = None,
 ) -> models.InspectionSchedule:
     payload = schedule_in.model_dump()
     cluster_ids = payload.pop("cluster_ids", [])
@@ -881,6 +1035,8 @@ def create_inspection_schedule(
         .all()
     }
     schedule = models.InspectionSchedule(**payload)
+    schedule.created_by_user_id = created_by_user_id
+    schedule.created_by_username = created_by_username
     schedule.set_cluster_ids(cluster_ids)
     schedule.set_cluster_name_map(cluster_name_map)
     schedule.set_item_ids(item_ids)
@@ -951,11 +1107,77 @@ def delete_inspection_schedule(
     )
 
 
-def list_audit_logs(db: Session, limit: int = 100) -> List[models.AuditLog]:
-    return (
-        db.query(models.AuditLog)
-        .order_by(models.AuditLog.created_at.desc())
-        .limit(limit)
+def list_audit_logs(
+    db: Session,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+    action: Optional[str] = None,
+    entity_type: Optional[str] = None,
+    keyword: Optional[str] = None,
+    start: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+) -> tuple[List[models.AuditLog], int]:
+    query = db.query(models.AuditLog)
+
+    known_entity_types = {
+        "auth_user",
+        "auth_role",
+        "cluster_config",
+        "inspection_agent",
+        "inspection_schedule",
+        "inspection_run",
+        "inspection_item",
+        "inspection_result",
+        "prometheus_version",
+    }
+
+    if entity_type:
+        if entity_type == "cluster":
+            query = query.filter(
+                models.AuditLog.entity_type.in_(
+                    ["cluster_config", "inspection_agent"]
+                )
+            )
+        elif entity_type == "other":
+            query = query.filter(
+                models.AuditLog.entity_type.notin_(sorted(known_entity_types))
+            )
+        else:
+            query = query.filter(models.AuditLog.entity_type == entity_type)
+
+    if entity_type == "inspection_run":
+        allowed_actions = {"create", "update", "delete", "download", "query"}
+        if action:
+            if action not in allowed_actions:
+                return [], 0
+            query = query.filter(models.AuditLog.action == action)
+        else:
+            query = query.filter(models.AuditLog.action.in_(allowed_actions))
+    elif action:
+        query = query.filter(models.AuditLog.action == action)
+    if start:
+        query = query.filter(models.AuditLog.created_at >= start)
+    if end:
+        query = query.filter(models.AuditLog.created_at <= end)
+    if keyword:
+        normalized = f"%{keyword.strip().lower()}%"
+        query = query.filter(
+            or_(
+                func.lower(models.AuditLog.username).like(normalized),
+                func.lower(models.AuditLog.action).like(normalized),
+                func.lower(models.AuditLog.entity_type).like(normalized),
+                func.lower(models.AuditLog.description).like(normalized),
+            )
+        )
+
+    total = query.count()
+    offset = max(page - 1, 0) * max(page_size, 1)
+    items = (
+        query.order_by(models.AuditLog.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
         .all()
     )
+    return items, total
 
