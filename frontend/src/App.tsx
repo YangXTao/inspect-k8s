@@ -2962,7 +2962,15 @@ const AuditView = () => {
         </div>
       </div>
 
-      {error && <div className="feedback error">{error}</div>}
+      {error && (
+        <div
+          className={`feedback ${
+            isLicenseRelatedMessage(error) ? "warning" : "error"
+          }`}
+        >
+          {error}
+        </div>
+      )}
 
       <div className="history-toolbar">
         <div className="history-selection">
