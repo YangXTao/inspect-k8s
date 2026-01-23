@@ -1248,10 +1248,10 @@ def login(
         if not user or not verify_login_proof(
             username, payload.nonce, payload.proof, user.password_hash
         ):
-            raise HTTPException(status_code=401, detail="用户名或密码错误")
+            return PlainTextResponse("用户名或密码错误", status_code=401)
     elif payload.password:
         if not user or not verify_password(payload.password, user.password_hash):
-            raise HTTPException(status_code=401, detail="用户名或密码错误")
+            return PlainTextResponse("用户名或密码错误", status_code=401)
     else:
         raise HTTPException(status_code=400, detail="缺少登录凭据")
     if not user.is_active:

@@ -1,10 +1,6 @@
 ARG PYTHON_BASE_IMAGE=192.168.10.51/base/zs-inspect-base-image:v0.2
 FROM ${PYTHON_BASE_IMAGE} AS runtime
 
-# 声明构建时可选代理参数
-ARG HTTP_PROXY=""
-ARG HTTPS_PROXY=""
-ARG NO_PROXY="localhost,127.0.0.1"
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \

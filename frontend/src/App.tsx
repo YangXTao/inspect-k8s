@@ -5173,7 +5173,7 @@ const InspectionSettingsPanel = ({
                       onClick={handleDeleteSelected}
                       disabled={selectedFilteredCount === 0}
                     >
-                      批量删除
+                      删除
                     </button>
                   </>
                 )}
@@ -12289,16 +12289,22 @@ const hasManualKubeconfig = useMemo(
       if (targetIds.length === 0) {
         return;
       }
+      const targetCount = targetIds.length;
       setConfirmState({
-        title: "批量删除巡检项",
-        message: `确认删除当前筛选结果中选中的 ${targetIds.length} 条巡检项？该操作不可恢复。`,
+        title: "删除巡检项",
+        message:
+          targetCount === 1
+            ? "确认删除该巡检项？该操作不可恢复。"
+            : `确认删除选中的 ${targetCount} 条巡检项？该操作不可恢复。`,
         confirmLabel: "删除",
         variant: "danger",
         scope: "settings",
         onConfirm: () =>
           deleteInspectionItemsBatch(
             targetIds,
-            `已删除 ${targetIds.length} 个巡检项`
+            targetCount === 1
+              ? "巡检项已删除"
+              : `已删除 ${targetCount} 个巡检项`
           ),
       });
     },

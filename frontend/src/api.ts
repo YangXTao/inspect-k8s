@@ -73,7 +73,24 @@ async function request<T>(
   }
 
   if (!response.ok) {
-    const message = await response.text();
+    const raw = await response.text();
+    let message = raw;
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as
+          | { detail?: string; message?: string }
+          | string;
+        if (typeof parsed === "string") {
+          message = parsed;
+        } else if (parsed.detail) {
+          message = parsed.detail;
+        } else if (parsed.message) {
+          message = parsed.message;
+        }
+      } catch {
+        // keep raw text
+      }
+    }
     throw new Error(message || "Request failed");
   }
 
