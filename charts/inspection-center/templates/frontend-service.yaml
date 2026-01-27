@@ -7,6 +7,8 @@ metadata:
     app.kubernetes.io/name: {{ include "inspection-center.name" . }}
     app.kubernetes.io/component: frontend
     app.kubernetes.io/instance: {{ .Release.Name }}
+  annotations:
+    "helm.sh/resource-policy": keep
 spec:
   type: {{ .Values.frontend.service.type | default "NodePort" }}
   selector:
