@@ -261,8 +261,8 @@ def _attach_run_report(db: Session, run: models.InspectionRun) -> models.Inspect
     audit_override = crud.get_run_audit_override(run)
     crud.log_action(
         db,
-        action="update",
-        entity_type="inspection_run",
+        action="create",
+        entity_type="report",
         entity_id=run.id,
         description=f"生成巡检报告：{run_label}",
         **audit_override,
@@ -3360,6 +3360,8 @@ def trigger_inspection(
         executor=executor,
         agent_status=agent_status,
         agent_id=agent_id,
+        created_by_user_id=current_user.id,
+        created_by_username=current_user.username,
     )
 
     run = crud.get_inspection_run(db, run.id)

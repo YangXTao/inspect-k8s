@@ -998,11 +998,20 @@ const findResultByKeywords = (
   if (!results.length) {
     return null;
   }
+  const normalize = (value: string) =>
+    value.toLowerCase().replace(/[\s._-]+/g, "");
   const lowered = keywords.map((keyword) => keyword.toLowerCase());
+  const normalizedKeywords = keywords.map((keyword) => normalize(keyword));
   return (
     results.find((result) => {
       const name = (result.item_name ?? "").toLowerCase();
-      return lowered.some((keyword) => name.includes(keyword));
+      const normalizedName = normalize(name);
+      return lowered.some((keyword, index) => {
+        if (name.includes(keyword)) {
+          return true;
+        }
+        return normalizedName.includes(normalizedKeywords[index]);
+      });
     }) ?? null
   );
 };
@@ -1227,6 +1236,27 @@ const DashboardOverviewView = ({
           ? runDetails[latestRun.id]
           : null;
       const indicators = OVERVIEW_INDICATORS.map((indicator) => {
+        if (indicator.key === "connection") {
+          const connectionStatus = cluster.connection_status;
+          if (connectionStatus === "connected") {
+            return {
+              key: indicator.key,
+              label: indicator.label,
+              status: null,
+              statusLabel: "正常",
+              statusClass: "success",
+              statusIcon: "✓",
+            };
+          }
+          return {
+            key: indicator.key,
+            label: indicator.label,
+            status: null,
+            statusLabel: "异常",
+            statusClass: "danger",
+            statusIcon: "✕",
+          };
+        }
         const result = detail
           ? findResultByKeywords(detail.results, [...indicator.keywords])
           : null;
