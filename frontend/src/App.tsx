@@ -7451,6 +7451,7 @@ interface UserSettingsPanelProps {
   submitting: boolean;
   notice: string | null;
   error: string | null;
+  license: LicenseCapabilities;
   canCreate: boolean;
   canUpdate: boolean;
   canDelete: boolean;
@@ -7480,6 +7481,7 @@ const UserSettingsPanel = ({
   submitting,
   notice,
   error,
+  license,
   canCreate,
   canUpdate,
   canDelete,
@@ -7495,6 +7497,9 @@ const UserSettingsPanel = ({
   const [formPassword, setFormPassword] = useState("");
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [localError, setLocalError] = useState<string | null>(null);
+  const readOnly = !license.valid;
+  const readOnlyMessage =
+    license.reason ?? "当前 License 未生效或未安装。";
 
   const sortedUsers = useMemo(
     () => users.slice().sort((a, b) => a.id - b.id),
@@ -7557,6 +7562,10 @@ const UserSettingsPanel = ({
     const trimmedUsername = formUsername.trim();
     const trimmedPassword = formPassword.trim();
     const editingAdmin = isAdminUser(editingUser);
+    if (readOnly) {
+      setLocalError(readOnlyMessage);
+      return;
+    }
     if (!trimmedUsername) {
       setLocalError("用户名不能为空");
       return;
@@ -7630,7 +7639,7 @@ const UserSettingsPanel = ({
               type="button"
               className="primary"
               onClick={openCreate}
-              disabled={loading || submitting}
+              disabled={loading || submitting || readOnly}
             >
               创建用户
             </button>
@@ -7639,6 +7648,9 @@ const UserSettingsPanel = ({
       </div>
       {notice && <div className="feedback success">{notice}</div>}
       {error && <div className="feedback error">{error}</div>}
+      {readOnly && (
+        <div className="feedback warning">{readOnlyMessage}</div>
+      )}
       <div className="user-role-summary">
         <div className="user-role-summary-title">系统角色</div>
         <div className="user-role-summary-list">
@@ -7697,7 +7709,7 @@ const UserSettingsPanel = ({
                           type="button"
                           className="link-button"
                           onClick={() => openEdit(user)}
-                          disabled={submitting}
+                          disabled={submitting || readOnly}
                         >
                           编辑
                         </button>
@@ -7707,7 +7719,7 @@ const UserSettingsPanel = ({
                           type="button"
                           className="link-button danger"
                           onClick={() => onDelete(user)}
-                          disabled={submitting || isAdminUser(user)}
+                          disabled={submitting || readOnly || isAdminUser(user)}
                         >
                           删除
                         </button>
@@ -7739,7 +7751,7 @@ const UserSettingsPanel = ({
                   value={formUsername}
                   onChange={(event) => setFormUsername(event.target.value)}
                   placeholder="例如：admin2"
-                  disabled={submitting || Boolean(editingUser)}
+                  disabled={submitting || readOnly || Boolean(editingUser)}
                 />
               </label>
               <label>
@@ -7749,7 +7761,7 @@ const UserSettingsPanel = ({
                   value={formDisplayName}
                   onChange={(event) => setFormDisplayName(event.target.value)}
                   placeholder="例如：运维管理员"
-                  disabled={submitting}
+                  disabled={submitting || readOnly}
                 />
               </label>
               <label>
@@ -7759,7 +7771,7 @@ const UserSettingsPanel = ({
                   value={formPassword}
                   onChange={(event) => setFormPassword(event.target.value)}
                   placeholder={editingUser ? "留空则不修改" : "至少 6 位"}
-                  disabled={submitting}
+                  disabled={submitting || readOnly}
                 />
               </label>
               <div className="user-role-block">
@@ -7787,6 +7799,7 @@ const UserSettingsPanel = ({
                         onChange={() => toggleRole(role.name)}
                         disabled={
                           submitting ||
+                          readOnly ||
                           (editingUser !== null && isAdminUser(editingUser))
                         }
                       />
@@ -7817,7 +7830,7 @@ const UserSettingsPanel = ({
                 <button
                   type="submit"
                   className="primary"
-                  disabled={submitting}
+                  disabled={submitting || readOnly}
                 >
                   {submitting ? "创建中..." : "创建"}
                 </button>
@@ -10819,6 +10832,13 @@ const loginRedirectState = useMemo(
         setUsersError("无权限创建用户");
         return;
       }
+      if (!licenseCapabilities.valid) {
+        setUsersError(
+          licenseCapabilities.reason ?? "当前 License 未生效或未安装。"
+        );
+        setUsersNotice(null);
+        return;
+      }
       setUsersSubmitting(true);
       setUsersError(null);
       setUsersNotice(null);
@@ -10834,7 +10854,7 @@ const loginRedirectState = useMemo(
         setUsersSubmitting(false);
       }
     },
-    [canCreateUsers, refreshUsers]
+    [canCreateUsers, refreshUsers, licenseCapabilities]
   );
 
   const handleUpdateUser = useCallback(
@@ -10849,6 +10869,13 @@ const loginRedirectState = useMemo(
     ) => {
       if (!canUpdateUsers) {
         setUsersError("无权限修改用户");
+        return;
+      }
+      if (!licenseCapabilities.valid) {
+        setUsersError(
+          licenseCapabilities.reason ?? "当前 License 未生效或未安装。"
+        );
+        setUsersNotice(null);
         return;
       }
       setUsersSubmitting(true);
@@ -10866,13 +10893,20 @@ const loginRedirectState = useMemo(
         setUsersSubmitting(false);
       }
     },
-    [canUpdateUsers, refreshUsers]
+    [canUpdateUsers, refreshUsers, licenseCapabilities]
   );
 
   const handleDeleteUser = useCallback(
     (user: AuthUser) => {
       if (!canDeleteUsers) {
         setUsersError("无权限删除用户");
+        return;
+      }
+      if (!licenseCapabilities.valid) {
+        setUsersError(
+          licenseCapabilities.reason ?? "当前 License 未生效或未安装。"
+        );
+        setUsersNotice(null);
         return;
       }
       setConfirmState({
@@ -10900,7 +10934,7 @@ const loginRedirectState = useMemo(
         },
       });
     },
-    [canDeleteUsers, refreshUsers]
+    [canDeleteUsers, refreshUsers, licenseCapabilities]
   );
 
   const pendingClusterIds = useMemo(
@@ -12452,16 +12486,15 @@ const hasManualKubeconfig = useMemo(
       isEnabled: boolean;
     }) => {
       if (payload.id ? !canUpdateSchedule : !canCreateSchedule) {
-        setScheduleError("当前账号无定时巡检管理权限。");
+        const message = "当前账号无定时巡检管理权限。";
         setScheduleNotice(null);
-        return;
+        throw new Error(message);
       }
       if (!licenseCapabilities.canRunInspections) {
-        setScheduleError(
-          licenseCapabilities.reason ?? "当前 License 不支持定时巡检。"
-        );
+        const message =
+          licenseCapabilities.reason ?? "当前 License 不支持定时巡检。";
         setScheduleNotice(null);
-        return;
+        throw new Error(message);
       }
       const trimmedName = payload.name?.trim() ?? "";
       setScheduleSubmitting(true);
@@ -12494,7 +12527,6 @@ const hasManualKubeconfig = useMemo(
         const message =
           err instanceof Error ? err.message : "保存定时巡检失败";
         logWithTimestamp("error", "保存定时巡检失败: %s", message);
-        setScheduleError(message);
         throw err instanceof Error ? err : new Error(message);
       } finally {
         setScheduleSubmitting(false);
@@ -12723,6 +12755,7 @@ const hasManualKubeconfig = useMemo(
               submitting={usersSubmitting}
               notice={usersNotice}
               error={usersError}
+              license={licenseCapabilities}
               canCreate={canCreateUsers}
               canUpdate={canUpdateUsers}
               canDelete={canDeleteUsers}
