@@ -989,26 +989,6 @@ const extractPercentageValue = (value?: string | null) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const extractPodTotal = (value?: string | null) => {
-  if (!value) {
-    return null;
-  }
-  const normalized = value.toLowerCase();
-  if (
-    !normalized.includes("pod") &&
-    !normalized.includes("pods") &&
-    !value.includes("总数")
-  ) {
-    return null;
-  }
-  const match = /(\d+)/.exec(value.replace(/,/g, ""));
-  if (!match) {
-    return null;
-  }
-  const parsed = Number(match[1]);
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
 const findResultByKeywords = (
   results: InspectionResult[],
   keywords: string[]
@@ -1029,7 +1009,7 @@ const OVERVIEW_INDICATORS = [
   {
     key: "connection",
     label: "连接状态",
-    keywords: ["connection probe", "连接探测", "连接状态"],
+    keywords: ["connection probe", "连接连通性", "连接探测", "连接状态"],
   },
   {
     key: "nodes",
@@ -1037,9 +1017,29 @@ const OVERVIEW_INDICATORS = [
     keywords: ["node health", "nodes status", "节点状态", "节点健康"],
   },
   {
-    key: "pods",
-    label: "Pod 状态",
-    keywords: ["pod status", "pod 状态", "pod"],
+    key: "etcd",
+    label: "etcd 状态",
+    keywords: ["etcd", "etcd status", "etcd health", "etcd 健康"],
+  },
+  {
+    key: "apiserver",
+    label: "apiserver 状态",
+    keywords: [
+      "api server availability",
+      "apiserver",
+      "api server",
+      "apiserver 状态",
+    ],
+  },
+  {
+    key: "controller",
+    label: "controller-manager 状态",
+    keywords: [
+      "controller manager",
+      "controller-manager",
+      "controller manager status",
+      "controller-manager 状态",
+    ],
   },
   {
     key: "cpu",
@@ -1170,66 +1170,45 @@ const DashboardOverviewView = ({
   }, [clusters]);
 
   const podSummary = useMemo(() => {
-    let total = 0;
-    let matched = false;
-    latestRuns.forEach((run) => {
-      const detail = runDetails[run.id];
-      if (!detail) {
-        return;
-      }
-      const podResult = findResultByKeywords(detail.results, [
-        "pod 总数",
-        "pod count",
-        "pods count",
-        "total pods",
-      ]);
-      const count = extractPodTotal(podResult?.detail);
-      if (count === null) {
-        return;
-      }
-      matched = true;
-      total += count;
-    });
-    if (!matched) {
+    const counts = clusters
+      .map((cluster) => cluster.pod_count)
+      .filter((value): value is number => typeof value === "number");
+    if (counts.length === 0) {
       return null;
     }
-    return total;
-  }, [latestRuns, runDetails]);
+    return counts.reduce((total, value) => total + value, 0);
+  }, [clusters]);
 
   const buildUsageSeries = useCallback(
     (keywords: string[]) => {
-      const entries: { clusterId: number; name: string; value: number }[] = [];
-      latestRuns.forEach((run) => {
-        const detail = runDetails[run.id];
+      return clusters.map((cluster) => {
+        const latestRun = latestRunByCluster.get(cluster.id) ?? null;
+        const detail =
+          latestRun && latestRun.status === "finished"
+            ? runDetails[latestRun.id]
+            : null;
         if (!detail) {
-          return;
+          return {
+            clusterId: cluster.id,
+            name: cluster.name,
+            value: null,
+          };
         }
         const result = findResultByKeywords(detail.results, keywords);
-        if (!result) {
-          return;
-        }
         const value = extractPercentageValue(
-          `${result.detail ?? ""} ${result.suggestion ?? ""}`
+          `${result?.detail ?? ""} ${result?.suggestion ?? ""}`
         );
-        if (value === null) {
-          return;
-        }
-        const clusterName =
-          clusterMap.get(run.cluster_id)?.name ??
-          run.cluster_name ??
-          `集群${run.cluster_id}`;
-        entries.push({
-          clusterId: run.cluster_id,
-          name: clusterName,
+        return {
+          clusterId: cluster.id,
+          name: cluster.name,
           value,
-        });
+        };
       });
-      return entries.sort((a, b) => b.value - a.value).slice(0, 5);
     },
-    [clusterMap, latestRuns, runDetails]
+    [clusters, latestRunByCluster, runDetails]
   );
 
-  const cpuUsageTop = useMemo(
+  const cpuUsageAll = useMemo(
     () =>
       buildUsageSeries([
         "cluster cpu usage",
@@ -1239,7 +1218,7 @@ const DashboardOverviewView = ({
     [buildUsageSeries]
   );
 
-  const memoryUsageTop = useMemo(
+  const memoryUsageAll = useMemo(
     () =>
       buildUsageSeries([
         "cluster memory usage",
@@ -1258,13 +1237,20 @@ const DashboardOverviewView = ({
           ? findResultByKeywords(detail.results, [...indicator.keywords])
           : null;
         const status = result?.status ?? null;
-        const statusMeta = status ? getInspectionResultStatusMeta(status) : null;
         return {
           key: indicator.key,
           label: indicator.label,
           status,
-          statusLabel: statusMeta?.label ?? "未检测",
-          statusClass: statusMeta?.className ?? "muted",
+          statusLabel: status
+            ? status === "passed"
+              ? "正常"
+              : "异常"
+            : "-",
+          statusClass: status
+            ? status === "passed"
+              ? "success"
+              : "danger"
+            : "muted",
           detail: result?.detail ?? "",
         };
       });
@@ -1306,7 +1292,7 @@ const DashboardOverviewView = ({
           </div>
         </div>
         <div className="overview-metric-card">
-          <div className="overview-metric-title">集群总 POD 数量</div>
+          <div className="overview-metric-title">集群总 POD 数</div>
           <div className="overview-metric-value">
             {podSummary ?? "-"}
           </div>
@@ -1322,22 +1308,26 @@ const DashboardOverviewView = ({
 
       <section className="overview-charts">
         <div className="overview-chart-card">
-          <div className="overview-chart-title">TOP5 集群 CPU 使用率</div>
-          {cpuUsageTop.length === 0 ? (
+          <div className="overview-chart-title">集群 CPU 使用率</div>
+          {cpuUsageAll.length === 0 ? (
             <div className="placeholder">暂无 CPU 使用率数据</div>
           ) : (
             <ul className="overview-bar-list">
-              {cpuUsageTop.map((entry) => (
+              {cpuUsageAll.map((entry) => (
                 <li key={entry.clusterId} className="overview-bar-item">
                   <span className="overview-bar-label">{entry.name}</span>
                   <div className="overview-bar-track">
                     <div
-                      className="overview-bar-fill"
-                      style={{ width: `${Math.min(entry.value, 100)}%` }}
+                      className={`overview-bar-fill${
+                        entry.value === null ? " empty" : ""
+                      }`}
+                      style={{
+                        width: entry.value === null ? "0%" : `${Math.min(entry.value, 100)}%`,
+                      }}
                     />
                   </div>
                   <span className="overview-bar-value">
-                    {entry.value.toFixed(1)}%
+                    {entry.value === null ? "-" : `${entry.value.toFixed(1)}%`}
                   </span>
                 </li>
               ))}
@@ -1345,22 +1335,26 @@ const DashboardOverviewView = ({
           )}
         </div>
         <div className="overview-chart-card">
-          <div className="overview-chart-title">TOP5 集群内存使用率</div>
-          {memoryUsageTop.length === 0 ? (
+          <div className="overview-chart-title">集群内存使用率</div>
+          {memoryUsageAll.length === 0 ? (
             <div className="placeholder">暂无内存使用率数据</div>
           ) : (
             <ul className="overview-bar-list">
-              {memoryUsageTop.map((entry) => (
+              {memoryUsageAll.map((entry) => (
                 <li key={entry.clusterId} className="overview-bar-item">
                   <span className="overview-bar-label">{entry.name}</span>
                   <div className="overview-bar-track">
                     <div
-                      className="overview-bar-fill memory"
-                      style={{ width: `${Math.min(entry.value, 100)}%` }}
+                      className={`overview-bar-fill memory${
+                        entry.value === null ? " empty" : ""
+                      }`}
+                      style={{
+                        width: entry.value === null ? "0%" : `${Math.min(entry.value, 100)}%`,
+                      }}
                     />
                   </div>
                   <span className="overview-bar-value">
-                    {entry.value.toFixed(1)}%
+                    {entry.value === null ? "-" : `${entry.value.toFixed(1)}%`}
                   </span>
                 </li>
               ))}
@@ -1370,14 +1364,6 @@ const DashboardOverviewView = ({
       </section>
 
       <section className="overview-indicators">
-        <div className="overview-indicators-header">
-          <div>
-            <h2>最新巡检指标</h2>
-            <p className="overview-indicators-hint">
-              基于每个集群最新一次巡检结果汇总
-            </p>
-          </div>
-        </div>
         {indicatorCards.length === 0 ? (
           <div className="placeholder">暂无集群巡检结果</div>
         ) : (
@@ -1403,7 +1389,11 @@ const DashboardOverviewView = ({
                       <span
                         className={`overview-indicator-status ${item.statusClass}`}
                       >
-                        {item.status === "passed" ? "✓" : item.status ? "✕" : "·"}
+                        {item.status === "passed"
+                          ? "✓"
+                          : item.status
+                            ? "✕"
+                            : "-"}
                       </span>
                       <span className="overview-indicator-label">
                         {item.label}

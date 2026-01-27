@@ -2477,6 +2477,15 @@ def agent_submit_results(
     if run.status in {"paused", "cancelled"}:
         refreshed = crud.get_inspection_run(ctx.db, run.id) or run
         return _serialize_run(refreshed)
+    if payload.pod_count is not None:
+        cluster = crud.get_cluster(ctx.db, run.cluster_id)
+        if cluster:
+            crud.update_cluster(
+                ctx.db,
+                cluster,
+                pod_count=payload.pod_count,
+                log_audit=False,
+            )
     is_partial = bool(payload.partial)
     for result in payload.results:
         normalized_status = (result.status or "").strip().lower()

@@ -72,6 +72,7 @@ class ClusterConfigOut(BaseModel):
     connection_message: Optional[str]
     agent_health_message: Optional[str] = None
     last_checked_at: Optional[datetime]
+    pod_count: Optional[int] = None
     created_at: datetime
     updated_at: datetime
     execution_mode: str
@@ -447,6 +448,10 @@ class AgentRunResultItemIn(BaseModel):
 
 class AgentRunResultIn(BaseModel):
     results: List[AgentRunResultItemIn] = Field(..., min_length=1)
+    pod_count: Optional[int] = Field(
+        None,
+        description="Agent 侧采集的 Pod 总数",
+    )
     partial: bool = Field(
         False,
         description="是否为增量上报；True 表示仅追加/更新已有结果，不会结束巡检",

@@ -553,6 +553,17 @@ def check_pods_status(context: CheckContext):
     )
 
 
+def check_pods_count(context: CheckContext):
+    ok, payload = _run_kubectl(
+        ["get", "pods", "--all-namespaces", "--no-headers"],
+        context,
+    )
+    if not ok:
+        return CHECK_STATUS_WARNING, payload, "Ensure kubeconfig can list pods."
+    lines = [line for line in payload.splitlines() if line.strip()]
+    return CHECK_STATUS_PASSED, f"Pod 总数: {len(lines)}", ""
+
+
 def check_node_cpu_hotspots(context: CheckContext):
     missing = _require_prom(context)
     if missing:
@@ -713,6 +724,7 @@ HANDLERS: Dict[str, Callable[[CheckContext], Tuple[str, str, str]]] = {
     "connection_probe": check_connection_probe,
     "nodes_status": check_nodes_status,
     "pods_status": check_pods_status,
+    "pods_count": check_pods_count,
     "cluster_cpu_usage": check_cluster_cpu_usage,
     "cluster_memory_usage": check_cluster_memory_usage,
     "node_cpu_hotspots": check_node_cpu_hotspots,

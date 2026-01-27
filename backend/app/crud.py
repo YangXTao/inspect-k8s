@@ -196,6 +196,7 @@ def update_cluster(
     connection_status: Optional[str] = None,
     connection_message: Optional[str] = None,
     last_checked_at: Optional[datetime] = None,
+    pod_count: Optional[int] = None,
     execution_mode: Optional[str] = None,
     default_agent_id: Any = UNSET,
     is_archived: Any = UNSET,
@@ -218,6 +219,8 @@ def update_cluster(
         cluster.connection_message = connection_message
     if last_checked_at is not None:
         cluster.last_checked_at = last_checked_at
+    if pod_count is not None:
+        cluster.pod_count = pod_count
     if execution_mode is not None:
         cluster.execution_mode = execution_mode
     if description is not None:

@@ -69,6 +69,7 @@ export type ClusterConfig = {
   agent_health_message?: string | null;
   kubernetes_version?: string | null;
   node_count?: number | null;
+  pod_count?: number | null;
   last_checked_at?: string | null;
   created_at: string;
   updated_at: string;

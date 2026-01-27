@@ -221,6 +221,16 @@ def _ensure_cluster_schema() -> None:
                 "ALTER TABLE cluster_configs ADD COLUMN last_checked_at DATETIME NULL"
             )
 
+    if "pod_count" not in existing_columns:
+        if dialect == "sqlite":
+            statements.append(
+                "ALTER TABLE cluster_configs ADD COLUMN pod_count INTEGER NULL"
+            )
+        else:
+            statements.append(
+                "ALTER TABLE cluster_configs ADD COLUMN pod_count INT NULL"
+            )
+
     if "execution_mode" not in existing_columns:
         column_type = "TEXT" if dialect == "sqlite" else "VARCHAR(20)"
         statements.append(
