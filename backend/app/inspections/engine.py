@@ -586,6 +586,22 @@ def check_pods_status(context: CheckContext) -> Tuple[str, str, str]:
     return CHECK_STATUS_WARNING, detail, suggestion
 
 
+def check_pods_count(context: CheckContext) -> Tuple[str, str, str]:
+    ok, payload = _run_kubectl(
+        ["get", "pods", "--all-namespaces", "--no-headers"],
+        context,
+    )
+    if not ok:
+        return (
+            CHECK_STATUS_WARNING,
+            payload,
+            "确认 kubeconfig 具备跨命名空间查询 Pod 权限。",
+        )
+    lines = [line for line in payload.splitlines() if line.strip()]
+    count = len(lines)
+    return CHECK_STATUS_PASSED, f"Pod 总数: {count}", ""
+
+
 # def check_events_recent(context: CheckContext) -> Tuple[str, str, str]:
 #     ok, payload = _run_kubectl(
 #         [
@@ -800,6 +816,7 @@ HANDLERS: Dict[str, Callable[[CheckContext], Tuple[str, str, str]]] = {
     "connection_probe": check_connection_probe,
     "nodes_status": check_nodes_status,
     "pods_status": check_pods_status,
+    "pods_count": check_pods_count,
     # "events_recent": check_events_recent,
     "cluster_cpu_usage": check_cluster_cpu_usage,
     "cluster_memory_usage": check_cluster_memory_usage,
@@ -828,6 +845,11 @@ DEFAULT_CHECKS = [
         "name": "Pod Status",
         "description": "Checks for non-running pods cluster-wide.",
         "check_type": "pods_status",
+    },
+    {
+        "name": "Pod 总数",
+        "description": "Counts total pods via kubectl.",
+        "check_type": "pods_count",
     },
     {
         "name": "Cluster CPU Usage",
