@@ -33,7 +33,7 @@ def _extract_connection_meta(
     except Exception:
         pass
 
-    # 匹配 "Server version v1.30.14; nodes 8." 类型字符串
+    # 匹配 "Server version v1.30.14; nodes 8." 类型字符�?
     version_match = re.search(
         r"Server\s+version\s+([^\s;]+)", message, flags=re.IGNORECASE
     )
@@ -120,16 +120,21 @@ class ClusterNodesRefreshOut(BaseModel):
 
 
 class OverviewSummaryOut(BaseModel):
+    cluster_total: int = 0
+    cluster_connected: int = 0
+    node_total: Optional[int] = None
+    node_ready: Optional[int] = None
     pod_total: Optional[int] = None
+
 
 
 class ClusterUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=150)
     prometheus_url: Optional[str] = Field(
-        None, max_length=255, description="Prometheus 根地址，形如 http(s)://host:port"
+        None, max_length=255, description="Prometheus 根地址，形�?http(s)://host:port"
     )
     default_agent_id: Optional[int] = Field(
-        None, description="默认执行巡检的 Agent ID"
+        None, description="默认执行巡检�?Agent ID"
     )
 
 
@@ -245,15 +250,15 @@ class InspectionRunOut(BaseModel):
     @property
     def status_label(self) -> str:
         mapping = {
-            "queued": "排队中",
-            "running": "执行中",
-            "paused": "暂停中",
-            "finished": "已完成",
+            "queued": "排队�?,
+            "running": "执行�?,
+            "paused": "暂停�?,
+            "finished": "已完�?,
             "failed": "执行失败",
-            "cancelled": "已取消",
+            "cancelled": "已取�?,
         }
         status = getattr(self, "status", None) or ""
-        return mapping.get(status, "未知状态")
+        return mapping.get(status, "未知状�?)
 
     @computed_field(return_type=Optional[str])
     @property
@@ -261,14 +266,14 @@ class InspectionRunOut(BaseModel):
         if getattr(self, "agent_status", None) is None:
             return None
         mapping = {
-            "queued": "待领取",
-            "running": "Agent 执行中",
-            "paused": "Agent 已暂停",
-            "finished": "Agent 已完成",
+            "queued": "待领�?,
+            "running": "Agent 执行�?,
+            "paused": "Agent 已暂�?,
+            "finished": "Agent 已完�?,
             "failed": "Agent 执行失败",
         }
         status = getattr(self, "agent_status", None) or ""
-        return mapping.get(status, "未知状态")
+        return mapping.get(status, "未知状�?)
 
 
 class InspectionRunListOut(BaseModel):
@@ -304,15 +309,15 @@ class InspectionRunListOut(BaseModel):
     @property
     def status_label(self) -> str:
         mapping = {
-            "queued": "排队中",
-            "running": "执行中",
-            "paused": "暂停中",
-            "finished": "已完成",
+            "queued": "排队�?,
+            "running": "执行�?,
+            "paused": "暂停�?,
+            "finished": "已完�?,
             "failed": "执行失败",
-            "cancelled": "已取消",
+            "cancelled": "已取�?,
         }
         status = getattr(self, "status", None) or ""
-        return mapping.get(status, "未知状态")
+        return mapping.get(status, "未知状�?)
 
     @computed_field(return_type=Optional[str])
     @property
@@ -320,14 +325,14 @@ class InspectionRunListOut(BaseModel):
         if getattr(self, "agent_status", None) is None:
             return None
         mapping = {
-            "queued": "待领取",
-            "running": "Agent 执行中",
-            "paused": "Agent 已暂停",
-            "finished": "Agent 已完成",
+            "queued": "待领�?,
+            "running": "Agent 执行�?,
+            "paused": "Agent 已暂�?,
+            "finished": "Agent 已完�?,
             "failed": "Agent 执行失败",
         }
         status = getattr(self, "agent_status", None) or ""
-        return mapping.get(status, "未知状态")
+        return mapping.get(status, "未知状�?)
 
 
 class InspectionScheduleBase(BaseModel):
@@ -391,7 +396,7 @@ class InspectionAgentOut(BaseModel):
 class InspectionAgentCreate(BaseModel):
     name: str = Field(..., max_length=100)
     cluster_id: Optional[int] = Field(
-        None, description="关联的集群 ID（可选）"
+        None, description="关联的集�?ID（可选）"
     )
     description: Optional[str] = Field(
         None, max_length=500, description="Agent 描述"
@@ -403,7 +408,7 @@ class InspectionAgentCreate(BaseModel):
 
 class InspectionAgentUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
-    cluster_id: Optional[int] = Field(None, description="关联的集群 ID（可选）")
+    cluster_id: Optional[int] = Field(None, description="关联的集�?ID（可选）")
     description: Optional[str] = Field(None, max_length=500)
     is_enabled: Optional[bool] = Field(None, description="是否启用 Agent")
     prometheus_url: Optional[str] = Field(None, max_length=255, description="Agent Prometheus URL")
@@ -418,6 +423,21 @@ class AgentHeartbeatIn(BaseModel):
     )
     nodes_retrieved_at: Optional[datetime] = Field(
         None, description="节点信息获取时间（可选）"
+    )
+    node_total: Optional[int] = Field(
+        None, description="�ڵ�������Agent ʵʱ�ɼ���"
+    )
+    node_ready: Optional[int] = Field(
+        None, description="Ready �ڵ�����Agent ʵʱ�ɼ���"
+    )
+    node_summary_at: Optional[datetime] = Field(
+        None, description="�ڵ�ͳ�Ʋɼ�ʱ��"
+    )
+    pod_count: Optional[int] = Field(
+        None, description="Pod ������Agent ʵʱ�ɼ���"
+    )
+    pod_count_at: Optional[datetime] = Field(
+        None, description="Pod ͳ�Ʋɼ�ʱ��"
     )
 
 
@@ -455,11 +475,11 @@ class AgentRunResultIn(BaseModel):
     results: List[AgentRunResultItemIn] = Field(..., min_length=1)
     pod_count: Optional[int] = Field(
         None,
-        description="本次巡检采集的 Pod 总数",
+        description="本次巡检采集�?Pod 总数",
     )
     partial: bool = Field(
         False,
-        description="是否为增量上报；True 表示仅追加/更新已有结果，不会结束巡检",
+        description="是否为增量上报；True 表示仅追�?更新已有结果，不会结束巡检",
     )
 
 
@@ -471,7 +491,7 @@ class AgentBootstrapCluster(BaseModel):
     )
     kubeconfig_b64: Optional[str] = Field(
         None,
-        description="Base64 编码的 kubeconfig 内容",
+        description="Base64 编码�?kubeconfig 内容",
     )
 
     kubeconfig_name: Optional[str] = Field(
@@ -485,7 +505,7 @@ class AgentBootstrapIn(BaseModel):
         ...,
         min_length=16,
         max_length=128,
-        description="Server 端分发给 Agent 的注册 Token",
+        description="Server 端分发给 Agent 的注�?Token",
     )
     prometheus_url: Optional[str] = Field(
         None,
@@ -521,7 +541,7 @@ class LicenseStatusOut(BaseModel):
 
 
 class LicenseImportPayload(BaseModel):
-    content: str = Field(..., min_length=1, description="加密或明文 License 内容")
+    content: str = Field(..., min_length=1, description="加密或明�?License 内容")
 
 
 class AuthLoginIn(BaseModel):

@@ -1064,6 +1064,10 @@ interface DashboardOverviewProps {
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
   canViewHistory: boolean;
+  clusterTotal: number | null;
+  clusterConnected: number | null;
+  nodeTotal: number | null;
+  nodeReady: number | null;
   podSummary: number | null;
 }
 
@@ -1073,6 +1077,10 @@ const DashboardOverviewView = ({
   clusterDisplayIds,
   runDisplayIds,
   canViewHistory,
+  clusterTotal,
+  clusterConnected,
+  nodeTotal,
+  nodeReady,
   podSummary,
 }: DashboardOverviewProps) => {
   const [runDetails, setRunDetails] = useState<Record<number, InspectionRun>>(
@@ -1105,6 +1113,22 @@ const DashboardOverviewView = ({
     latestRuns.forEach((run) => map.set(run.cluster_id, run));
     return map;
   }, [latestRuns]);
+
+  const clusterRatio = useMemo(() => {
+    const total = clusterTotal ?? clusters.length;
+    const connected =
+      clusterConnected ??
+      clusters.filter((cluster) => cluster.connection_status === "connected")
+        .length;
+    return `${connected}/${total}`;
+  }, [clusterConnected, clusterTotal, clusters]);
+
+  const nodeRatio = useMemo(() => {
+    if (typeof nodeReady === "number" && typeof nodeTotal === "number") {
+      return `${nodeReady}/${nodeTotal}`;
+    }
+    return "-";
+  }, [nodeReady, nodeTotal]);
 
   useEffect(() => {
     if (latestRuns.length === 0) {
@@ -1159,16 +1183,6 @@ const DashboardOverviewView = ({
       cancelled = true;
     };
   }, [latestRuns, runDetails]);
-
-  const nodeSummary = useMemo(() => {
-    const counts = clusters
-      .map((cluster) => cluster.node_count)
-      .filter((value): value is number => typeof value === "number");
-    if (counts.length === 0) {
-      return null;
-    }
-    return counts.reduce((total, value) => total + value, 0);
-  }, [clusters]);
 
   const buildUsageSeries = useCallback(
     (keywords: string[]) => {
@@ -1296,12 +1310,12 @@ const DashboardOverviewView = ({
       <section className="overview-metrics">
         <div className="overview-metric-card">
           <div className="overview-metric-title">集群总数</div>
-          <div className="overview-metric-value">{clusters.length}</div>
+          <div className="overview-metric-value">{clusterRatio}</div>
         </div>
         <div className="overview-metric-card">
           <div className="overview-metric-title">节点总数</div>
           <div className="overview-metric-value">
-            {nodeSummary ?? "-"}
+            {nodeRatio}
           </div>
         </div>
         <div className="overview-metric-card">
@@ -11524,17 +11538,18 @@ const loginRedirectState = useMemo(
     refreshUsers,
   ]);
 
-  useEffect(() => {
-    if (typeof window === "undefined" || !isAuthenticated) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      void refreshClusters();
-    }, CLUSTER_HEARTBEAT_REFRESH_INTERVAL);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [isAuthenticated, refreshClusters]);
+    useEffect(() => {
+      if (typeof window === "undefined" || !isAuthenticated) {
+        return;
+      }
+      const timer = window.setInterval(() => {
+        void refreshClusters();
+        void refreshOverviewSummary();
+      }, CLUSTER_HEARTBEAT_REFRESH_INTERVAL);
+      return () => {
+        window.clearInterval(timer);
+      };
+    }, [isAuthenticated, refreshClusters, refreshOverviewSummary]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !isAuthenticated) {
@@ -13560,6 +13575,10 @@ const hasManualKubeconfig = useMemo(
       clusterDisplayIds={clusterDisplayIds}
       runDisplayIds={runDisplayIds}
       canViewHistory={canViewHistory}
+      clusterTotal={overviewSummary?.cluster_total ?? null}
+      clusterConnected={overviewSummary?.cluster_connected ?? null}
+      nodeTotal={overviewSummary?.node_total ?? null}
+      nodeReady={overviewSummary?.node_ready ?? null}
       podSummary={overviewSummary?.pod_total ?? null}
     />
   );

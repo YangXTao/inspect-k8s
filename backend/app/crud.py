@@ -107,9 +107,14 @@ def _resolve_run_audit_override(
     username = (getattr(run, "created_by_username", None) or "").strip()
     if not username:
         return {}
+    operator = (getattr(run, "operator", None) or "").strip()
+    if operator.endswith(SCHEDULED_AUDIT_SUFFIX) and not username.endswith(
+        SCHEDULED_AUDIT_SUFFIX
+    ):
+        username = f"{username}{SCHEDULED_AUDIT_SUFFIX}"
     return {
         "user_id": getattr(run, "created_by_user_id", None),
-        "username": f"{username}{SCHEDULED_AUDIT_SUFFIX}",
+        "username": username,
     }
 
 
@@ -727,12 +732,26 @@ def record_agent_heartbeat(
     seen_at: Optional[datetime] = None,
     nodes_output: Optional[str] = None,
     nodes_output_at: Optional[datetime] = None,
+    node_total: Optional[int] = None,
+    node_ready: Optional[int] = None,
+    node_summary_at: Optional[datetime] = None,
+    pod_count: Optional[int] = None,
+    pod_count_at: Optional[datetime] = None,
 ) -> models.InspectionAgent:
     agent.last_seen_at = seen_at or datetime.utcnow()
     if nodes_output is not None:
         agent.nodes_output = nodes_output
         agent.nodes_output_at = nodes_output_at or agent.last_seen_at
         agent.nodes_report_requested_at = None
+    if node_total is not None:
+        agent.node_total = node_total
+        agent.node_summary_at = node_summary_at or agent.last_seen_at
+    if node_ready is not None:
+        agent.node_ready = node_ready
+        agent.node_summary_at = node_summary_at or agent.last_seen_at
+    if pod_count is not None:
+        agent.pod_count = pod_count
+        agent.pod_count_at = pod_count_at or agent.last_seen_at
     agent.updated_at = datetime.utcnow()
     db.add(agent)
     db.commit()

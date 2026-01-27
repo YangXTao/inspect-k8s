@@ -262,7 +262,7 @@ def _attach_run_report(db: Session, run: models.InspectionRun) -> models.Inspect
     crud.log_action(
         db,
         action="create",
-        entity_type="report",
+        entity_type="inspection_run",
         entity_id=run.id,
         description=f"生成巡检报告：{run_label}",
         **audit_override,
@@ -2311,6 +2311,11 @@ def agent_heartbeat(
         seen_at=payload.reported_at or datetime.utcnow(),
         nodes_output=nodes_output,
         nodes_output_at=nodes_retrieved_at,
+        node_total=payload.node_total,
+        node_ready=payload.node_ready,
+        node_summary_at=payload.node_summary_at,
+        pod_count=payload.pod_count,
+        pod_count_at=payload.pod_count_at,
     )
     refreshed = crud.get_inspection_agent(ctx.db, updated.id) or updated
     return _serialize_agent(refreshed)
@@ -3290,20 +3295,33 @@ def get_overview_summary(
 ):
     _require_permission(db, current_user, "clusterAgent.read", "集群查看")
     clusters = crud.list_clusters(db)
-    cluster_ids = [cluster.id for cluster in clusters]
-    latest_runs = _resolve_latest_runs_by_cluster(db, cluster_ids)
+    cluster_total = len(clusters)
+    cluster_connected = sum(
+        1 for cluster in clusters if cluster.connection_status == "connected"
+    )
+    node_total_sum = 0
+    node_ready_sum = 0
+    node_matched = False
     pod_total = 0
-    matched = False
-    for run in latest_runs.values():
-        if run.status != "finished":
+    pod_matched = False
+    for cluster in clusters:
+        agent = _resolve_active_agent(db, cluster)
+        if not agent:
             continue
-        if run.pod_count is None:
-            continue
-        if run.pod_count < 0:
-            continue
-        matched = True
-        pod_total += run.pod_count
-    return schemas.OverviewSummaryOut(pod_total=pod_total if matched else None)
+        if agent.node_total is not None and agent.node_ready is not None:
+            node_matched = True
+            node_total_sum += int(agent.node_total)
+            node_ready_sum += int(agent.node_ready)
+        if agent.pod_count is not None and agent.pod_count >= 0:
+            pod_matched = True
+            pod_total += int(agent.pod_count)
+    return schemas.OverviewSummaryOut(
+        cluster_total=cluster_total,
+        cluster_connected=cluster_connected,
+        node_total=node_total_sum if node_matched else None,
+        node_ready=node_ready_sum if node_matched else None,
+        pod_total=pod_total if pod_matched else None,
+    )
 
 
 @app.post("/inspection-runs", response_model=schemas.InspectionRunOut, status_code=201)

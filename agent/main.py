@@ -509,6 +509,11 @@ class AgentClient:
         *,
         nodes_output: Optional[str] = None,
         nodes_retrieved_at: Optional[str] = None,
+        node_total: Optional[int] = None,
+        node_ready: Optional[int] = None,
+        node_summary_at: Optional[str] = None,
+        pod_count: Optional[int] = None,
+        pod_count_at: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         payload: Dict[str, Any] = {
             "reported_at": datetime.now(timezone.utc).isoformat()
@@ -517,6 +522,16 @@ class AgentClient:
             payload["nodes_output"] = nodes_output
         if nodes_retrieved_at:
             payload["nodes_retrieved_at"] = nodes_retrieved_at
+        if node_total is not None:
+            payload["node_total"] = node_total
+        if node_ready is not None:
+            payload["node_ready"] = node_ready
+        if node_summary_at:
+            payload["node_summary_at"] = node_summary_at
+        if pod_count is not None:
+            payload["pod_count"] = pod_count
+        if pod_count_at:
+            payload["pod_count_at"] = pod_count_at
         resp = self.session.post(
             f"{self.config.server_base}/agent/heartbeat",
             json=payload,
@@ -721,6 +736,53 @@ class AgentRunner:
             LOG.warning("Pod count parse failed: %s", output)
             return None
 
+    def _collect_node_summary(self) -> Optional[Tuple[int, int]]:
+        kubeconfig_path = self.config.kubeconfig_path
+        kube_binary = os.getenv("KUBECTL_BINARY", "kubectl")
+        if shutil.which(kube_binary) is None:
+            LOG.warning("Node summary skipped: kubectl not found.")
+            return None
+        cmd = [kube_binary]
+        if kubeconfig_path and kubeconfig_path.exists():
+            cmd.extend(["--kubeconfig", str(kubeconfig_path)])
+        cmd.extend(["get", "nodes", "--no-headers"])
+        try:
+            completed = subprocess.run(
+                cmd,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=max(10, int(self.config.request_timeout)),
+            )
+        except subprocess.TimeoutExpired:
+            LOG.warning("Node summary command timed out.")
+            return None
+        except Exception as exc:
+            LOG.warning("Node summary command failed: %s", exc)
+            return None
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "").strip()
+            LOG.warning("Node summary command failed: %s", detail)
+            return None
+        lines = [
+            line.strip()
+            for line in (completed.stdout or "").splitlines()
+            if line.strip()
+        ]
+        if not lines:
+            LOG.warning("Node summary command returned empty output.")
+            return None
+        total = len(lines)
+        ready = 0
+        for line in lines:
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            status = parts[1]
+            if status.startswith("Ready"):
+                ready += 1
+        return ready, total
+
     def _refresh_nodes_on_demand(self, heartbeat_data: Optional[Dict[str, Any]]) -> None:
         if not heartbeat_data:
             return
@@ -788,6 +850,10 @@ class AgentRunner:
             nodes_output = None
             nodes_retrieved_at = None
             now = datetime.now(timezone.utc)
+            node_summary = self._collect_node_summary()
+            pod_count = self._collect_pod_count()
+            node_summary_at = now.isoformat() if node_summary else None
+            pod_count_at = now.isoformat() if pod_count is not None else None
             if self._should_report_nodes(now):
                 self._last_nodes_report_at = now
                 nodes_output = self._collect_nodes_output()
@@ -796,6 +862,11 @@ class AgentRunner:
             heartbeat_data = self.client.send_heartbeat(
                 nodes_output=nodes_output,
                 nodes_retrieved_at=nodes_retrieved_at,
+                node_ready=node_summary[0] if node_summary else None,
+                node_total=node_summary[1] if node_summary else None,
+                node_summary_at=node_summary_at,
+                pod_count=pod_count,
+                pod_count_at=pod_count_at,
             )
             if isinstance(heartbeat_data, dict):
                 server_prom = (heartbeat_data.get("prometheus_url") or "").strip()
