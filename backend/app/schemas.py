@@ -119,6 +119,10 @@ class ClusterNodesRefreshOut(BaseModel):
     requested_at: datetime
 
 
+class OverviewSummaryOut(BaseModel):
+    pod_total: Optional[int] = None
+
+
 class ClusterUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=150)
     prometheus_url: Optional[str] = Field(
@@ -220,6 +224,7 @@ class InspectionRunOut(BaseModel):
     total_items: int
     processed_items: int
     progress: int
+    pod_count: Optional[int] = None
     created_at: datetime
     completed_at: Optional[datetime]
     prometheus_version: Optional[str] = None
@@ -279,6 +284,7 @@ class InspectionRunListOut(BaseModel):
     total_items: int
     processed_items: int
     progress: int
+    pod_count: Optional[int] = None
     created_at: datetime
     completed_at: Optional[datetime]
     prometheus_version: Optional[str] = None
@@ -447,6 +453,10 @@ class AgentRunResultItemIn(BaseModel):
 
 class AgentRunResultIn(BaseModel):
     results: List[AgentRunResultItemIn] = Field(..., min_length=1)
+    pod_count: Optional[int] = Field(
+        None,
+        description="本次巡检采集的 Pod 总数",
+    )
     partial: bool = Field(
         False,
         description="是否为增量上报；True 表示仅追加/更新已有结果，不会结束巡检",

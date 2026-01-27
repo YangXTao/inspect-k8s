@@ -2495,6 +2495,15 @@ def agent_submit_results(
         )
     run = crud.get_inspection_run(ctx.db, run.id) or run
     processed_total = crud.count_run_results(ctx.db, run)
+    if not is_partial:
+        pod_count_raw = payload.pod_count
+        if pod_count_raw is not None:
+            try:
+                pod_count_value = int(pod_count_raw)
+            except (TypeError, ValueError):
+                pod_count_value = None
+            if pod_count_value is not None and pod_count_value >= 0:
+                run.pod_count = pod_count_value
 
     def _clamp_processed(value: int, total: int) -> int:
         if total > 0:
@@ -3213,6 +3222,7 @@ def _serialize_run(run: models.InspectionRun) -> schemas.InspectionRunOut:
         total_items=total_items,
         processed_items=processed_items,
         progress=progress,
+        pod_count=run.pod_count,
         created_at=run.created_at,
         completed_at=run.completed_at,
         prometheus_version=run.prometheus_version,
@@ -3239,6 +3249,7 @@ def _serialize_run_list(run: models.InspectionRun) -> schemas.InspectionRunListO
         total_items=total_items,
         processed_items=processed_items,
         progress=progress,
+        pod_count=run.pod_count,
         created_at=run.created_at,
         completed_at=run.completed_at,
         prometheus_version=run.prometheus_version,
@@ -3246,6 +3257,53 @@ def _serialize_run_list(run: models.InspectionRun) -> schemas.InspectionRunListO
         agent_status=run.agent_status,
         agent_id=run.agent_id,
     )
+
+
+def _resolve_latest_runs_by_cluster(
+    db: Session, cluster_ids: List[int]
+) -> dict[int, models.InspectionRun]:
+    if not cluster_ids:
+        return {}
+    runs = (
+        db.query(models.InspectionRun)
+        .filter(models.InspectionRun.cluster_id.in_(cluster_ids))
+        .order_by(
+            func.coalesce(
+                models.InspectionRun.completed_at,
+                models.InspectionRun.created_at,
+            ).desc(),
+            models.InspectionRun.id.desc(),
+        )
+        .all()
+    )
+    latest: dict[int, models.InspectionRun] = {}
+    for run in runs:
+        if run.cluster_id not in latest:
+            latest[run.cluster_id] = run
+    return latest
+
+
+@app.get("/overview/summary", response_model=schemas.OverviewSummaryOut)
+def get_overview_summary(
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "clusterAgent.read", "集群查看")
+    clusters = crud.list_clusters(db)
+    cluster_ids = [cluster.id for cluster in clusters]
+    latest_runs = _resolve_latest_runs_by_cluster(db, cluster_ids)
+    pod_total = 0
+    matched = False
+    for run in latest_runs.values():
+        if run.status != "finished":
+            continue
+        if run.pod_count is None:
+            continue
+        if run.pod_count < 0:
+            continue
+        matched = True
+        pod_total += run.pod_count
+    return schemas.OverviewSummaryOut(pod_total=pod_total if matched else None)
 
 
 @app.post("/inspection-runs", response_model=schemas.InspectionRunOut, status_code=201)

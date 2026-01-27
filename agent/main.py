@@ -5,6 +5,7 @@ import base64
 import logging
 import os
 import shutil
+import shlex
 import subprocess
 import sys
 import time
@@ -556,8 +557,11 @@ class AgentClient:
         results: Iterable[Dict[str, Any]],
         *,
         partial: bool = False,
+        pod_count: Optional[int] = None,
     ) -> Dict[str, Any]:
-        payload = {"results": list(results), "partial": partial}
+        payload: Dict[str, Any] = {"results": list(results), "partial": partial}
+        if pod_count is not None:
+            payload["pod_count"] = pod_count
         resp = self.session.post(
             f"{self.config.server_base}/agent/runs/{run_id}/results",
             json=payload,
@@ -677,6 +681,45 @@ class AgentRunner:
             LOG.warning("kubectl 未返回节点信息。")
             return None
         return output
+
+    def _collect_pod_count(self) -> Optional[int]:
+        kubeconfig_path = self.config.kubeconfig_path
+        kube_binary = os.getenv("KUBECTL_BINARY", "kubectl")
+        if shutil.which(kube_binary) is None:
+            LOG.warning("Pod count skipped: kubectl not found.")
+            return None
+        kubeconfig_arg = ""
+        if kubeconfig_path and kubeconfig_path.exists():
+            kubeconfig_arg = f" --kubeconfig {shlex.quote(str(kubeconfig_path))}"
+        cmd = f"{kube_binary}{kubeconfig_arg} get pod -A --no-headers | wc -l"
+        try:
+            completed = subprocess.run(
+                cmd,
+                shell=True,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=max(10, int(self.config.request_timeout)),
+            )
+        except subprocess.TimeoutExpired:
+            LOG.warning("Pod count command timed out.")
+            return None
+        except Exception as exc:
+            LOG.warning("Pod count command failed: %s", exc)
+            return None
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "").strip()
+            LOG.warning("Pod count command failed: %s", detail)
+            return None
+        output = (completed.stdout or "").strip()
+        if not output:
+            LOG.warning("Pod count command returned empty output.")
+            return None
+        try:
+            return int(output.split()[0])
+        except (ValueError, IndexError):
+            LOG.warning("Pod count parse failed: %s", output)
+            return None
 
     def _refresh_nodes_on_demand(self, heartbeat_data: Optional[Dict[str, Any]]) -> None:
         if not heartbeat_data:
@@ -803,7 +846,8 @@ class AgentRunner:
                 LOG.info("Run %s aborted before completion.", run_id)
                 continue
             try:
-                self.client.submit_results(run_id, results)
+                pod_count = self._collect_pod_count()
+                self.client.submit_results(run_id, results, pod_count=pod_count)
                 LOG.info("巡检 %s 已回传结果。", run_id)
             except Exception as exc:
                 LOG.error("上报巡检 %s 结果失败：%s", run_id, exc)

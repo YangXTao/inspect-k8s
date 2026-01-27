@@ -60,6 +60,7 @@ import {
   updateCluster,
   createInspectionSchedule as apiCreateInspectionSchedule,
   updateInspectionSchedule as apiUpdateInspectionSchedule,
+  getOverviewSummary,
   uploadLicense,
   uploadLicenseText,
   updateInspectionItem as apiUpdateInspectionItem,
@@ -90,6 +91,7 @@ import type {
   AuthUser,
   AuthRole,
   AuditLog,
+  OverviewSummary,
 } from "./types";
 
 type NoticeType = "success" | "warning" | "error" | null;
@@ -989,26 +991,6 @@ const extractPercentageValue = (value?: string | null) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const extractPodTotal = (value?: string | null) => {
-  if (!value) {
-    return null;
-  }
-  const normalized = value.toLowerCase();
-  if (
-    !normalized.includes("pod") &&
-    !normalized.includes("pods") &&
-    !value.includes("总数")
-  ) {
-    return null;
-  }
-  const match = /(\d+)/.exec(value.replace(/,/g, ""));
-  if (!match) {
-    return null;
-  }
-  const parsed = Number(match[1]);
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
 const findResultByKeywords = (
   results: InspectionResult[],
   keywords: string[]
@@ -1037,9 +1019,23 @@ const OVERVIEW_INDICATORS = [
     keywords: ["node health", "nodes status", "节点状态", "节点健康"],
   },
   {
-    key: "pods",
-    label: "Pod 状态",
-    keywords: ["pod status", "pod 状态", "pod"],
+    key: "etcd",
+    label: "etcd 状态",
+    keywords: ["etcd", "etcd status", "etcd 健康", "etcd health"],
+  },
+  {
+    key: "apiserver",
+    label: "apiserver 状态",
+    keywords: ["apiserver", "api server", "api server availability"],
+  },
+  {
+    key: "controller",
+    label: "controller-manager 状态",
+    keywords: [
+      "controller-manager",
+      "controller manager",
+      "kube-controller-manager",
+    ],
   },
   {
     key: "cpu",
@@ -1059,6 +1055,7 @@ interface DashboardOverviewProps {
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
   canViewHistory: boolean;
+  podSummary: number | null;
 }
 
 const DashboardOverviewView = ({
@@ -1067,18 +1064,13 @@ const DashboardOverviewView = ({
   clusterDisplayIds,
   runDisplayIds,
   canViewHistory,
+  podSummary,
 }: DashboardOverviewProps) => {
   const [runDetails, setRunDetails] = useState<Record<number, InspectionRun>>(
     {}
   );
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-
-  const clusterMap = useMemo(() => {
-    const map = new Map<number, ClusterConfig>();
-    clusters.forEach((cluster) => map.set(cluster.id, cluster));
-    return map;
-  }, [clusters]);
 
   const latestRuns = useMemo(() => {
     const map = new Map<number, InspectionRunListItem>();
@@ -1169,67 +1161,45 @@ const DashboardOverviewView = ({
     return counts.reduce((total, value) => total + value, 0);
   }, [clusters]);
 
-  const podSummary = useMemo(() => {
-    let total = 0;
-    let matched = false;
-    latestRuns.forEach((run) => {
-      const detail = runDetails[run.id];
-      if (!detail) {
-        return;
-      }
-      const podResult = findResultByKeywords(detail.results, [
-        "pod 总数",
-        "pod count",
-        "pods count",
-        "total pods",
-      ]);
-      const count = extractPodTotal(podResult?.detail);
-      if (count === null) {
-        return;
-      }
-      matched = true;
-      total += count;
-    });
-    if (!matched) {
-      return null;
-    }
-    return total;
-  }, [latestRuns, runDetails]);
-
   const buildUsageSeries = useCallback(
     (keywords: string[]) => {
-      const entries: { clusterId: number; name: string; value: number }[] = [];
-      latestRuns.forEach((run) => {
-        const detail = runDetails[run.id];
-        if (!detail) {
-          return;
-        }
-        const result = findResultByKeywords(detail.results, keywords);
-        if (!result) {
-          return;
-        }
-        const value = extractPercentageValue(
-          `${result.detail ?? ""} ${result.suggestion ?? ""}`
-        );
-        if (value === null) {
-          return;
-        }
-        const clusterName =
-          clusterMap.get(run.cluster_id)?.name ??
-          run.cluster_name ??
-          `集群${run.cluster_id}`;
-        entries.push({
-          clusterId: run.cluster_id,
-          name: clusterName,
+      const entries = clusters.map((cluster) => {
+        const latestRun = latestRunByCluster.get(cluster.id);
+        const detail =
+          latestRun && latestRun.status === "finished"
+            ? runDetails[latestRun.id]
+            : null;
+        const result = detail
+          ? findResultByKeywords(detail.results, keywords)
+          : null;
+        const value = result
+          ? extractPercentageValue(
+              `${result.detail ?? ""} ${result.suggestion ?? ""}`
+            )
+          : null;
+        return {
+          clusterId: cluster.id,
+          name: cluster.name,
           value,
-        });
+        };
       });
-      return entries.sort((a, b) => b.value - a.value).slice(0, 5);
+      return entries.sort((a, b) => {
+        if (a.value === null && b.value === null) {
+          return a.name.localeCompare(b.name, "zh");
+        }
+        if (a.value === null) {
+          return 1;
+        }
+        if (b.value === null) {
+          return -1;
+        }
+        return b.value - a.value;
+      });
     },
-    [clusterMap, latestRuns, runDetails]
+    [clusters, latestRunByCluster, runDetails]
   );
 
-  const cpuUsageTop = useMemo(
+  const cpuUsageSeries = useMemo(
     () =>
       buildUsageSeries([
         "cluster cpu usage",
@@ -1239,7 +1209,7 @@ const DashboardOverviewView = ({
     [buildUsageSeries]
   );
 
-  const memoryUsageTop = useMemo(
+  const memoryUsageSeries = useMemo(
     () =>
       buildUsageSeries([
         "cluster memory usage",
@@ -1252,25 +1222,25 @@ const DashboardOverviewView = ({
   const indicatorCards = useMemo(() => {
     return clusters.map((cluster) => {
       const latestRun = latestRunByCluster.get(cluster.id) ?? null;
-      const detail = latestRun ? runDetails[latestRun.id] : null;
+      const detail =
+        latestRun && latestRun.status === "finished"
+          ? runDetails[latestRun.id]
+          : null;
       const indicators = OVERVIEW_INDICATORS.map((indicator) => {
         const result = detail
           ? findResultByKeywords(detail.results, [...indicator.keywords])
           : null;
         const status = result?.status ?? null;
-        const statusMeta = status ? getInspectionResultStatusMeta(status) : null;
+        const isPassed = status === "passed";
         return {
           key: indicator.key,
           label: indicator.label,
           status,
-          statusLabel: statusMeta?.label ?? "未检测",
-          statusClass: statusMeta?.className ?? "muted",
-          detail: result?.detail ?? "",
+          statusLabel: status ? (isPassed ? "正常" : "异常") : "-",
+          statusClass: status ? (isPassed ? "success" : "danger") : "muted",
+          statusIcon: status ? (isPassed ? "✓" : "✕") : "·",
         };
       });
-      const hasIssue = indicators.some(
-        (item) => item.status && item.status !== "passed"
-      );
       const clusterSlug = getClusterDisplayId(
         clusterDisplayIds,
         cluster.id,
@@ -1286,7 +1256,6 @@ const DashboardOverviewView = ({
         cluster,
         latestRun,
         indicators,
-        hasIssue,
         reportPath: canViewHistory ? reportPath : null,
       };
     });
@@ -1322,62 +1291,70 @@ const DashboardOverviewView = ({
 
       <section className="overview-charts">
         <div className="overview-chart-card">
-          <div className="overview-chart-title">TOP5 集群 CPU 使用率</div>
-          {cpuUsageTop.length === 0 ? (
-            <div className="placeholder">暂无 CPU 使用率数据</div>
+          <div className="overview-chart-title">集群 CPU 使用率</div>
+          {cpuUsageSeries.length === 0 ? (
+            <div className="placeholder">暂无集群</div>
           ) : (
             <ul className="overview-bar-list">
-              {cpuUsageTop.map((entry) => (
-                <li key={entry.clusterId} className="overview-bar-item">
-                  <span className="overview-bar-label">{entry.name}</span>
-                  <div className="overview-bar-track">
-                    <div
-                      className="overview-bar-fill"
-                      style={{ width: `${Math.min(entry.value, 100)}%` }}
-                    />
-                  </div>
-                  <span className="overview-bar-value">
-                    {entry.value.toFixed(1)}%
-                  </span>
-                </li>
-              ))}
+              {cpuUsageSeries.map((entry) => {
+                const valueLabel =
+                  entry.value === null ? "-" : `${entry.value.toFixed(1)}%`;
+                const width =
+                  entry.value === null
+                    ? "0%"
+                    : `${Math.min(entry.value, 100)}%`;
+                return (
+                  <li key={entry.clusterId} className="overview-bar-item">
+                    <span className="overview-bar-label">{entry.name}</span>
+                    <div className="overview-bar-track">
+                      <div
+                        className={`overview-bar-fill${
+                          entry.value === null ? " empty" : ""
+                        }`}
+                        style={{ width }}
+                      />
+                    </div>
+                    <span className="overview-bar-value">{valueLabel}</span>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
         <div className="overview-chart-card">
-          <div className="overview-chart-title">TOP5 集群内存使用率</div>
-          {memoryUsageTop.length === 0 ? (
-            <div className="placeholder">暂无内存使用率数据</div>
+          <div className="overview-chart-title">集群内存使用率</div>
+          {memoryUsageSeries.length === 0 ? (
+            <div className="placeholder">暂无集群</div>
           ) : (
             <ul className="overview-bar-list">
-              {memoryUsageTop.map((entry) => (
-                <li key={entry.clusterId} className="overview-bar-item">
-                  <span className="overview-bar-label">{entry.name}</span>
-                  <div className="overview-bar-track">
-                    <div
-                      className="overview-bar-fill memory"
-                      style={{ width: `${Math.min(entry.value, 100)}%` }}
-                    />
-                  </div>
-                  <span className="overview-bar-value">
-                    {entry.value.toFixed(1)}%
-                  </span>
-                </li>
-              ))}
+              {memoryUsageSeries.map((entry) => {
+                const valueLabel =
+                  entry.value === null ? "-" : `${entry.value.toFixed(1)}%`;
+                const width =
+                  entry.value === null
+                    ? "0%"
+                    : `${Math.min(entry.value, 100)}%`;
+                return (
+                  <li key={entry.clusterId} className="overview-bar-item">
+                    <span className="overview-bar-label">{entry.name}</span>
+                    <div className="overview-bar-track">
+                      <div
+                        className={`overview-bar-fill memory${
+                          entry.value === null ? " empty" : ""
+                        }`}
+                        style={{ width }}
+                      />
+                    </div>
+                    <span className="overview-bar-value">{valueLabel}</span>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
       </section>
 
       <section className="overview-indicators">
-        <div className="overview-indicators-header">
-          <div>
-            <h2>最新巡检指标</h2>
-            <p className="overview-indicators-hint">
-              基于每个集群最新一次巡检结果汇总
-            </p>
-          </div>
-        </div>
         {indicatorCards.length === 0 ? (
           <div className="placeholder">暂无集群巡检结果</div>
         ) : (
@@ -1403,7 +1380,7 @@ const DashboardOverviewView = ({
                       <span
                         className={`overview-indicator-status ${item.statusClass}`}
                       >
-                        {item.status === "passed" ? "✓" : item.status ? "✕" : "·"}
+                        {item.statusIcon}
                       </span>
                       <span className="overview-indicator-label">
                         {item.label}
@@ -1414,9 +1391,9 @@ const DashboardOverviewView = ({
                     </li>
                   ))}
                 </ul>
-                {card.hasIssue && card.reportPath && (
+                {card.reportPath && (
                   <Link to={card.reportPath} className="link-button">
-                    查看最新巡检
+                    查看巡检详情
                   </Link>
                 )}
               </div>
@@ -9971,6 +9948,9 @@ const App = () => {
   const [runs, setRuns] = useState<InspectionRunListItem[]>([]);
   const [items, setItems] = useState<InspectionItem[]>([]);
   const [schedules, setSchedules] = useState<InspectionSchedule[]>([]);
+  const [overviewSummary, setOverviewSummary] = useState<OverviewSummary | null>(
+    null
+  );
   const isAuthenticated = authUser !== null;
   const permissionSet = useMemo(
     () => new Set(authUser?.permissions ?? []),
@@ -10853,6 +10833,7 @@ const loginRedirectState = useMemo(
       setClusters([]);
       setClusterDisplayIds({});
       setClusterError(null);
+      setOverviewSummary(null);
       return null;
     }
     try {
@@ -10873,6 +10854,24 @@ const loginRedirectState = useMemo(
         err instanceof Error ? err.message : "获取集群信息失败";
       logWithTimestamp("error", "获取集群信息失败: %s", message);
       setClusterError(message);
+      return null;
+    }
+  }, [canViewClusterAgents]);
+
+  const refreshOverviewSummary = useCallback(async () => {
+    if (!canViewClusterAgents) {
+      setOverviewSummary(null);
+      return null;
+    }
+    try {
+      const data = await getOverviewSummary();
+      setOverviewSummary(data);
+      return data;
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "获取首页汇总失败";
+      logWithTimestamp("error", "获取首页汇总失败: %s", message);
+      setOverviewSummary(null);
       return null;
     }
   }, [canViewClusterAgents]);
@@ -10959,11 +10958,12 @@ const loginRedirectState = useMemo(
       const filtered = data.filter(
         (run) => run.operator !== CONNECTION_TEST_OPERATOR
       );
-      setRuns((previous) =>
-        areRunListsEqual(previous, filtered) ? previous ?? filtered : filtered
-      );
-      logWithTimestamp("info", "巡检历史获取成功,数量: %d", filtered.length);
-      return filtered;
+        setRuns((previous) =>
+          areRunListsEqual(previous, filtered) ? previous ?? filtered : filtered
+        );
+        void refreshOverviewSummary();
+        logWithTimestamp("info", "巡检历史获取成功,数量: %d", filtered.length);
+        return filtered;
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "获取巡检历史失败";
@@ -10971,7 +10971,13 @@ const loginRedirectState = useMemo(
       showClusterNotice(currentNoticeScope, message, "error");
       return null;
     }
-  }, [currentNoticeScope, showClusterNotice, canViewHistory, hasPermission]);
+  }, [
+    currentNoticeScope,
+    showClusterNotice,
+    canViewHistory,
+    hasPermission,
+    refreshOverviewSummary,
+  ]);
 
   const handleCreateAgent = useCallback(
     async (payload: {
@@ -11471,20 +11477,22 @@ const loginRedirectState = useMemo(
       return;
     }
     void refreshClusters();
-      void refreshRuns();
-      void refreshItems();
-      void refreshSchedules();
-      void refreshRoles();
-      void refreshUsers();
-    }, [
-      isAuthenticated,
-      refreshClusters,
-      refreshRuns,
-      refreshItems,
-      refreshSchedules,
-      refreshRoles,
-      refreshUsers,
-    ]);
+    void refreshRuns();
+    void refreshOverviewSummary();
+    void refreshItems();
+    void refreshSchedules();
+    void refreshRoles();
+    void refreshUsers();
+  }, [
+    isAuthenticated,
+    refreshClusters,
+    refreshRuns,
+    refreshOverviewSummary,
+    refreshItems,
+    refreshSchedules,
+    refreshRoles,
+    refreshUsers,
+  ]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !isAuthenticated) {
@@ -13522,6 +13530,7 @@ const hasManualKubeconfig = useMemo(
       clusterDisplayIds={clusterDisplayIds}
       runDisplayIds={runDisplayIds}
       canViewHistory={canViewHistory}
+      podSummary={overviewSummary?.pod_total ?? null}
     />
   );
 

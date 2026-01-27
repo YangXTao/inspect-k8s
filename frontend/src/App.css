@@ -4139,6 +4139,10 @@ th {
   background: linear-gradient(90deg, #38bdf8, #0ea5e9);
 }
 
+.overview-bar-fill.empty {
+  background: #cbd5f5;
+}
+
 .overview-bar-value {
   font-weight: 600;
   color: #0f172a;

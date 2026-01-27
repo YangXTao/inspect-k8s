@@ -116,6 +116,7 @@ class InspectionRun(Base):
     report_path = Column(String(255), nullable=True)
     total_items = Column(Integer, nullable=False, default=0)
     processed_items = Column(Integer, nullable=False, default=0)
+    pod_count = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     completed_at = Column(DateTime, nullable=True)
     plan_json = Column(Text, nullable=True)

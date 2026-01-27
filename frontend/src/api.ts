@@ -17,6 +17,7 @@ import {
   AuthUser,
   AuditLog,
   AuditLogList,
+  OverviewSummary,
 } from "./types";
 
 const API_BASE = appConfig.apiBaseUrl.replace(/\/$/, "");
@@ -424,6 +425,10 @@ export function getReportDownloadUrl(
 
 export function getClusters(): Promise<ClusterConfig[]> {
   return request<ClusterConfig[]>("/clusters");
+}
+
+export function getOverviewSummary(): Promise<OverviewSummary> {
+  return request<OverviewSummary>("/overview/summary");
 }
 
 export function getClusterNodes(

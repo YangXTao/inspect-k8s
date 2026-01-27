@@ -370,6 +370,11 @@ def _ensure_inspection_runs_schema() -> None:
         statements.append(
             f"ALTER TABLE inspection_runs ADD COLUMN processed_items {column_type} NOT NULL DEFAULT 0"
         )
+    if "pod_count" not in existing_columns:
+        column_type = "INTEGER" if dialect == "sqlite" else "INT"
+        statements.append(
+            f"ALTER TABLE inspection_runs ADD COLUMN pod_count {column_type} NULL"
+        )
     if "plan_json" not in existing_columns:
         column_type = "TEXT" if dialect == "sqlite" else "TEXT"
         statements.append(
