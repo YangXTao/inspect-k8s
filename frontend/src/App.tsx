@@ -1335,32 +1335,39 @@ const DashboardOverviewView = ({
     const plotWidth = width - padding.left - padding.right;
     const plotHeight = height - padding.top - padding.bottom;
     const maxIndex = Math.max(timeline.length - 1, 1);
-    const availableIndexSet = new Set<number>();
-    series.forEach((entry) => {
-      entry.values.forEach((value, index) => {
-        if (typeof value === "number" && Number.isFinite(value)) {
-          availableIndexSet.add(index);
-        }
-      });
-    });
-    const resolveNearestIndex = (target: number) => {
-      if (availableIndexSet.size === 0) {
-        return target;
+    const hasAnyValue = series.some((entry) =>
+      entry.values.some(
+        (value) => typeof value === "number" && Number.isFinite(value)
+      )
+    );
+    const resolveNearestValueIndex = (
+      values: Array<number | null>,
+      target: number
+    ) => {
+      if (target < 0 || target > maxIndex) {
+        return null;
       }
-      if (availableIndexSet.has(target)) {
+      const current = values[target];
+      if (typeof current === "number" && Number.isFinite(current)) {
         return target;
       }
       for (let offset = 1; offset <= maxIndex; offset += 1) {
         const left = target - offset;
-        if (left >= 0 && availableIndexSet.has(left)) {
-          return left;
+        if (left >= 0) {
+          const value = values[left];
+          if (typeof value === "number" && Number.isFinite(value)) {
+            return left;
+          }
         }
         const right = target + offset;
-        if (right <= maxIndex && availableIndexSet.has(right)) {
-          return right;
+        if (right <= maxIndex) {
+          const value = values[right];
+          if (typeof value === "number" && Number.isFinite(value)) {
+            return right;
+          }
         }
       }
-      return target;
+      return null;
     };
     const labelIntervalSeconds = 5 * 60;
     const labelBase =
@@ -1404,7 +1411,7 @@ const DashboardOverviewView = ({
         }));
         return;
       }
-      if (availableIndexSet.size === 0) {
+      if (!hasAnyValue) {
         setHoverState((prev) => ({
           ...prev,
           [metric]: { ...prev[metric], index: null, point: null },
@@ -1415,7 +1422,6 @@ const DashboardOverviewView = ({
         ((x - scaledPaddingLeft) / scaledPlotWidth) * maxIndex
       );
       const clamped = Math.min(Math.max(index, 0), maxIndex);
-      const nearestIndex = resolveNearestIndex(clamped);
       const align = x > rect.width * 0.72 ? "left" : "right";
       const tooltipX =
         align === "left"
@@ -1425,7 +1431,7 @@ const DashboardOverviewView = ({
       setHoverState((prev) => ({
         ...prev,
         [metric]: {
-          index: nearestIndex,
+          index: clamped,
           point: { x: tooltipX, y: tooltipY },
           align,
         },
@@ -1445,7 +1451,14 @@ const DashboardOverviewView = ({
         ? []
         : series
             .map((entry) => {
-              const value = entry.values[currentHover.index ?? 0];
+              const nearestIndex = resolveNearestValueIndex(
+                entry.values,
+                currentHover.index ?? 0
+              );
+              if (nearestIndex === null) {
+                return null;
+              }
+              const value = entry.values[nearestIndex];
               if (typeof value !== "number" || !Number.isFinite(value)) {
                 return null;
               }
@@ -11211,7 +11224,7 @@ const loginRedirectState = useMemo(
     }
     try {
       const data = await getOverviewMetrics({
-        minutes: 180,
+        minutes: 30,
         interval_seconds: 60,
       });
       setOverviewMetrics(data);
