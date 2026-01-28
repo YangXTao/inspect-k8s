@@ -1110,12 +1110,14 @@ const DashboardOverviewView = ({
     cpu: {
       index: null as number | null,
       point: null as { x: number; y: number } | null,
+      lineX: null as number | null,
       lineY: null as number | null,
       align: "right" as "right" | "left",
     },
     memory: {
       index: null as number | null,
       point: null as { x: number; y: number } | null,
+      lineX: null as number | null,
       lineY: null as number | null,
       align: "right" as "right" | "left",
     },
@@ -1417,21 +1419,19 @@ const DashboardOverviewView = ({
       if (x < scaledPaddingLeft || x > rect.width - scaledRight) {
         setHoverState((prev) => ({
           ...prev,
-          [metric]: { ...prev[metric], index: null, point: null, lineY: null },
+          [metric]: { ...prev[metric], index: null, point: null, lineX: null, lineY: null },
         }));
         return;
       }
       if (!hasAnyValue) {
         setHoverState((prev) => ({
           ...prev,
-          [metric]: { ...prev[metric], index: null, point: null, lineY: null },
+          [metric]: { ...prev[metric], index: null, point: null, lineX: null, lineY: null },
         }));
         return;
       }
-      const index = Math.round(
-        ((x - scaledPaddingLeft) / scaledPlotWidth) * maxIndex
-      );
-      const clamped = Math.min(Math.max(index, 0), maxIndex);
+      const rawIndex = ((x - scaledPaddingLeft) / scaledPlotWidth) * maxIndex;
+      const clamped = Math.min(Math.max(Math.round(rawIndex), 0), maxIndex);
       const align = x > rect.width * 0.72 ? "left" : "right";
       const tooltipX =
         align === "left"
@@ -1442,22 +1442,27 @@ const DashboardOverviewView = ({
         Math.max(y / scale, padding.top),
         height - padding.bottom
       );
+      const lineX = Math.min(
+        Math.max(rawIndex, 0),
+        maxIndex
+      );
       setHoverState((prev) => ({
         ...prev,
         [metric]: {
           index: clamped,
           point: { x: tooltipX, y: tooltipY },
           lineY,
+          lineX,
           align,
         },
-        [otherMetric]: { ...prev[otherMetric], index: null, point: null, lineY: null },
+        [otherMetric]: { ...prev[otherMetric], index: null, point: null, lineX: null, lineY: null },
       }));
     };
 
     const handleMouseLeave = () => {
       setHoverState((prev) => ({
         ...prev,
-        [metric]: { ...prev[metric], index: null, point: null, lineY: null },
+        [metric]: { ...prev[metric], index: null, point: null, lineX: null, lineY: null },
       }));
     };
 
@@ -1528,10 +1533,10 @@ const DashboardOverviewView = ({
                 stroke={entry.color}
               />
             ))}
-            {currentHover.index !== null && (
+            {currentHover.lineX !== null && (
               <line
-                x1={toX(currentHover.index)}
-                x2={toX(currentHover.index)}
+                x1={toX(currentHover.lineX)}
+                x2={toX(currentHover.lineX)}
                 y1={padding.top}
                 y2={height - padding.bottom}
                 className="overview-line-hover"
