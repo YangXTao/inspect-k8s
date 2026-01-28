@@ -45,6 +45,7 @@ DEFAULT_BATCH_SIZE = 1
 DEFAULT_TIMEOUT = 15
 DEFAULT_NODE_REPORT_INTERVAL = 86400
 DEFAULT_METRICS_REPORT_INTERVAL = 60
+DEFAULT_STATUS_REPORT_INTERVAL = 60
 
 
 def _as_bool(value: Any) -> bool:
@@ -285,6 +286,7 @@ class AgentConfig:
     request_timeout: int = DEFAULT_TIMEOUT
     node_report_interval: int = DEFAULT_NODE_REPORT_INTERVAL
     metrics_report_interval: int = DEFAULT_METRICS_REPORT_INTERVAL
+    status_report_interval: int = DEFAULT_STATUS_REPORT_INTERVAL
 
     def load_token(self) -> Optional[str]:
         if self.token:
@@ -454,6 +456,13 @@ def load_config(config_path: Optional[str]) -> AgentConfig:
             ),
             DEFAULT_METRICS_REPORT_INTERVAL,
         ),
+        status_report_interval=_as_int(
+            os.getenv(
+                'INSPECT_AGENT_STATUS_REPORT_INTERVAL',
+                agent_cfg.get('status_report_interval'),
+            ),
+            DEFAULT_STATUS_REPORT_INTERVAL,
+        ),
     )
     return config
 class AgentClient:
@@ -616,6 +625,7 @@ class AgentRunner:
         self._active_prom_url: Optional[str] = None
         self._last_nodes_report_at: Optional[datetime] = None
         self._last_metrics_report_at: Optional[datetime] = None
+        self._last_status_report_at: Optional[datetime] = None
         self._last_nodes_report_request: Optional[str] = None
         self._apply_prometheus_url(config.prometheus_url)
 
@@ -672,6 +682,15 @@ class AgentRunner:
         if not self._last_metrics_report_at:
             return True
         elapsed = (now - self._last_metrics_report_at).total_seconds()
+        return elapsed >= interval
+
+    def _should_report_status(self, now: datetime) -> bool:
+        interval = max(0, self.config.status_report_interval)
+        if interval == 0:
+            return False
+        if not self._last_status_report_at:
+            return True
+        elapsed = (now - self._last_status_report_at).total_seconds()
         return elapsed >= interval
 
     def _collect_nodes_summary(self) -> Optional[Tuple[int, int]]:
@@ -911,12 +930,21 @@ class AgentRunner:
                 nodes_output = self._collect_nodes_output()
                 if nodes_output:
                     nodes_retrieved_at = now.isoformat()
-            if self._should_report_metrics(now):
-                self._last_metrics_report_at = now
+            should_report_status = self._should_report_status(now)
+            if should_report_status:
+                self._last_status_report_at = now
                 summary = self._collect_nodes_summary()
                 if summary:
                     node_ready, node_total = summary
                 pod_count = self._collect_pod_count()
+            if self._should_report_metrics(now):
+                self._last_metrics_report_at = now
+                if (not should_report_status) and self.config.status_report_interval == 0:
+                    summary = self._collect_nodes_summary()
+                    if summary:
+                        node_ready, node_total = summary
+                    if pod_count is None:
+                        pod_count = self._collect_pod_count()
                 cpu_usage, memory_usage = self._collect_cluster_utilization()
             heartbeat_data = self.client.send_heartbeat(
                 nodes_output=nodes_output,
