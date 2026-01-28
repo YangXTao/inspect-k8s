@@ -1107,8 +1107,18 @@ const DashboardOverviewView = ({
 }: DashboardOverviewProps) => {
   const chartWrapperRef = useRef<HTMLDivElement | null>(null);
   const [hoverState, setHoverState] = useState(() => ({
-    cpu: { index: null as number | null, point: null as { x: number; y: number } | null, align: "right" as "right" | "left" },
-    memory: { index: null as number | null, point: null as { x: number; y: number } | null, align: "right" as "right" | "left" },
+    cpu: {
+      index: null as number | null,
+      point: null as { x: number; y: number } | null,
+      lineY: null as number | null,
+      align: "right" as "right" | "left",
+    },
+    memory: {
+      index: null as number | null,
+      point: null as { x: number; y: number } | null,
+      lineY: null as number | null,
+      align: "right" as "right" | "left",
+    },
   }));
   const [runDetails, setRunDetails] = useState<Record<number, InspectionRun>>(
     {}
@@ -1369,7 +1379,7 @@ const DashboardOverviewView = ({
       }
       return null;
     };
-    const labelIntervalSeconds = 5 * 60;
+    const labelIntervalSeconds = 10 * 60;
     const labelBase =
       timeline.length > 0
         ? new Date(
@@ -1407,14 +1417,14 @@ const DashboardOverviewView = ({
       if (x < scaledPaddingLeft || x > rect.width - scaledRight) {
         setHoverState((prev) => ({
           ...prev,
-          [metric]: { ...prev[metric], index: null, point: null },
+          [metric]: { ...prev[metric], index: null, point: null, lineY: null },
         }));
         return;
       }
       if (!hasAnyValue) {
         setHoverState((prev) => ({
           ...prev,
-          [metric]: { ...prev[metric], index: null, point: null },
+          [metric]: { ...prev[metric], index: null, point: null, lineY: null },
         }));
         return;
       }
@@ -1428,21 +1438,26 @@ const DashboardOverviewView = ({
           ? Math.max(0, Math.min(rect.width, x - 12))
           : Math.max(0, Math.min(rect.width, x + 12));
       const tooltipY = Math.max(0, Math.min(rect.height, y + 12));
+      const lineY = Math.min(
+        Math.max(y / scale, padding.top),
+        height - padding.bottom
+      );
       setHoverState((prev) => ({
         ...prev,
         [metric]: {
           index: clamped,
           point: { x: tooltipX, y: tooltipY },
+          lineY,
           align,
         },
-        [otherMetric]: { ...prev[otherMetric], index: null, point: null },
+        [otherMetric]: { ...prev[otherMetric], index: null, point: null, lineY: null },
       }));
     };
 
     const handleMouseLeave = () => {
       setHoverState((prev) => ({
         ...prev,
-        [metric]: { ...prev[metric], index: null, point: null },
+        [metric]: { ...prev[metric], index: null, point: null, lineY: null },
       }));
     };
 
@@ -1513,23 +1528,23 @@ const DashboardOverviewView = ({
                 stroke={entry.color}
               />
             ))}
-            {series.map((entry) =>
-              entry.values.map((value, index) => {
-                if (value === null || Number.isNaN(value)) {
-                  return null;
-                }
-                const x = toX(index);
-                const y = toY(Math.min(Math.max(value, 0), 100));
-                return (
-                  <circle
-                    key={`${entry.name}-${index}`}
-                    cx={x}
-                    cy={y}
-                    r={2.2}
-                    fill={entry.color}
-                  />
-                );
-              })
+            {currentHover.index !== null && (
+              <line
+                x1={toX(currentHover.index)}
+                x2={toX(currentHover.index)}
+                y1={padding.top}
+                y2={height - padding.bottom}
+                className="overview-line-hover"
+              />
+            )}
+            {currentHover.lineY !== null && (
+              <line
+                x1={padding.left}
+                x2={width - padding.right}
+                y1={currentHover.lineY}
+                y2={currentHover.lineY}
+                className="overview-line-hover"
+              />
             )}
             {timeline.map((time, index) => {
               if (!labelBase) {
@@ -11224,7 +11239,7 @@ const loginRedirectState = useMemo(
     }
     try {
       const data = await getOverviewMetrics({
-        minutes: 30,
+        minutes: 60,
         interval_seconds: 60,
       });
       setOverviewMetrics(data);
