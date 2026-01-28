@@ -1105,6 +1105,11 @@ const DashboardOverviewView = ({
   overviewSummary,
   overviewMetrics,
 }: DashboardOverviewProps) => {
+  const chartWrapperRef = useRef<HTMLDivElement | null>(null);
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number } | null>(
+    null
+  );
   const [runDetails, setRunDetails] = useState<Record<number, InspectionRun>>(
     {}
   );
@@ -1303,7 +1308,7 @@ const DashboardOverviewView = ({
     }
     const width = 640;
     const height = 240;
-    const padding = { left: 44, right: 12, top: 12, bottom: 34 };
+    const padding = { left: 32, right: 12, top: 12, bottom: 34 };
     const plotWidth = width - padding.left - padding.right;
     const plotHeight = height - padding.top - padding.bottom;
     const maxIndex = Math.max(timeline.length - 1, 1);
@@ -1325,9 +1330,56 @@ const DashboardOverviewView = ({
       });
       return path;
     };
+    const handleMouseMove = (event: React.MouseEvent<SVGSVGElement>) => {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const scale = rect.width / width;
+      const scaledPaddingLeft = padding.left * scale;
+      const scaledPlotWidth = plotWidth * scale;
+      const scaledRight = padding.right * scale;
+      if (x < scaledPaddingLeft || x > rect.width - scaledRight) {
+        setHoverIndex(null);
+        setHoverPoint(null);
+        return;
+      }
+      const index = Math.round(
+        ((x - scaledPaddingLeft) / scaledPlotWidth) * maxIndex
+      );
+      const clamped = Math.min(Math.max(index, 0), maxIndex);
+      const tooltipX = toX(clamped) * scale;
+      setHoverIndex(clamped);
+      setHoverPoint({ x: tooltipX, y: padding.top * scale });
+    };
+
+    const handleMouseLeave = () => {
+      setHoverIndex(null);
+      setHoverPoint(null);
+    };
+
+    const tooltipLines =
+      hoverIndex === null
+        ? []
+        : series.map((entry) => {
+            const value = entry.values[hoverIndex];
+            const label =
+              typeof value === "number" && Number.isFinite(value)
+                ? `${value.toFixed(2)}%`
+                : "-";
+            return {
+              name: entry.name,
+              value: label,
+              color: entry.color,
+            };
+          });
+
     return (
-      <div className="overview-line-chart">
-        <svg viewBox={`0 0 ${width} ${height}`} className="overview-line-svg">
+      <div className="overview-line-chart" ref={chartWrapperRef}>
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="overview-line-svg"
+          onMouseMove={handleMouseMove}
+          onMouseLeave={handleMouseLeave}
+        >
           {[0, 50, 100].map((tick) => {
             const y = toY(tick);
             return (
@@ -1340,9 +1392,9 @@ const DashboardOverviewView = ({
                   className="overview-line-grid"
                 />
                 <text
-                  x={padding.left - 8}
+                  x={padding.left + 4}
                   y={y + 4}
-                  textAnchor="end"
+                  textAnchor="start"
                   className="overview-line-axis-label"
                 >
                   {tick}%
@@ -1394,6 +1446,30 @@ const DashboardOverviewView = ({
             );
           })}
         </svg>
+        {hoverIndex !== null && hoverPoint && (
+          <div
+            className="overview-line-tooltip"
+            style={{
+              left: hoverPoint.x,
+              top: hoverPoint.y,
+            }}
+          >
+            <div className="overview-line-tooltip-time">
+              {formatChartTime(timeline[hoverIndex])}
+            </div>
+            {tooltipLines.map((line) => (
+              <div key={line.name} className="overview-line-tooltip-row">
+                <span
+                  className="overview-line-legend-dot"
+                  style={{ background: line.color }}
+                />
+                <span className="overview-line-tooltip-text">
+                  {line.name}：{line.value}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="overview-line-legend">
           {series.map((entry) => (
             <div key={entry.name} className="overview-line-legend-item">
