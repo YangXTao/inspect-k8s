@@ -1149,7 +1149,12 @@ def _sync_cluster_prometheus_to_agents(
     )
     for agent in agents:
         if agent.prometheus_url != prom_url:
-            crud.update_inspection_agent(db, agent, prometheus_url=prom_url)
+            crud.update_inspection_agent(
+                db,
+                agent,
+                prometheus_url=prom_url,
+                log_audit=False,
+            )
 
 
 def _remove_file_safely(path: str | Path | None) -> None:
@@ -2292,7 +2297,12 @@ def agent_bootstrap(
                 update_kwargs["contexts_json"] = contexts_json
             if agent_description is not None:
                 update_kwargs["description"] = agent_description
-            cluster = crud.update_cluster(db, cluster, **update_kwargs)
+            cluster = crud.update_cluster(
+                db,
+                cluster,
+                log_audit=False,
+                **update_kwargs,
+            )
 
         cluster_prom_url = _normalize_prometheus_url(cluster.prometheus_url)
         final_prom_url = cluster_prom_url or effective_prom_url
@@ -2301,6 +2311,7 @@ def agent_bootstrap(
                 db,
                 cluster,
                 prometheus_url=final_prom_url,
+                log_audit=False,
             )
 
         agent = crud.update_inspection_agent(
@@ -2309,6 +2320,7 @@ def agent_bootstrap(
             cluster=cluster,
             is_enabled=True,
             prometheus_url=final_prom_url or agent.prometheus_url,
+            log_audit=False,
         )
         if cluster_was_pending and cluster is not None:
             try:

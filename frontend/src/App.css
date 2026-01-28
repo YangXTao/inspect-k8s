@@ -4152,7 +4152,7 @@ th {
 
 .overview-line-tooltip {
   position: absolute;
-  transform: translate(-50%, calc(-100% - 8px));
+  transform: translate(0, 0);
   background: rgba(15, 23, 42, 0.95);
   color: #fff;
   padding: 8px 10px;

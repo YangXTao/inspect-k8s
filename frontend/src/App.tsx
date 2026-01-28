@@ -1308,7 +1308,7 @@ const DashboardOverviewView = ({
     }
     const width = 640;
     const height = 240;
-    const padding = { left: 32, right: 12, top: 12, bottom: 34 };
+    const padding = { left: 14, right: 12, top: 12, bottom: 34 };
     const plotWidth = width - padding.left - padding.right;
     const plotHeight = height - padding.top - padding.bottom;
     const maxIndex = Math.max(timeline.length - 1, 1);
@@ -1333,6 +1333,7 @@ const DashboardOverviewView = ({
     const handleMouseMove = (event: React.MouseEvent<SVGSVGElement>) => {
       const rect = event.currentTarget.getBoundingClientRect();
       const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
       const scale = rect.width / width;
       const scaledPaddingLeft = padding.left * scale;
       const scaledPlotWidth = plotWidth * scale;
@@ -1346,9 +1347,10 @@ const DashboardOverviewView = ({
         ((x - scaledPaddingLeft) / scaledPlotWidth) * maxIndex
       );
       const clamped = Math.min(Math.max(index, 0), maxIndex);
-      const tooltipX = toX(clamped) * scale;
+      const tooltipX = Math.max(0, Math.min(rect.width, x + 12));
+      const tooltipY = Math.max(0, Math.min(rect.height, y + 12));
       setHoverIndex(clamped);
-      setHoverPoint({ x: tooltipX, y: padding.top * scale });
+      setHoverPoint({ x: tooltipX, y: tooltipY });
     };
 
     const handleMouseLeave = () => {
@@ -1392,7 +1394,7 @@ const DashboardOverviewView = ({
                   className="overview-line-grid"
                 />
                 <text
-                  x={padding.left + 4}
+                  x={2}
                   y={y + 4}
                   textAnchor="start"
                   className="overview-line-axis-label"

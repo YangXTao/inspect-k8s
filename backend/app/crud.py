@@ -684,6 +684,7 @@ def update_inspection_agent(
     is_enabled: Optional[bool] = None,
     cluster: Any = UNSET,
     prometheus_url: Any = UNSET,
+    log_audit: bool = True,
 ) -> models.InspectionAgent:
     if name is not None:
         agent.name = name
@@ -699,13 +700,14 @@ def update_inspection_agent(
     db.add(agent)
     db.commit()
     db.refresh(agent)
-    log_action(
-        db,
-        action="update",
-        entity_type="inspection_agent",
-        entity_id=agent.id,
-        description=f"更新巡检 Agent '{agent.name}'",
-    )
+    if log_audit:
+        log_action(
+            db,
+            action="update",
+            entity_type="inspection_agent",
+            entity_id=agent.id,
+            description=f"更新巡检 Agent '{agent.name}'",
+        )
     return agent
 
 
