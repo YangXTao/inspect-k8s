@@ -1331,10 +1331,37 @@ const DashboardOverviewView = ({
     const otherMetric: "cpu" | "memory" = metric === "cpu" ? "memory" : "cpu";
     const width = 640;
     const height = 240;
-    const padding = { left: 22, right: 12, top: 12, bottom: 34 };
+    const padding = { left: 14, right: 12, top: 12, bottom: 34 };
     const plotWidth = width - padding.left - padding.right;
     const plotHeight = height - padding.top - padding.bottom;
     const maxIndex = Math.max(timeline.length - 1, 1);
+    const availableIndexSet = new Set<number>();
+    series.forEach((entry) => {
+      entry.values.forEach((value, index) => {
+        if (typeof value === "number" && Number.isFinite(value)) {
+          availableIndexSet.add(index);
+        }
+      });
+    });
+    const resolveNearestIndex = (target: number) => {
+      if (availableIndexSet.size === 0) {
+        return target;
+      }
+      if (availableIndexSet.has(target)) {
+        return target;
+      }
+      for (let offset = 1; offset <= maxIndex; offset += 1) {
+        const left = target - offset;
+        if (left >= 0 && availableIndexSet.has(left)) {
+          return left;
+        }
+        const right = target + offset;
+        if (right <= maxIndex && availableIndexSet.has(right)) {
+          return right;
+        }
+      }
+      return target;
+    };
     const labelIntervalSeconds = 20 * 60;
     const labelBase =
       timeline.length > 0
@@ -1377,10 +1404,18 @@ const DashboardOverviewView = ({
         }));
         return;
       }
+      if (availableIndexSet.size === 0) {
+        setHoverState((prev) => ({
+          ...prev,
+          [metric]: { ...prev[metric], index: null, point: null },
+        }));
+        return;
+      }
       const index = Math.round(
         ((x - scaledPaddingLeft) / scaledPlotWidth) * maxIndex
       );
       const clamped = Math.min(Math.max(index, 0), maxIndex);
+      const nearestIndex = resolveNearestIndex(clamped);
       const align = x > rect.width * 0.72 ? "left" : "right";
       const tooltipX =
         align === "left"
@@ -1390,7 +1425,7 @@ const DashboardOverviewView = ({
       setHoverState((prev) => ({
         ...prev,
         [metric]: {
-          index: clamped,
+          index: nearestIndex,
           point: { x: tooltipX, y: tooltipY },
           align,
         },
@@ -1408,18 +1443,23 @@ const DashboardOverviewView = ({
     const tooltipLines =
       currentHover.index === null
         ? []
-        : series.map((entry) => {
-            const value = entry.values[currentHover.index ?? 0];
-            const label =
-              typeof value === "number" && Number.isFinite(value)
-                ? `${value.toFixed(2)}%`
-                : "-";
-            return {
-              name: entry.name,
-              value: label,
-              color: entry.color,
-            };
-          });
+        : series
+            .map((entry) => {
+              const value = entry.values[currentHover.index ?? 0];
+              if (typeof value !== "number" || !Number.isFinite(value)) {
+                return null;
+              }
+              return {
+                name: entry.name,
+                value: `${value.toFixed(2)}%`,
+                color: entry.color,
+              };
+            })
+            .filter(Boolean) as Array<{
+            name: string;
+            value: string;
+            color: string;
+          }>;
 
     return (
       <div className="overview-line-chart" ref={chartWrapperRef}>
@@ -1472,7 +1512,7 @@ const DashboardOverviewView = ({
                     key={`${entry.name}-${index}`}
                     cx={x}
                     cy={y}
-                    r={3}
+                    r={2.2}
                     fill={entry.color}
                   />
                 );
