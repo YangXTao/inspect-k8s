@@ -108,12 +108,13 @@ def _resolve_run_audit_override(
     if not username:
         return {}
     operator = (getattr(run, "operator", None) or "").strip()
-    if not operator.endswith(SCHEDULED_AUDIT_SUFFIX):
-        return {}
-    if username.endswith(SCHEDULED_AUDIT_SUFFIX):
-        audit_username = username
+    if operator.endswith(SCHEDULED_AUDIT_SUFFIX):
+        if username.endswith(SCHEDULED_AUDIT_SUFFIX):
+            audit_username = username
+        else:
+            audit_username = f"{username}{SCHEDULED_AUDIT_SUFFIX}"
     else:
-        audit_username = f"{username}{SCHEDULED_AUDIT_SUFFIX}"
+        audit_username = username
     return {
         "user_id": getattr(run, "created_by_user_id", None),
         "username": audit_username,

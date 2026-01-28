@@ -984,11 +984,24 @@ const extractPercentageValue = (value?: string | null) => {
   if (!value) {
     return null;
   }
-  const match = /(\d+(?:\.\d+)?)\s*%/.exec(value);
-  if (!match) {
+  const percentMatch = /(\d+(?:\.\d+)?)\s*%/.exec(value);
+  if (percentMatch) {
+    const parsed = Number(percentMatch[1]);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  const labeledMatch =
+    /(?:sample|value|avg|平均|样本|指标)\s*[:：]?\s*([0-9]+(?:\.\d+)?)/i.exec(
+      value
+    );
+  if (labeledMatch) {
+    const parsed = Number(labeledMatch[1]);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  const numberMatch = /([0-9]+(?:\.\d+)?)/.exec(value);
+  if (!numberMatch) {
     return null;
   }
-  const parsed = Number(match[1]);
+  const parsed = Number(numberMatch[1]);
   return Number.isFinite(parsed) ? parsed : null;
 };
 
@@ -1251,6 +1264,8 @@ const DashboardOverviewView = ({
         "集群cpu使用",
         "集群 cpu 使用率",
         "集群 cpu",
+        "集群cpu 30分钟内的使用率",
+        "集群 cpu 30分钟内的使用率",
         "30分钟",
         "30 分钟",
       ]),
@@ -1265,6 +1280,8 @@ const DashboardOverviewView = ({
         "集群内存",
         "集群内存使用率",
         "集群 内存 使用率",
+        "集群内存 30分钟内的使用率",
+        "集群 内存 30分钟内的使用率",
         "30分钟",
         "30 分钟",
       ]),
@@ -1290,9 +1307,10 @@ const DashboardOverviewView = ({
             const value = entry.value;
             const height =
               value === null ? 0 : Math.min(Math.max(value, 0), 100);
-            const valueLabel = value === null ? "-" : `${value.toFixed(1)}%`;
+            const valueLabel = value === null ? "-" : `${value.toFixed(2)}%`;
             return (
               <div key={entry.clusterId} className="overview-vertical-bar">
+                <div className="overview-vertical-bar-value">{valueLabel}</div>
                 <div className={`overview-vertical-bar-track ${variant}`}>
                   <div
                     className={`overview-vertical-bar-fill ${variant}${
@@ -1301,7 +1319,6 @@ const DashboardOverviewView = ({
                     style={{ height: `${height}%` }}
                   />
                 </div>
-                <div className="overview-vertical-bar-value">{valueLabel}</div>
                 <div className="overview-vertical-bar-label">{entry.name}</div>
               </div>
             );

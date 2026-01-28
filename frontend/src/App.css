@@ -4120,9 +4120,10 @@ th {
 .overview-vertical-bars {
   height: 180px;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(56px, 1fr));
+  gap: 0;
   align-items: end;
+  border-bottom: 1px solid #e2e8f0;
 }
 
 .overview-vertical-bar {
@@ -4131,6 +4132,11 @@ th {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  border-right: 1px solid #e2e8f0;
+}
+
+.overview-vertical-bar:last-child {
+  border-right: none;
 }
 
 .overview-vertical-bar-track {
@@ -4165,7 +4171,7 @@ th {
 
 .overview-vertical-bar-value {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   color: #0f172a;
 }
 
@@ -4350,7 +4356,7 @@ th {
   }
 
   .overview-vertical-bars {
-    grid-template-columns: repeat(auto-fit, minmax(56px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(48px, 1fr));
   }
 }
 
