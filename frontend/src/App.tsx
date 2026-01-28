@@ -1249,6 +1249,46 @@ const DashboardOverviewView = ({
     [buildUsageSeries]
   );
 
+  const renderUsageChart = (
+    entries: Array<{ clusterId: number; name: string; value: number | null }>,
+    variant: "cpu" | "memory"
+  ) => {
+    if (entries.length === 0) {
+      return <div className="placeholder">暂无集群</div>;
+    }
+    return (
+      <div className="overview-vertical-chart">
+        <div className="overview-vertical-axis">
+          <span>100%</span>
+          <span>50%</span>
+          <span>0%</span>
+        </div>
+        <div className="overview-vertical-bars">
+          {entries.map((entry) => {
+            const value = entry.value;
+            const height =
+              value === null ? 0 : Math.min(Math.max(value, 0), 100);
+            const valueLabel = value === null ? "-" : `${value.toFixed(1)}%`;
+            return (
+              <div key={entry.clusterId} className="overview-vertical-bar">
+                <div className={`overview-vertical-bar-track ${variant}`}>
+                  <div
+                    className={`overview-vertical-bar-fill ${variant}${
+                      value === null ? " empty" : ""
+                    }`}
+                    style={{ height: `${height}%` }}
+                  />
+                </div>
+                <div className="overview-vertical-bar-value">{valueLabel}</div>
+                <div className="overview-vertical-bar-label">{entry.name}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   const indicatorCards = useMemo(() => {
     return clusters.map((cluster) => {
       const latestRun = latestRunByCluster.get(cluster.id) ?? null;
@@ -1324,7 +1364,7 @@ const DashboardOverviewView = ({
           <div className="overview-metric-value">{nodeCountLabel}</div>
         </div>
         <div className="overview-metric-card">
-          <div className="overview-metric-title">集群总 POD 数量</div>
+          <div className="overview-metric-title">POD总数</div>
           <div className="overview-metric-value">{podCountLabel}</div>
         </div>
       </section>
@@ -1339,65 +1379,11 @@ const DashboardOverviewView = ({
       <section className="overview-charts">
         <div className="overview-chart-card">
           <div className="overview-chart-title">集群 CPU 使用率</div>
-          {cpuUsageSeries.length === 0 ? (
-            <div className="placeholder">暂无集群</div>
-          ) : (
-            <ul className="overview-bar-list">
-              {cpuUsageSeries.map((entry) => {
-                const valueLabel =
-                  entry.value === null ? "-" : `${entry.value.toFixed(1)}%`;
-                const width =
-                  entry.value === null
-                    ? "0%"
-                    : `${Math.min(entry.value, 100)}%`;
-                return (
-                  <li key={entry.clusterId} className="overview-bar-item">
-                    <span className="overview-bar-label">{entry.name}</span>
-                    <div className="overview-bar-track">
-                      <div
-                        className={`overview-bar-fill${
-                          entry.value === null ? " empty" : ""
-                        }`}
-                        style={{ width }}
-                      />
-                    </div>
-                    <span className="overview-bar-value">{valueLabel}</span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          {renderUsageChart(cpuUsageSeries, "cpu")}
         </div>
         <div className="overview-chart-card">
           <div className="overview-chart-title">集群内存使用率</div>
-          {memoryUsageSeries.length === 0 ? (
-            <div className="placeholder">暂无集群</div>
-          ) : (
-            <ul className="overview-bar-list">
-              {memoryUsageSeries.map((entry) => {
-                const valueLabel =
-                  entry.value === null ? "-" : `${entry.value.toFixed(1)}%`;
-                const width =
-                  entry.value === null
-                    ? "0%"
-                    : `${Math.min(entry.value, 100)}%`;
-                return (
-                  <li key={entry.clusterId} className="overview-bar-item">
-                    <span className="overview-bar-label">{entry.name}</span>
-                    <div className="overview-bar-track">
-                      <div
-                        className={`overview-bar-fill memory${
-                          entry.value === null ? " empty" : ""
-                        }`}
-                        style={{ width }}
-                      />
-                    </div>
-                    <span className="overview-bar-value">{valueLabel}</span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          {renderUsageChart(memoryUsageSeries, "memory")}
         </div>
       </section>
 
@@ -1601,7 +1587,7 @@ const TopNavigation = ({
             />
           </svg>
         </span>
-        <span className="top-navigation-title">Kubernetes 巡检中心</span>
+        <span className="top-navigation-title">首页概览</span>
       </Link>
       <nav className="top-navigation-links">
         {showClusters && (
