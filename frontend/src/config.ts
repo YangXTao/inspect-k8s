@@ -38,7 +38,7 @@ export const appConfig = {
   apiBaseUrl: resolveApiBaseUrl(),
   branding: {
     logoUrl: "",
-    logoText: "K8s Inspection Center",
+    logoText: "Kubernetes 巡检中心",
   },
 };
 

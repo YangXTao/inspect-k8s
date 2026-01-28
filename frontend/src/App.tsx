@@ -1007,11 +1007,23 @@ const findResultByKeywords = (
     results.find((result) => {
       const name = (result.item_name ?? "").toLowerCase();
       const normalizedName = normalize(name);
+      const detail = (result.detail ?? "").toLowerCase();
+      const normalizedDetail = normalize(detail);
+      const suggestion = (result.suggestion ?? "").toLowerCase();
+      const normalizedSuggestion = normalize(suggestion);
       return lowered.some((keyword, index) => {
         if (name.includes(keyword)) {
           return true;
         }
         return normalizedName.includes(normalizedKeywords[index]);
+      }) || lowered.some((keyword, index) => {
+        if (detail.includes(keyword) || suggestion.includes(keyword)) {
+          return true;
+        }
+        return (
+          normalizedDetail.includes(normalizedKeywords[index]) ||
+          normalizedSuggestion.includes(normalizedKeywords[index])
+        );
       });
     }) ?? null
   );
@@ -1235,6 +1247,12 @@ const DashboardOverviewView = ({
         "cluster cpu usage",
         "cluster cpu",
         "集群cpu",
+        "集群cpu使用率",
+        "集群cpu使用",
+        "集群 cpu 使用率",
+        "集群 cpu",
+        "30分钟",
+        "30 分钟",
       ]),
     [buildUsageSeries]
   );
@@ -1245,6 +1263,10 @@ const DashboardOverviewView = ({
         "cluster memory usage",
         "cluster memory",
         "集群内存",
+        "集群内存使用率",
+        "集群 内存 使用率",
+        "30分钟",
+        "30 分钟",
       ]),
     [buildUsageSeries]
   );
@@ -2270,14 +2292,9 @@ const OverviewView = ({
               alt="logo"
               className="branding-logo"
             />
-          ) : (
-            <div className="branding-fallback">
-              {appConfig.branding.logoText}
-            </div>
-          )}
+          ) : null}
           <div>
             <h1>Kubernetes 巡检中心</h1>
-            <p>通过 Agent 托管集群连接，Server 统一管理巡检项和结果。</p>
           </div>
         </div>
         <div className="header-actions">
@@ -13609,7 +13626,7 @@ const hasManualKubeconfig = useMemo(
   return (
     <>
       <Helmet>
-        <title>K8s Inspection Center</title>
+        <title>Kubernetes 巡检中心</title>
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
       </Helmet>
       <TopNavigation

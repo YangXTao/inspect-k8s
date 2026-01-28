@@ -629,8 +629,8 @@ def check_cluster_cpu_usage(context: CheckContext) -> Tuple[str, str, str]:
         return missing
     prom = context.prom
     expression = (
-        "sum(rate(node_cpu_seconds_total{mode!='idle'}[5m])) "
-        "/ sum(rate(node_cpu_seconds_total[5m])) * 100"
+        "sum(rate(node_cpu_seconds_total{mode!='idle'}[30m])) "
+        "/ sum(rate(node_cpu_seconds_total[30m])) * 100"
     )
     ok, results, message = prom.query(expression)
     if not ok:
@@ -649,7 +649,7 @@ def check_cluster_cpu_usage(context: CheckContext) -> Tuple[str, str, str]:
     elif value >= 75:
         status = CHECK_STATUS_WARNING
         suggestion = "CPU 使用率偏高，关注关键工作负载或扩容。"
-    detail = f"Cluster CPU usage ≈ {_format_percentage(value)}."
+    detail = f"集群 CPU 30分钟内使用率 ≈ {_format_percentage(value)}。"
     return status, detail, suggestion
 
 
@@ -659,8 +659,8 @@ def check_cluster_memory_usage(context: CheckContext) -> Tuple[str, str, str]:
         return missing
     prom = context.prom
     expression = (
-        "(sum(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) "
-        "/ sum(node_memory_MemTotal_bytes)) * 100"
+        "avg_over_time((sum(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) "
+        "/ sum(node_memory_MemTotal_bytes))[30m]) * 100"
     )
     ok, results, message = prom.query(expression)
     if not ok:
@@ -679,7 +679,7 @@ def check_cluster_memory_usage(context: CheckContext) -> Tuple[str, str, str]:
     elif value >= 80:
         status = CHECK_STATUS_WARNING
         suggestion = "内存使用率偏高，请关注关键节点和工作负载。"
-    detail = f"Cluster memory usage ≈ {_format_percentage(value)}."
+    detail = f"集群内存 30分钟内使用率 ≈ {_format_percentage(value)}。"
     return status, detail, suggestion
 
 
@@ -853,12 +853,12 @@ DEFAULT_CHECKS = [
     },
     {
         "name": "Cluster CPU Usage",
-        "description": "Aggregated CPU utilisation via Prometheus metrics.",
+        "description": "Prometheus 统计的 30 分钟内集群 CPU 使用率。",
         "check_type": "cluster_cpu_usage",
     },
     {
         "name": "Cluster Memory Usage",
-        "description": "Overall memory utilisation from Prometheus.",
+        "description": "Prometheus 统计的 30 分钟内集群内存使用率。",
         "check_type": "cluster_memory_usage",
     },
     {
