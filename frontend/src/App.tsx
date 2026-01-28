@@ -12290,23 +12290,34 @@ const hasManualKubeconfig = useMemo(
             label: "同时删除关联巡检记录及报告文件",
           },
         ],
-        onConfirm: async (optionsMap) => {
-          try {
-            const deleteFiles = Boolean(optionsMap?.deleteLocalFiles);
-            for (const cluster of targets) {
-              logWithTimestamp("info", "删除集群: %s", cluster.id);
-              await apiDeleteCluster(cluster.id, { deleteFiles });
-            }
-            const targetIds = targets.map((cluster) => cluster.id);
-            const targetNames = new Set(targets.map((cluster) => cluster.name.trim()));
-            setClusters((prev) =>
-              prev.filter((cluster) => !targetIds.includes(cluster.id))
-            );
-            setClusterDisplayIds((prev) => {
-              let changed = false;
-              const next = { ...prev };
-              targetIds.forEach((clusterId) => {
-                if (clusterId in next) {
+          onConfirm: async (optionsMap) => {
+            try {
+              const deleteFiles = Boolean(optionsMap?.deleteLocalFiles);
+              for (const cluster of targets) {
+                logWithTimestamp("info", "删除集群: %s", cluster.id);
+                await apiDeleteCluster(cluster.id, { deleteFiles });
+              }
+              const targetIds = targets.map((cluster) => cluster.id);
+              const targetNames = new Set(targets.map((cluster) => cluster.name.trim()));
+              setClusters((prev) =>
+                prev.filter((cluster) => !targetIds.includes(cluster.id))
+              );
+              setOverviewMetrics((prev) => {
+                if (!prev) {
+                  return prev;
+                }
+                const nextSeries = prev.series.filter(
+                  (series) => !targetIds.includes(series.cluster_id)
+                );
+                return nextSeries.length === prev.series.length
+                  ? prev
+                  : { ...prev, series: nextSeries };
+              });
+              setClusterDisplayIds((prev) => {
+                let changed = false;
+                const next = { ...prev };
+                targetIds.forEach((clusterId) => {
+                  if (clusterId in next) {
                   delete next[clusterId];
                   changed = true;
                 }
@@ -12328,16 +12339,18 @@ const hasManualKubeconfig = useMemo(
                   return false;
                 }
                 return true;
-              })
-            );
-            await refreshClusters();
-            await refreshRuns();
-            await refreshAgents();
-            showClusterNotice("overview", `已删除 ${targets.length} 个集群`, "success");
-          } catch (err) {
-            const message =
-              err instanceof Error ? err.message : "删除集群失败";
-            logWithTimestamp("error", "批量删除集群失败: %s", message);
+                })
+              );
+              await refreshClusters();
+              await refreshRuns();
+              await refreshAgents();
+              await refreshOverviewSummary();
+              await refreshOverviewMetrics();
+              showClusterNotice("overview", `已删除 ${targets.length} 个集群`, "success");
+            } catch (err) {
+              const message =
+                err instanceof Error ? err.message : "删除集群失败";
+              logWithTimestamp("error", "批量删除集群失败: %s", message);
             showClusterNotice("overview", message, "error");
             throw err instanceof Error ? err : new Error(message);
           }
@@ -12349,7 +12362,10 @@ const hasManualKubeconfig = useMemo(
       clusters,
       refreshAgents,
       refreshClusters,
+      refreshOverviewMetrics,
+      refreshOverviewSummary,
       refreshRuns,
+      setOverviewMetrics,
       setAgents,
       setClusterDisplayIds,
       setClusters,
@@ -12391,6 +12407,17 @@ const hasManualKubeconfig = useMemo(
               await apiDeleteCluster(cluster.id, { deleteFiles });
               const clusterName = cluster.name.trim();
               setClusters((prev) => prev.filter((item) => item.id !== cluster.id));
+              setOverviewMetrics((prev) => {
+                if (!prev) {
+                  return prev;
+                }
+                const nextSeries = prev.series.filter(
+                  (series) => series.cluster_id !== cluster.id
+                );
+                return nextSeries.length === prev.series.length
+                  ? prev
+                  : { ...prev, series: nextSeries };
+              });
               setClusterDisplayIds((prev) => {
                 if (!(cluster.id in prev)) {
                   return prev;
@@ -12419,6 +12446,8 @@ const hasManualKubeconfig = useMemo(
               await refreshClusters();
               await refreshRuns();
               await refreshAgents();
+              await refreshOverviewSummary();
+              await refreshOverviewMetrics();
               const successScope = location.pathname.includes("/clusters/")
                 ? "overview"
                 : currentNoticeScope;
@@ -12440,10 +12469,13 @@ const hasManualKubeconfig = useMemo(
     [
       refreshAgents,
       refreshClusters,
+      refreshOverviewMetrics,
+      refreshOverviewSummary,
       refreshRuns,
       location.pathname,
       navigate,
       currentNoticeScope,
+      setOverviewMetrics,
       setAgents,
       setClusterDisplayIds,
       setClusters,
