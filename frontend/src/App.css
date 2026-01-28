@@ -4099,6 +4099,54 @@ th {
   color: #0f172a;
 }
 
+.overview-line-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.overview-line-svg {
+  width: 100%;
+  height: 220px;
+  display: block;
+}
+
+.overview-line-grid {
+  stroke: #e2e8f0;
+  stroke-dasharray: 4 4;
+}
+
+.overview-line-axis-label {
+  font-size: 11px;
+  fill: #94a3b8;
+}
+
+.overview-line-path {
+  fill: none;
+  stroke-width: 2;
+}
+
+.overview-line-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.overview-line-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.overview-line-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
 .overview-vertical-chart {
   display: grid;
   grid-template-columns: 44px 1fr;

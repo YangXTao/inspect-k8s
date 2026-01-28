@@ -521,6 +521,8 @@ class AgentClient:
         node_total: Optional[int] = None,
         node_ready: Optional[int] = None,
         pod_count: Optional[int] = None,
+        cluster_cpu_usage: Optional[float] = None,
+        cluster_memory_usage: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
         payload: Dict[str, Any] = {
             "reported_at": datetime.now(timezone.utc).isoformat()
@@ -535,6 +537,10 @@ class AgentClient:
             payload["node_ready"] = node_ready
         if pod_count is not None:
             payload["pod_count"] = pod_count
+        if cluster_cpu_usage is not None:
+            payload["cluster_cpu_usage"] = cluster_cpu_usage
+        if cluster_memory_usage is not None:
+            payload["cluster_memory_usage"] = cluster_memory_usage
         resp = self.session.post(
             f"{self.config.server_base}/agent/heartbeat",
             json=payload,
@@ -802,6 +808,32 @@ class AgentRunner:
             LOG.warning("Pod count parse failed: %s", output)
             return None
 
+    def _query_prometheus_value(self, expression: str) -> Optional[float]:
+        if not self.prom_client:
+            return None
+        ok, results, message = self.prom_client.query(expression)
+        if not ok:
+            LOG.warning("Prometheus query failed: %s", message)
+            return None
+        if not results:
+            LOG.warning("Prometheus returned empty result for query.")
+            return None
+        value = PrometheusClient.extract_value(results[0])
+        return value
+
+    def _collect_cluster_utilization(self) -> Tuple[Optional[float], Optional[float]]:
+        cpu_query = (
+            "sum(rate(container_cpu_usage_seconds_total{image!=\"\",container!~\"POD\"}[30m])) "
+            "/ sum(kube_node_status_allocatable{resource=\"cpu\"}) * 100"
+        )
+        memory_query = (
+            "sum(container_memory_working_set_bytes{image!=\"\",container!~\"POD\"}) "
+            "/ sum(kube_node_status_allocatable{resource=\"memory\"}) * 100"
+        )
+        cpu_value = self._query_prometheus_value(cpu_query)
+        memory_value = self._query_prometheus_value(memory_query)
+        return cpu_value, memory_value
+
     def _refresh_nodes_on_demand(self, heartbeat_data: Optional[Dict[str, Any]]) -> None:
         if not heartbeat_data:
             return
@@ -871,6 +903,8 @@ class AgentRunner:
             node_total = None
             node_ready = None
             pod_count = None
+            cpu_usage = None
+            memory_usage = None
             now = datetime.now(timezone.utc)
             if self._should_report_nodes(now):
                 self._last_nodes_report_at = now
@@ -883,12 +917,15 @@ class AgentRunner:
                 if summary:
                     node_ready, node_total = summary
                 pod_count = self._collect_pod_count()
+                cpu_usage, memory_usage = self._collect_cluster_utilization()
             heartbeat_data = self.client.send_heartbeat(
                 nodes_output=nodes_output,
                 nodes_retrieved_at=nodes_retrieved_at,
                 node_total=node_total,
                 node_ready=node_ready,
                 pod_count=pod_count,
+                cluster_cpu_usage=cpu_usage,
+                cluster_memory_usage=memory_usage,
             )
             if isinstance(heartbeat_data, dict):
                 server_prom = (heartbeat_data.get("prometheus_url") or "").strip()

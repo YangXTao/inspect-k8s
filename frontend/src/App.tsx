@@ -61,6 +61,7 @@ import {
   createInspectionSchedule as apiCreateInspectionSchedule,
   updateInspectionSchedule as apiUpdateInspectionSchedule,
   getOverviewSummary,
+  getOverviewMetrics,
   uploadLicense,
   uploadLicenseText,
   updateInspectionItem as apiUpdateInspectionItem,
@@ -92,6 +93,7 @@ import type {
   AuthRole,
   AuditLog,
   OverviewSummary,
+  OverviewMetrics,
 } from "./types";
 
 type NoticeType = "success" | "warning" | "error" | null;
@@ -1091,6 +1093,7 @@ interface DashboardOverviewProps {
   runDisplayIds: Record<number, string>;
   canViewHistory: boolean;
   overviewSummary: OverviewSummary | null;
+  overviewMetrics: OverviewMetrics | null;
 }
 
 const DashboardOverviewView = ({
@@ -1100,6 +1103,7 @@ const DashboardOverviewView = ({
   runDisplayIds,
   canViewHistory,
   overviewSummary,
+  overviewMetrics,
 }: DashboardOverviewProps) => {
   const [runDetails, setRunDetails] = useState<Record<number, InspectionRun>>(
     {}
@@ -1216,113 +1220,190 @@ const DashboardOverviewView = ({
     return typeof total === "number" ? String(total) : "-";
   }, [overviewSummary]);
 
-  const buildUsageSeries = useCallback(
-    (keywords: string[]) => {
-      const entries = clusters.map((cluster) => {
-        const latestRun = latestRunByCluster.get(cluster.id);
-        const detail =
-          latestRun && latestRun.status === "finished"
-            ? runDetails[latestRun.id]
-            : null;
-        const result = detail
-          ? findResultByKeywords(detail.results, keywords)
-          : null;
-        const value = result
-          ? extractPercentageValue(
-              `${result.detail ?? ""} ${result.suggestion ?? ""}`
-            )
-          : null;
+  const chartColors = [
+    "#2563eb",
+    "#22c55e",
+    "#f97316",
+    "#ec4899",
+    "#8b5cf6",
+    "#0ea5e9",
+    "#10b981",
+    "#eab308",
+  ];
+
+  const timeline = useMemo(() => {
+    if (!overviewMetrics) {
+      return [];
+    }
+    const start = parseDateValue(overviewMetrics.start);
+    const end = parseDateValue(overviewMetrics.end);
+    const interval = overviewMetrics.interval_minutes || 20;
+    if (!start || !end || interval <= 0) {
+      return [];
+    }
+    const points: Date[] = [];
+    let cursor = new Date(start.getTime());
+    while (cursor <= end) {
+      points.push(new Date(cursor.getTime()));
+      cursor = new Date(cursor.getTime() + interval * 60 * 1000);
+    }
+    return points;
+  }, [overviewMetrics]);
+
+  const formatChartTime = (date: Date) =>
+    date.toLocaleTimeString("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+  const buildLineSeries = useCallback(
+    (metric: "cpu" | "memory") => {
+      if (!overviewMetrics || timeline.length === 0) {
+        return [];
+      }
+      const interval = overviewMetrics.interval_minutes || 20;
+      const toBucketKey = (value: Date) =>
+        Math.floor(value.getTime() / 60000 / interval) * interval;
+      const timelineKeys = timeline.map((date) => toBucketKey(date));
+      return overviewMetrics.series.map((series, index) => {
+        const valueMap = new Map<number, number>();
+        series.points.forEach((point) => {
+          const parsed = parseDateValue(point.reported_at);
+          if (!parsed) {
+            return;
+          }
+          const key = toBucketKey(parsed);
+          const value =
+            metric === "cpu" ? point.cpu_usage : point.memory_usage;
+          if (typeof value === "number" && Number.isFinite(value)) {
+            valueMap.set(key, value);
+          }
+        });
+        const values = timelineKeys.map((key) => {
+          const value = valueMap.get(key);
+          return typeof value === "number" ? value : null;
+        });
         return {
-          clusterId: cluster.id,
-          name: cluster.name,
-          value,
+          name: series.cluster_name,
+          values,
+          color: chartColors[index % chartColors.length],
         };
       });
-      return entries.sort((a, b) => {
-        if (a.value === null && b.value === null) {
-          return a.name.localeCompare(b.name, "zh");
-        }
-        if (a.value === null) {
-          return 1;
-        }
-        if (b.value === null) {
-          return -1;
-        }
-        return b.value - a.value;
-      });
     },
-    [clusters, latestRunByCluster, runDetails]
+    [overviewMetrics, timeline]
   );
 
-  const cpuUsageSeries = useMemo(
-    () =>
-      buildUsageSeries([
-        "cluster cpu usage",
-        "cluster cpu",
-        "集群cpu",
-        "集群cpu使用率",
-        "集群cpu使用",
-        "集群 cpu 使用率",
-        "集群 cpu",
-        "集群cpu 30分钟内的使用率",
-        "集群 cpu 30分钟内的使用率",
-        "30分钟",
-        "30 分钟",
-      ]),
-    [buildUsageSeries]
-  );
-
-  const memoryUsageSeries = useMemo(
-    () =>
-      buildUsageSeries([
-        "cluster memory usage",
-        "cluster memory",
-        "集群内存",
-        "集群内存使用率",
-        "集群 内存 使用率",
-        "集群内存 30分钟内的使用率",
-        "集群 内存 30分钟内的使用率",
-        "30分钟",
-        "30 分钟",
-      ]),
-    [buildUsageSeries]
-  );
-
-  const renderUsageChart = (
-    entries: Array<{ clusterId: number; name: string; value: number | null }>,
-    variant: "cpu" | "memory"
-  ) => {
-    if (entries.length === 0) {
-      return <div className="placeholder">暂无集群</div>;
+  const renderLineChart = (metric: "cpu" | "memory") => {
+    if (!overviewMetrics || timeline.length === 0) {
+      return <div className="placeholder">暂无数据</div>;
     }
+    const series = buildLineSeries(metric);
+    if (series.length === 0) {
+      return <div className="placeholder">暂无数据</div>;
+    }
+    const width = 640;
+    const height = 240;
+    const padding = { left: 44, right: 12, top: 12, bottom: 34 };
+    const plotWidth = width - padding.left - padding.right;
+    const plotHeight = height - padding.top - padding.bottom;
+    const maxIndex = Math.max(timeline.length - 1, 1);
+    const labelEvery =
+      timeline.length > 8 ? Math.ceil(timeline.length / 8) : 1;
+    const toX = (index: number) =>
+      padding.left + (index / maxIndex) * plotWidth;
+    const toY = (value: number) =>
+      padding.top + (1 - value / 100) * plotHeight;
+    const buildPath = (values: Array<number | null>) => {
+      let path = "";
+      values.forEach((value, index) => {
+        if (value === null || Number.isNaN(value)) {
+          return;
+        }
+        const x = toX(index);
+        const y = toY(Math.min(Math.max(value, 0), 100));
+        path = path ? `${path} L ${x} ${y}` : `M ${x} ${y}`;
+      });
+      return path;
+    };
     return (
-      <div className="overview-vertical-chart">
-        <div className="overview-vertical-axis">
-          <span>100%</span>
-          <span>50%</span>
-          <span>0%</span>
-        </div>
-        <div className="overview-vertical-bars">
-          {entries.map((entry) => {
-            const value = entry.value;
-            const height =
-              value === null ? 0 : Math.min(Math.max(value, 0), 100);
-            const valueLabel = value === null ? "-" : `${value.toFixed(2)}%`;
+      <div className="overview-line-chart">
+        <svg viewBox={`0 0 ${width} ${height}`} className="overview-line-svg">
+          {[0, 50, 100].map((tick) => {
+            const y = toY(tick);
             return (
-              <div key={entry.clusterId} className="overview-vertical-bar">
-                <div className="overview-vertical-bar-value">{valueLabel}</div>
-                <div className={`overview-vertical-bar-track ${variant}`}>
-                  <div
-                    className={`overview-vertical-bar-fill ${variant}${
-                      value === null ? " empty" : ""
-                    }`}
-                    style={{ height: `${height}%` }}
-                  />
-                </div>
-                <div className="overview-vertical-bar-label">{entry.name}</div>
-              </div>
+              <g key={`y-${tick}`}>
+                <line
+                  x1={padding.left}
+                  x2={width - padding.right}
+                  y1={y}
+                  y2={y}
+                  className="overview-line-grid"
+                />
+                <text
+                  x={padding.left - 8}
+                  y={y + 4}
+                  textAnchor="end"
+                  className="overview-line-axis-label"
+                >
+                  {tick}%
+                </text>
+              </g>
             );
           })}
+          {series.map((entry) => (
+            <path
+              key={entry.name}
+              d={buildPath(entry.values)}
+              className="overview-line-path"
+              stroke={entry.color}
+            />
+          ))}
+          {series.map((entry) =>
+            entry.values.map((value, index) => {
+              if (value === null || Number.isNaN(value)) {
+                return null;
+              }
+              const x = toX(index);
+              const y = toY(Math.min(Math.max(value, 0), 100));
+              return (
+                <circle
+                  key={`${entry.name}-${index}`}
+                  cx={x}
+                  cy={y}
+                  r={3}
+                  fill={entry.color}
+                />
+              );
+            })
+          )}
+          {timeline.map((time, index) => {
+            if (index % labelEvery !== 0) {
+              return null;
+            }
+            const x = toX(index);
+            return (
+              <text
+                key={`x-${index}`}
+                x={x}
+                y={height - 10}
+                textAnchor="middle"
+                className="overview-line-axis-label"
+              >
+                {formatChartTime(time)}
+              </text>
+            );
+          })}
+        </svg>
+        <div className="overview-line-legend">
+          {series.map((entry) => (
+            <div key={entry.name} className="overview-line-legend-item">
+              <span
+                className="overview-line-legend-dot"
+                style={{ background: entry.color }}
+              />
+              <span>{entry.name}</span>
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -1418,11 +1499,11 @@ const DashboardOverviewView = ({
       <section className="overview-charts">
         <div className="overview-chart-card">
           <div className="overview-chart-title">集群 CPU 使用率</div>
-          {renderUsageChart(cpuUsageSeries, "cpu")}
+          {renderLineChart("cpu")}
         </div>
         <div className="overview-chart-card">
           <div className="overview-chart-title">集群内存使用率</div>
-          {renderUsageChart(memoryUsageSeries, "memory")}
+          {renderLineChart("memory")}
         </div>
       </section>
 
@@ -10018,6 +10099,9 @@ const App = () => {
   const [overviewSummary, setOverviewSummary] = useState<OverviewSummary | null>(
     null
   );
+  const [overviewMetrics, setOverviewMetrics] = useState<OverviewMetrics | null>(
+    null
+  );
   const isAuthenticated = authUser !== null;
   const permissionSet = useMemo(
     () => new Set(authUser?.permissions ?? []),
@@ -10943,6 +11027,24 @@ const loginRedirectState = useMemo(
     }
   }, [canViewClusterAgents]);
 
+  const refreshOverviewMetrics = useCallback(async () => {
+    if (!canViewClusterAgents) {
+      setOverviewMetrics(null);
+      return null;
+    }
+    try {
+      const data = await getOverviewMetrics({ minutes: 180, interval: 20 });
+      setOverviewMetrics(data);
+      return data;
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "获取首页趋势失败";
+      logWithTimestamp("error", "获取首页趋势失败: %s", message);
+      setOverviewMetrics(null);
+      return null;
+    }
+  }, [canViewClusterAgents]);
+
   const handleTestClusterConnection = useCallback(
     async (
       clusterId: number,
@@ -11546,6 +11648,7 @@ const loginRedirectState = useMemo(
     void refreshClusters();
     void refreshRuns();
     void refreshOverviewSummary();
+    void refreshOverviewMetrics();
     void refreshItems();
     void refreshSchedules();
     void refreshRoles();
@@ -11555,6 +11658,7 @@ const loginRedirectState = useMemo(
     refreshClusters,
     refreshRuns,
     refreshOverviewSummary,
+    refreshOverviewMetrics,
     refreshItems,
     refreshSchedules,
     refreshRoles,
@@ -11568,11 +11672,17 @@ const loginRedirectState = useMemo(
     const timer = window.setInterval(() => {
       void refreshClusters();
       void refreshOverviewSummary();
+      void refreshOverviewMetrics();
     }, CLUSTER_HEARTBEAT_REFRESH_INTERVAL);
     return () => {
       window.clearInterval(timer);
     };
-  }, [isAuthenticated, refreshClusters, refreshOverviewSummary]);
+  }, [
+    isAuthenticated,
+    refreshClusters,
+    refreshOverviewSummary,
+    refreshOverviewMetrics,
+  ]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !isAuthenticated) {
@@ -13599,6 +13709,7 @@ const hasManualKubeconfig = useMemo(
       runDisplayIds={runDisplayIds}
       canViewHistory={canViewHistory}
       overviewSummary={overviewSummary}
+      overviewMetrics={overviewMetrics}
     />
   );
 

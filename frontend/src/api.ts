@@ -18,6 +18,7 @@ import {
   AuditLog,
   AuditLogList,
   OverviewSummary,
+  OverviewMetrics,
 } from "./types";
 
 const API_BASE = appConfig.apiBaseUrl.replace(/\/$/, "");
@@ -429,6 +430,20 @@ export function getClusters(): Promise<ClusterConfig[]> {
 
 export function getOverviewSummary(): Promise<OverviewSummary> {
   return request<OverviewSummary>("/overview/summary");
+}
+
+export function getOverviewMetrics(
+  params?: { minutes?: number; interval?: number }
+): Promise<OverviewMetrics> {
+  const query = new URLSearchParams();
+  if (params?.minutes) {
+    query.set("minutes", String(params.minutes));
+  }
+  if (params?.interval) {
+    query.set("interval", String(params.interval));
+  }
+  const suffix = query.toString();
+  return request<OverviewMetrics>(`/overview/metrics${suffix ? `?${suffix}` : ""}`);
 }
 
 export function getClusterNodes(

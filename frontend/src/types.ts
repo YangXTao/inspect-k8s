@@ -86,6 +86,25 @@ export type OverviewSummary = {
   pod_total?: number | null;
 };
 
+export type OverviewMetricPoint = {
+  reported_at: string;
+  cpu_usage?: number | null;
+  memory_usage?: number | null;
+};
+
+export type OverviewMetricsSeries = {
+  cluster_id: number;
+  cluster_name: string;
+  points: OverviewMetricPoint[];
+};
+
+export type OverviewMetrics = {
+  start: string;
+  end: string;
+  interval_minutes: number;
+  series: OverviewMetricsSeries[];
+};
+
 export type InspectionAgentStatus =
   | "queued"
   | "running"

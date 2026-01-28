@@ -759,6 +759,28 @@ def record_agent_heartbeat(
     return agent
 
 
+def create_cluster_metric_sample(
+    db: Session,
+    *,
+    cluster_id: int,
+    agent_id: Optional[int],
+    cpu_usage: Optional[float],
+    memory_usage: Optional[float],
+    reported_at: datetime,
+) -> models.ClusterMetricSample:
+    sample = models.ClusterMetricSample(
+        cluster_id=cluster_id,
+        agent_id=agent_id,
+        cpu_usage=cpu_usage,
+        memory_usage=memory_usage,
+        reported_at=reported_at,
+    )
+    db.add(sample)
+    db.commit()
+    db.refresh(sample)
+    return sample
+
+
 def request_agent_nodes_report(
     db: Session,
     agent: models.InspectionAgent,

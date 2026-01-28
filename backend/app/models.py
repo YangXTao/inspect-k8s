@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Iterable
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, Boolean
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, Boolean, Float
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -297,6 +297,27 @@ class InspectionAgent(Base):
 
     cluster = relationship("ClusterConfig", back_populates="agents", foreign_keys=[cluster_id])
     runs = relationship("InspectionRun", back_populates="agent")
+
+
+class ClusterMetricSample(Base):
+    __tablename__ = "cluster_metric_samples"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cluster_id = Column(
+        Integer,
+        ForeignKey("cluster_configs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    agent_id = Column(
+        Integer,
+        ForeignKey("inspection_agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    cpu_usage = Column(Float, nullable=True)
+    memory_usage = Column(Float, nullable=True)
+    reported_at = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class AuthRole(Base):

@@ -127,6 +127,25 @@ class OverviewSummaryOut(BaseModel):
     pod_total: Optional[int] = None
 
 
+class OverviewMetricPointOut(BaseModel):
+    reported_at: datetime
+    cpu_usage: Optional[float] = None
+    memory_usage: Optional[float] = None
+
+
+class OverviewMetricsSeriesOut(BaseModel):
+    cluster_id: int
+    cluster_name: str
+    points: List[OverviewMetricPointOut] = Field(default_factory=list)
+
+
+class OverviewMetricsOut(BaseModel):
+    start: datetime
+    end: datetime
+    interval_minutes: int
+    series: List[OverviewMetricsSeriesOut] = Field(default_factory=list)
+
+
 class ClusterUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=150)
     prometheus_url: Optional[str] = Field(
@@ -433,6 +452,12 @@ class AgentHeartbeatIn(BaseModel):
     )
     pod_count: Optional[int] = Field(
         None, ge=0, description="Agent 上报的 Pod 总数"
+    )
+    cluster_cpu_usage: Optional[float] = Field(
+        None, ge=0, description="集群 CPU 使用率（%）"
+    )
+    cluster_memory_usage: Optional[float] = Field(
+        None, ge=0, description="集群内存使用率（%）"
     )
 
 

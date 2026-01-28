@@ -1213,6 +1213,18 @@ def _normalize_count(value: Optional[int]) -> Optional[int]:
     return parsed
 
 
+def _normalize_percentage(value: Optional[float]) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0:
+        return None
+    return parsed
+
+
 def _sanitize_optional_text(value: str | None) -> str | None:
     if value is None:
         return None
@@ -2330,16 +2342,29 @@ def agent_heartbeat(
     if node_total is not None and node_ready is not None and node_ready > node_total:
         node_ready = node_total
     pod_count = _normalize_count(payload.pod_count)
+    cpu_usage = _normalize_percentage(payload.cluster_cpu_usage)
+    memory_usage = _normalize_percentage(payload.cluster_memory_usage)
+    reported_at = payload.reported_at or datetime.utcnow()
     updated = crud.record_agent_heartbeat(
         ctx.db,
         ctx.agent,
-        seen_at=payload.reported_at or datetime.utcnow(),
+        seen_at=reported_at,
         nodes_output=nodes_output,
         nodes_output_at=nodes_retrieved_at,
         node_total=node_total,
         node_ready=node_ready,
         pod_count=pod_count,
     )
+    cluster_id = updated.cluster_id
+    if cluster_id and (cpu_usage is not None or memory_usage is not None):
+        crud.create_cluster_metric_sample(
+            ctx.db,
+            cluster_id=cluster_id,
+            agent_id=updated.id,
+            cpu_usage=cpu_usage,
+            memory_usage=memory_usage,
+            reported_at=reported_at,
+        )
     refreshed = crud.get_inspection_agent(ctx.db, updated.id) or updated
     return _serialize_agent(refreshed)
 
@@ -3311,6 +3336,13 @@ def _resolve_latest_runs_by_cluster(
     return latest
 
 
+def _floor_time_to_interval(moment: datetime, interval_minutes: int) -> datetime:
+    minutes = max(1, int(interval_minutes))
+    epoch_minutes = int(moment.timestamp() // 60)
+    bucket_minutes = (epoch_minutes // minutes) * minutes
+    return datetime.utcfromtimestamp(bucket_minutes * 60)
+
+
 @app.get("/overview/summary", response_model=schemas.OverviewSummaryOut)
 def get_overview_summary(
     db: Session = Depends(get_db),
@@ -3348,6 +3380,103 @@ def get_overview_summary(
         node_ready=node_ready_total if matched_nodes else None,
         node_total=node_total_total if matched_nodes else None,
         pod_total=pod_total if matched_pods else None,
+    )
+
+
+@app.get("/overview/metrics", response_model=schemas.OverviewMetricsOut)
+def get_overview_metrics(
+    minutes: int = Query(180, ge=20, le=24 * 60, description="时间窗口（分钟）"),
+    interval: int = Query(20, ge=5, le=120, description="采样间隔（分钟）"),
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "clusterAgent.read", "集群查看")
+    now = datetime.utcnow()
+    start = now - timedelta(minutes=minutes)
+    interval_minutes = max(1, int(interval))
+    start_bucket = _floor_time_to_interval(start, interval_minutes)
+    end_bucket = _floor_time_to_interval(now, interval_minutes)
+
+    clusters = crud.list_clusters(db)
+    cluster_map = {cluster.id: cluster.name for cluster in clusters}
+    if not cluster_map:
+        return schemas.OverviewMetricsOut(
+            start=start_bucket,
+            end=end_bucket,
+            interval_minutes=interval_minutes,
+            series=[],
+        )
+
+    samples = (
+        db.query(models.ClusterMetricSample)
+        .filter(
+            models.ClusterMetricSample.cluster_id.in_(list(cluster_map.keys())),
+            models.ClusterMetricSample.reported_at >= start_bucket,
+            models.ClusterMetricSample.reported_at <= now,
+        )
+        .order_by(
+            models.ClusterMetricSample.cluster_id.asc(),
+            models.ClusterMetricSample.reported_at.asc(),
+        )
+        .all()
+    )
+
+    buckets: dict[int, dict[datetime, dict[str, float]]] = {}
+    counts: dict[int, dict[datetime, dict[str, int]]] = {}
+
+    for sample in samples:
+        cluster_id = sample.cluster_id
+        bucket_time = _floor_time_to_interval(sample.reported_at, interval_minutes)
+        bucket_map = buckets.setdefault(cluster_id, {})
+        count_map = counts.setdefault(cluster_id, {})
+        bucket = bucket_map.setdefault(bucket_time, {"cpu_sum": 0.0, "mem_sum": 0.0})
+        count = count_map.setdefault(bucket_time, {"cpu_count": 0, "mem_count": 0})
+        if sample.cpu_usage is not None:
+            bucket["cpu_sum"] += float(sample.cpu_usage)
+            count["cpu_count"] += 1
+        if sample.memory_usage is not None:
+            bucket["mem_sum"] += float(sample.memory_usage)
+            count["mem_count"] += 1
+
+    series: list[schemas.OverviewMetricsSeriesOut] = []
+    for cluster in clusters:
+        bucket_map = buckets.get(cluster.id, {})
+        count_map = counts.get(cluster.id, {})
+        points: list[schemas.OverviewMetricPointOut] = []
+        for bucket_time in sorted(bucket_map.keys()):
+            sums = bucket_map[bucket_time]
+            cnt = count_map.get(bucket_time, {})
+            cpu_value = (
+                sums["cpu_sum"] / cnt["cpu_count"]
+                if cnt.get("cpu_count")
+                else None
+            )
+            mem_value = (
+                sums["mem_sum"] / cnt["mem_count"]
+                if cnt.get("mem_count")
+                else None
+            )
+            if cpu_value is None and mem_value is None:
+                continue
+            points.append(
+                schemas.OverviewMetricPointOut(
+                    reported_at=bucket_time,
+                    cpu_usage=cpu_value,
+                    memory_usage=mem_value,
+                )
+            )
+        series.append(
+            schemas.OverviewMetricsSeriesOut(
+                cluster_id=cluster.id,
+                cluster_name=cluster.name,
+                points=points,
+            )
+        )
+    return schemas.OverviewMetricsOut(
+        start=start_bucket,
+        end=end_bucket,
+        interval_minutes=interval_minutes,
+        series=series,
     )
 
 
