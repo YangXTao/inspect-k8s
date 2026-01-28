@@ -1409,15 +1409,21 @@ const DashboardOverviewView = ({
       return path;
     };
     const handleMouseMove = (event: React.MouseEvent<SVGSVGElement>) => {
-      const rect = event.currentTarget.getBoundingClientRect();
+      const svg = event.currentTarget;
+      const rect = svg.getBoundingClientRect();
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
-      const scaleX = rect.width / width;
-      const scaleY = rect.height / height;
-      const scaledPaddingLeft = padding.left * scaleX;
-      const scaledPlotWidth = plotWidth * scaleX;
-      const scaledRight = padding.right * scaleX;
-      if (x < scaledPaddingLeft || x > rect.width - scaledRight) {
+      const point = svg.createSVGPoint();
+      point.x = event.clientX;
+      point.y = event.clientY;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) {
+        return;
+      }
+      const svgPoint = point.matrixTransform(ctm.inverse());
+      const xSvg = svgPoint.x;
+      const ySvg = svgPoint.y;
+      if (xSvg < padding.left || xSvg > width - padding.right) {
         setHoverState((prev) => ({
           ...prev,
           [metric]: { ...prev[metric], index: null, point: null, lineX: null, lineY: null },
@@ -1431,7 +1437,8 @@ const DashboardOverviewView = ({
         }));
         return;
       }
-      const rawIndex = ((x - scaledPaddingLeft) / scaledPlotWidth) * maxIndex;
+      const rawIndex =
+        ((xSvg - padding.left) / plotWidth) * maxIndex;
       const clamped = Math.min(Math.max(Math.round(rawIndex), 0), maxIndex);
       const align = x > rect.width * 0.72 ? "left" : "right";
       const tooltipX =
@@ -1440,11 +1447,11 @@ const DashboardOverviewView = ({
           : Math.max(0, Math.min(rect.width, x + 12));
       const tooltipY = Math.max(0, Math.min(rect.height, y + 12));
       const lineY = Math.min(
-        Math.max(y / scaleY, padding.top),
+        Math.max(ySvg, padding.top),
         height - padding.bottom
       );
       const lineX = Math.min(
-        Math.max(x / scaleX, padding.left),
+        Math.max(xSvg, padding.left),
         width - padding.right
       );
       setHoverState((prev) => ({
@@ -1492,6 +1499,35 @@ const DashboardOverviewView = ({
             .filter(Boolean) as Array<{
             name: string;
             value: string;
+            color: string;
+          }>;
+    const highlightPoints =
+      currentHover.index === null
+        ? []
+        : series
+            .map((entry) => {
+              const nearestIndex = resolveNearestValueIndex(
+                entry.values,
+                currentHover.index ?? 0
+              );
+              if (nearestIndex === null) {
+                return null;
+              }
+              const value = entry.values[nearestIndex];
+              if (typeof value !== "number" || !Number.isFinite(value)) {
+                return null;
+              }
+              return {
+                name: entry.name,
+                x: toX(nearestIndex),
+                y: toY(Math.min(Math.max(value, 0), 100)),
+                color: entry.color,
+              };
+            })
+            .filter(Boolean) as Array<{
+            name: string;
+            x: number;
+            y: number;
             color: string;
           }>;
 
@@ -1552,6 +1588,17 @@ const DashboardOverviewView = ({
                 className="overview-line-hover"
               />
             )}
+            {highlightPoints.map((point) => (
+              <circle
+                key={`highlight-${point.name}`}
+                cx={point.x}
+                cy={point.y}
+                r={4}
+                fill="#ffffff"
+                stroke={point.color}
+                strokeWidth={2}
+              />
+            ))}
             {timeline.map((time, index) => {
               if (!labelBase) {
                 return null;
