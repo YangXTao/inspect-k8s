@@ -1331,7 +1331,7 @@ const DashboardOverviewView = ({
     const otherMetric: "cpu" | "memory" = metric === "cpu" ? "memory" : "cpu";
     const width = 640;
     const height = 240;
-    const padding = { left: 0, right: 12, top: 12, bottom: 34 };
+    const padding = { left: 22, right: 12, top: 12, bottom: 34 };
     const plotWidth = width - padding.left - padding.right;
     const plotHeight = height - padding.top - padding.bottom;
     const maxIndex = Math.max(timeline.length - 1, 1);
@@ -1423,112 +1423,114 @@ const DashboardOverviewView = ({
 
     return (
       <div className="overview-line-chart" ref={chartWrapperRef}>
-        <svg
-          viewBox={`0 0 ${width} ${height}`}
-          className="overview-line-svg"
-          onMouseMove={handleMouseMove}
-          onMouseLeave={handleMouseLeave}
-        >
-          {[0, 50, 100].map((tick) => {
-            const y = toY(tick);
-            return (
-              <g key={`y-${tick}`}>
-                <line
-                  x1={padding.left}
-                  x2={width - padding.right}
-                  y1={y}
-                  y2={y}
-                  className="overview-line-grid"
-                />
-                <text
-                  x={0}
-                  y={y + 4}
-                  textAnchor="start"
-                  className="overview-line-axis-label"
-                >
-                  {tick}%
-                </text>
-              </g>
-            );
-          })}
-          {series.map((entry) => (
-            <path
-              key={entry.name}
-              d={buildPath(entry.values)}
-              className="overview-line-path"
-              stroke={entry.color}
-            />
-          ))}
-          {series.map((entry) =>
-            entry.values.map((value, index) => {
-              if (value === null || Number.isNaN(value)) {
+        <div className="overview-line-canvas">
+          <svg
+            viewBox={`0 0 ${width} ${height}`}
+            className="overview-line-svg"
+            onMouseMove={handleMouseMove}
+            onMouseLeave={handleMouseLeave}
+          >
+            {[0, 50, 100].map((tick) => {
+              const y = toY(tick);
+              return (
+                <g key={`y-${tick}`}>
+                  <line
+                    x1={padding.left}
+                    x2={width - padding.right}
+                    y1={y}
+                    y2={y}
+                    className="overview-line-grid"
+                  />
+                  <text
+                    x={2}
+                    y={y + 4}
+                    textAnchor="start"
+                    className="overview-line-axis-label"
+                  >
+                    {tick}%
+                  </text>
+                </g>
+              );
+            })}
+            {series.map((entry) => (
+              <path
+                key={entry.name}
+                d={buildPath(entry.values)}
+                className="overview-line-path"
+                stroke={entry.color}
+              />
+            ))}
+            {series.map((entry) =>
+              entry.values.map((value, index) => {
+                if (value === null || Number.isNaN(value)) {
+                  return null;
+                }
+                const x = toX(index);
+                const y = toY(Math.min(Math.max(value, 0), 100));
+                return (
+                  <circle
+                    key={`${entry.name}-${index}`}
+                    cx={x}
+                    cy={y}
+                    r={3}
+                    fill={entry.color}
+                  />
+                );
+              })
+            )}
+            {timeline.map((time, index) => {
+              if (!labelBase) {
+                return null;
+              }
+              const diffSeconds = Math.round(
+                (time.getTime() - labelBase.getTime()) / 1000
+              );
+              if (diffSeconds < 0 || diffSeconds % labelIntervalSeconds !== 0) {
                 return null;
               }
               const x = toX(index);
-              const y = toY(Math.min(Math.max(value, 0), 100));
               return (
-                <circle
-                  key={`${entry.name}-${index}`}
-                  cx={x}
-                  cy={y}
-                  r={3}
-                  fill={entry.color}
-                />
+                <text
+                  key={`x-${index}`}
+                  x={x}
+                  y={height - 10}
+                  textAnchor="middle"
+                  className="overview-line-axis-label"
+                >
+                  {formatChartTime(time)}
+                </text>
               );
-            })
-          )}
-        {timeline.map((time, index) => {
-          if (!labelBase) {
-            return null;
-          }
-          const diffSeconds = Math.round(
-            (time.getTime() - labelBase.getTime()) / 1000
-          );
-          if (diffSeconds < 0 || diffSeconds % labelIntervalSeconds !== 0) {
-            return null;
-          }
-          const x = toX(index);
-          return (
-            <text
-              key={`x-${index}`}
-              x={x}
-              y={height - 10}
-              textAnchor="middle"
-              className="overview-line-axis-label"
+            })}
+          </svg>
+          {currentHover.index !== null && currentHover.point && (
+            <div
+              className={`overview-line-tooltip ${
+                currentHover.align === "left"
+                  ? "overview-line-tooltip-left"
+                  : "overview-line-tooltip-right"
+              }`}
+              style={{
+                left: currentHover.point.x,
+                top: currentHover.point.y,
+              }}
             >
-              {formatChartTime(time)}
-            </text>
-          );
-        })}
-        </svg>
-        {currentHover.index !== null && currentHover.point && (
-          <div
-            className={`overview-line-tooltip ${
-              currentHover.align === "left"
-                ? "overview-line-tooltip-left"
-                : "overview-line-tooltip-right"
-            }`}
-            style={{
-              left: currentHover.point.x,
-              top: currentHover.point.y,
-            }}
-          >
-            <div className="overview-line-tooltip-time">
-              {formatTooltipTime(timeline[currentHover.index])}
-            </div>
-            {tooltipLines.map((line) => (
-              <div key={line.name} className="overview-line-tooltip-row">
-                <span
-                  className="overview-line-legend-dot"
-                  style={{ background: line.color }}
-                />
-                <span className="overview-line-tooltip-text">
-                  {line.name}：{line.value}
-                </span>
+              <div className="overview-line-tooltip-time">
+                {formatTooltipTime(timeline[currentHover.index])}
               </div>
-            ))}
-          </div>
-        )}
+              {tooltipLines.map((line) => (
+                <div key={line.name} className="overview-line-tooltip-row">
+                  <span
+                    className="overview-line-legend-dot"
+                    style={{ background: line.color }}
+                  />
+                  <span className="overview-line-tooltip-text">
+                    {line.name}：{line.value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <div className="overview-line-legend">
           {series.map((entry) => (
             <div key={entry.name} className="overview-line-legend-item">

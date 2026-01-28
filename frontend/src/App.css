@@ -4086,7 +4086,7 @@ th {
 .overview-chart-card {
   background: #fff;
   border-radius: 14px;
-  padding: 18px 20px 18px 0;
+  padding: 18px 20px;
   border: 1px solid #e2e8f0;
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
   min-height: 240px;
@@ -4097,7 +4097,6 @@ th {
   font-weight: 600;
   margin-bottom: 12px;
   color: #0f172a;
-  padding-left: 0;
 }
 
 .overview-line-chart {
@@ -4106,6 +4105,12 @@ th {
   gap: 10px;
   align-items: flex-start;
   position: relative;
+}
+
+.overview-line-canvas {
+  position: relative;
+  width: 100%;
+  margin-left: -12px;
 }
 
 .overview-line-svg {

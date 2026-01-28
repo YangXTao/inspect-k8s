@@ -352,6 +352,7 @@ def _trigger_auto_connection_test(
         cluster,
         connection_status="warning",
         connection_message=message,
+        log_audit=False,
     )
 
 
@@ -2508,6 +2509,7 @@ def _apply_connection_test_result(
         .order_by(models.AuditLog.created_at.desc())
         .first()
     )
+    is_system_test = (run.operator or "").strip() == CONNECTION_TEST_OPERATOR
     crud.update_cluster(
         db,
         cluster,
@@ -2516,22 +2518,23 @@ def _apply_connection_test_result(
         last_checked_at=datetime.utcnow(),
         log_audit=False,
     )
-    crud.log_action(
-        db,
-        action="update",
-        entity_type="cluster_config",
-        entity_id=cluster.id,
-        description=(
-            f"测试连接成功：{display_id}"
-            if is_success
-            else f"测试连接失败：{display_id}"
-        ),
-        user_id=actor_entry.user_id if actor_entry else None,
-        username=actor_entry.username if actor_entry else None,
-        ip_address=actor_entry.ip_address if actor_entry else None,
-        user_agent=actor_entry.user_agent if actor_entry else None,
-        status="success" if is_success else "failed",
-    )
+    if not (is_system_test and actor_entry is None):
+        crud.log_action(
+            db,
+            action="update",
+            entity_type="cluster_config",
+            entity_id=cluster.id,
+            description=(
+                f"测试连接成功：{display_id}"
+                if is_success
+                else f"测试连接失败：{display_id}"
+            ),
+            user_id=actor_entry.user_id if actor_entry else None,
+            username=actor_entry.username if actor_entry else None,
+            ip_address=actor_entry.ip_address if actor_entry else None,
+            user_agent=actor_entry.user_agent if actor_entry else None,
+            status="success" if is_success else "failed",
+        )
 
 
 @agent_router.post("/runs/{run_id}/results", response_model=schemas.InspectionRunOut)
