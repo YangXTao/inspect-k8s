@@ -79,6 +79,10 @@ export type ClusterConfig = {
 };
 
 export type OverviewSummary = {
+  cluster_total: number;
+  cluster_online: number;
+  node_ready?: number | null;
+  node_total?: number | null;
   pod_total?: number | null;
 };
 

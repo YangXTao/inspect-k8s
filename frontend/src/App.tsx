@@ -619,6 +619,7 @@ const resolveAuditEntityLabel = (entityType?: string | null) => {
   mapping.set("auth_role", "角色");
   mapping.set("inspection_result", "巡检结果");
   mapping.set("audit_log", "审计日志");
+  mapping.set("report", "巡检记录");
   mapping.set("overview", "首页");
   mapping.set("setting", "设置");
   mapping.set("license", "License");
@@ -1064,7 +1065,7 @@ interface DashboardOverviewProps {
   clusterDisplayIds: Record<number, string>;
   runDisplayIds: Record<number, string>;
   canViewHistory: boolean;
-  podSummary: number | null;
+  overviewSummary: OverviewSummary | null;
 }
 
 const DashboardOverviewView = ({
@@ -1073,7 +1074,7 @@ const DashboardOverviewView = ({
   clusterDisplayIds,
   runDisplayIds,
   canViewHistory,
-  podSummary,
+  overviewSummary,
 }: DashboardOverviewProps) => {
   const [runDetails, setRunDetails] = useState<Record<number, InspectionRun>>(
     {}
@@ -1160,15 +1161,35 @@ const DashboardOverviewView = ({
     };
   }, [latestRuns, runDetails]);
 
-  const nodeSummary = useMemo(() => {
-    const counts = clusters
-      .map((cluster) => cluster.node_count)
-      .filter((value): value is number => typeof value === "number");
-    if (counts.length === 0) {
-      return null;
+  const clusterCountLabel = useMemo(() => {
+    if (!overviewSummary) {
+      return "-";
     }
-    return counts.reduce((total, value) => total + value, 0);
-  }, [clusters]);
+    const total = overviewSummary.cluster_total;
+    const online = overviewSummary.cluster_online;
+    if (typeof total !== "number" || typeof online !== "number") {
+      return "-";
+    }
+    return `${online}/${total}`;
+  }, [overviewSummary]);
+
+  const nodeCountLabel = useMemo(() => {
+    if (!overviewSummary) {
+      return "-";
+    }
+    const total = overviewSummary.node_total;
+    const ready = overviewSummary.node_ready;
+    if (typeof total !== "number" || typeof ready !== "number") {
+      return "-";
+    }
+    const normalizedReady = Math.min(Math.max(ready, 0), total);
+    return `${normalizedReady}/${total}`;
+  }, [overviewSummary]);
+
+  const podCountLabel = useMemo(() => {
+    const total = overviewSummary?.pod_total;
+    return typeof total === "number" ? String(total) : "-";
+  }, [overviewSummary]);
 
   const buildUsageSeries = useCallback(
     (keywords: string[]) => {
@@ -1295,20 +1316,16 @@ const DashboardOverviewView = ({
     <div className="overview-dashboard">
       <section className="overview-metrics">
         <div className="overview-metric-card">
-          <div className="overview-metric-title">集群总数</div>
-          <div className="overview-metric-value">{clusters.length}</div>
+          <div className="overview-metric-title">集群在线/总数</div>
+          <div className="overview-metric-value">{clusterCountLabel}</div>
         </div>
         <div className="overview-metric-card">
-          <div className="overview-metric-title">节点总数</div>
-          <div className="overview-metric-value">
-            {nodeSummary ?? "-"}
-          </div>
+          <div className="overview-metric-title">节点就绪/总数</div>
+          <div className="overview-metric-value">{nodeCountLabel}</div>
         </div>
         <div className="overview-metric-card">
           <div className="overview-metric-title">集群总 POD 数量</div>
-          <div className="overview-metric-value">
-            {podSummary ?? "-"}
-          </div>
+          <div className="overview-metric-value">{podCountLabel}</div>
         </div>
       </section>
 
@@ -11530,11 +11547,12 @@ const loginRedirectState = useMemo(
     }
     const timer = window.setInterval(() => {
       void refreshClusters();
+      void refreshOverviewSummary();
     }, CLUSTER_HEARTBEAT_REFRESH_INTERVAL);
     return () => {
       window.clearInterval(timer);
     };
-  }, [isAuthenticated, refreshClusters]);
+  }, [isAuthenticated, refreshClusters, refreshOverviewSummary]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !isAuthenticated) {
@@ -13560,7 +13578,7 @@ const hasManualKubeconfig = useMemo(
       clusterDisplayIds={clusterDisplayIds}
       runDisplayIds={runDisplayIds}
       canViewHistory={canViewHistory}
-      podSummary={overviewSummary?.pod_total ?? null}
+      overviewSummary={overviewSummary}
     />
   );
 

@@ -120,6 +120,10 @@ class ClusterNodesRefreshOut(BaseModel):
 
 
 class OverviewSummaryOut(BaseModel):
+    cluster_total: int
+    cluster_online: int
+    node_ready: Optional[int] = None
+    node_total: Optional[int] = None
     pod_total: Optional[int] = None
 
 
@@ -418,6 +422,17 @@ class AgentHeartbeatIn(BaseModel):
     )
     nodes_retrieved_at: Optional[datetime] = Field(
         None, description="节点信息获取时间（可选）"
+    )
+
+
+    node_total: Optional[int] = Field(
+        None, ge=0, description="Agent 上报的节点总数"
+    )
+    node_ready: Optional[int] = Field(
+        None, ge=0, description="Agent 上报的 Ready 节点数"
+    )
+    pod_count: Optional[int] = Field(
+        None, ge=0, description="Agent 上报的 Pod 总数"
     )
 
 

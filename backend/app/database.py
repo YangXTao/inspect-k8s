@@ -875,6 +875,26 @@ def _ensure_inspection_agents_schema() -> None:
         statements.append(
             f"ALTER TABLE inspection_agents ADD COLUMN nodes_report_requested_at {column_type} NULL"
         )
+    if "node_total" not in columns:
+        column_type = "INTEGER" if dialect == "sqlite" else "INT"
+        statements.append(
+            f"ALTER TABLE inspection_agents ADD COLUMN node_total {column_type} NULL"
+        )
+    if "node_ready" not in columns:
+        column_type = "INTEGER" if dialect == "sqlite" else "INT"
+        statements.append(
+            f"ALTER TABLE inspection_agents ADD COLUMN node_ready {column_type} NULL"
+        )
+    if "pod_count" not in columns:
+        column_type = "INTEGER" if dialect == "sqlite" else "INT"
+        statements.append(
+            f"ALTER TABLE inspection_agents ADD COLUMN pod_count {column_type} NULL"
+        )
+    if "metrics_reported_at" not in columns:
+        column_type = "DATETIME" if dialect == "sqlite" else "DATETIME"
+        statements.append(
+            f"ALTER TABLE inspection_agents ADD COLUMN metrics_reported_at {column_type} NULL"
+        )
 
     if dialect != "sqlite":
         statements.extend(

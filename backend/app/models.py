@@ -286,6 +286,10 @@ class InspectionAgent(Base):
     nodes_output = Column(Text, nullable=True)
     nodes_output_at = Column(DateTime, nullable=True)
     nodes_report_requested_at = Column(DateTime, nullable=True)
+    node_total = Column(Integer, nullable=True)
+    node_ready = Column(Integer, nullable=True)
+    pod_count = Column(Integer, nullable=True)
+    metrics_reported_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False

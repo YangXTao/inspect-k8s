@@ -262,7 +262,7 @@ def _attach_run_report(db: Session, run: models.InspectionRun) -> models.Inspect
     crud.log_action(
         db,
         action="create",
-        entity_type="report",
+        entity_type="inspection_run",
         entity_id=run.id,
         description=f"生成巡检报告：{run_label}",
         **audit_override,
@@ -1201,6 +1201,18 @@ def _normalize_nodes_output(value: str | None) -> str | None:
     return normalized
 
 
+def _normalize_count(value: Optional[int]) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0:
+        return None
+    return parsed
+
+
 def _sanitize_optional_text(value: str | None) -> str | None:
     if value is None:
         return None
@@ -1754,13 +1766,21 @@ def _present_cluster(
     ):
         agent = cluster.default_agent
         last_seen = agent.last_seen_at if agent and agent.is_enabled else None
-        if last_seen:
+        if agent and agent.is_enabled:
             deadline = datetime.utcnow() - AGENT_HEARTBEAT_TIMEOUT
-            if last_seen < deadline:
+            if last_seen and last_seen >= deadline:
+                result.connection_status = "connected"
+            elif last_seen:
                 result.connection_status = "failed"
                 health_message = (
                     f"Agent 超过 {AGENT_HEARTBEAT_TIMEOUT_MINUTES} 分钟未上报健康状态。"
                 )
+            else:
+                result.connection_status = "warning"
+                health_message = "尚未收到 Agent 心跳。"
+        else:
+            result.connection_status = "warning"
+            health_message = "未绑定可用 Agent。"
     if health_message:
         result.agent_health_message = health_message
     if (
@@ -2305,12 +2325,20 @@ def agent_heartbeat(
 ):
     nodes_output = _normalize_nodes_output(payload.nodes_output)
     nodes_retrieved_at = payload.nodes_retrieved_at
+    node_total = _normalize_count(payload.node_total)
+    node_ready = _normalize_count(payload.node_ready)
+    if node_total is not None and node_ready is not None and node_ready > node_total:
+        node_ready = node_total
+    pod_count = _normalize_count(payload.pod_count)
     updated = crud.record_agent_heartbeat(
         ctx.db,
         ctx.agent,
         seen_at=payload.reported_at or datetime.utcnow(),
         nodes_output=nodes_output,
         nodes_output_at=nodes_retrieved_at,
+        node_total=node_total,
+        node_ready=node_ready,
+        pod_count=pod_count,
     )
     refreshed = crud.get_inspection_agent(ctx.db, updated.id) or updated
     return _serialize_agent(refreshed)
@@ -3290,20 +3318,37 @@ def get_overview_summary(
 ):
     _require_permission(db, current_user, "clusterAgent.read", "集群查看")
     clusters = crud.list_clusters(db)
-    cluster_ids = [cluster.id for cluster in clusters]
-    latest_runs = _resolve_latest_runs_by_cluster(db, cluster_ids)
+    cluster_total = len(clusters)
+    cluster_online = 0
+    node_ready_total = 0
+    node_total_total = 0
     pod_total = 0
-    matched = False
-    for run in latest_runs.values():
-        if run.status != "finished":
+    matched_nodes = False
+    matched_pods = False
+    deadline = datetime.utcnow() - AGENT_HEARTBEAT_TIMEOUT
+    for cluster in clusters:
+        if cluster.execution_mode != "agent":
             continue
-        if run.pod_count is None:
+        agent = _resolve_active_agent(db, cluster)
+        if not agent or not agent.is_enabled:
             continue
-        if run.pod_count < 0:
-            continue
-        matched = True
-        pod_total += run.pod_count
-    return schemas.OverviewSummaryOut(pod_total=pod_total if matched else None)
+        last_seen = agent.last_seen_at
+        if last_seen and last_seen >= deadline:
+            cluster_online += 1
+            if agent.node_total is not None and agent.node_ready is not None:
+                node_total_total += agent.node_total
+                node_ready_total += agent.node_ready
+                matched_nodes = True
+            if agent.pod_count is not None and agent.pod_count >= 0:
+                pod_total += agent.pod_count
+                matched_pods = True
+    return schemas.OverviewSummaryOut(
+        cluster_total=cluster_total,
+        cluster_online=cluster_online,
+        node_ready=node_ready_total if matched_nodes else None,
+        node_total=node_total_total if matched_nodes else None,
+        pod_total=pod_total if matched_pods else None,
+    )
 
 
 @app.post("/inspection-runs", response_model=schemas.InspectionRunOut, status_code=201)
