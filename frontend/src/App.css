@@ -4121,10 +4121,10 @@ th {
 }
 
 .overview-line-grid {
-  stroke: #cbd5f5;
+  stroke: #e2e8f0;
   stroke-dasharray: none;
-  stroke-width: 1;
-  opacity: 0.9;
+  stroke-width: 0.8;
+  opacity: 0.8;
 }
 
 .overview-line-axis-label {
