@@ -1275,6 +1275,13 @@ const DashboardOverviewView = ({
       minute: "2-digit",
     });
 
+  const formatTooltipTime = (date: Date) =>
+    date.toLocaleTimeString("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+
   const buildLineSeries = useCallback(
     (metric: "cpu" | "memory") => {
       if (!overviewMetrics || timeline.length === 0) {
@@ -1324,12 +1331,21 @@ const DashboardOverviewView = ({
     const otherMetric: "cpu" | "memory" = metric === "cpu" ? "memory" : "cpu";
     const width = 640;
     const height = 240;
-    const padding = { left: 8, right: 12, top: 12, bottom: 34 };
+    const padding = { left: 0, right: 12, top: 12, bottom: 34 };
     const plotWidth = width - padding.left - padding.right;
     const plotHeight = height - padding.top - padding.bottom;
     const maxIndex = Math.max(timeline.length - 1, 1);
-    const labelEvery =
-      timeline.length > 8 ? Math.ceil(timeline.length / 8) : 1;
+    const labelIntervalSeconds = 20 * 60;
+    const labelBase =
+      timeline.length > 0
+        ? new Date(
+            Math.floor(
+              timeline[0].getTime() / 1000 / labelIntervalSeconds
+            ) *
+              labelIntervalSeconds *
+              1000
+          )
+        : null;
     const toX = (index: number) =>
       padding.left + (index / maxIndex) * plotWidth;
     const toY = (value: number) =>
@@ -1461,23 +1477,29 @@ const DashboardOverviewView = ({
               );
             })
           )}
-          {timeline.map((time, index) => {
-            if (index % labelEvery !== 0) {
-              return null;
-            }
-            const x = toX(index);
-            return (
-              <text
-                key={`x-${index}`}
-                x={x}
-                y={height - 10}
-                textAnchor="middle"
-                className="overview-line-axis-label"
-              >
-                {formatChartTime(time)}
-              </text>
-            );
-          })}
+        {timeline.map((time, index) => {
+          if (!labelBase) {
+            return null;
+          }
+          const diffSeconds = Math.round(
+            (time.getTime() - labelBase.getTime()) / 1000
+          );
+          if (diffSeconds < 0 || diffSeconds % labelIntervalSeconds !== 0) {
+            return null;
+          }
+          const x = toX(index);
+          return (
+            <text
+              key={`x-${index}`}
+              x={x}
+              y={height - 10}
+              textAnchor="middle"
+              className="overview-line-axis-label"
+            >
+              {formatChartTime(time)}
+            </text>
+          );
+        })}
         </svg>
         {currentHover.index !== null && currentHover.point && (
           <div
@@ -1492,7 +1514,7 @@ const DashboardOverviewView = ({
             }}
           >
             <div className="overview-line-tooltip-time">
-              {formatChartTime(timeline[currentHover.index])}
+              {formatTooltipTime(timeline[currentHover.index])}
             </div>
             {tooltipLines.map((line) => (
               <div key={line.name} className="overview-line-tooltip-row">
@@ -11148,7 +11170,7 @@ const loginRedirectState = useMemo(
     try {
       const data = await getOverviewMetrics({
         minutes: 180,
-        interval_seconds: 30,
+        interval_seconds: 60,
       });
       setOverviewMetrics(data);
       return data;
