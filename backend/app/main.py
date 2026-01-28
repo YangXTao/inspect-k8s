@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import math
 import logging
 import os
 import re
@@ -3348,11 +3349,11 @@ def _resolve_latest_runs_by_cluster(
     return latest
 
 
-def _floor_time_to_interval(moment: datetime, interval_minutes: int) -> datetime:
-    minutes = max(1, int(interval_minutes))
-    epoch_minutes = int(moment.timestamp() // 60)
-    bucket_minutes = (epoch_minutes // minutes) * minutes
-    return datetime.utcfromtimestamp(bucket_minutes * 60)
+def _floor_time_to_interval_seconds(moment: datetime, interval_seconds: int) -> datetime:
+    seconds = max(1, int(interval_seconds))
+    epoch_seconds = int(moment.timestamp())
+    bucket_seconds = (epoch_seconds // seconds) * seconds
+    return datetime.utcfromtimestamp(bucket_seconds)
 
 
 @app.get("/overview/summary", response_model=schemas.OverviewSummaryOut)
@@ -3399,15 +3400,23 @@ def get_overview_summary(
 def get_overview_metrics(
     minutes: int = Query(180, ge=20, le=24 * 60, description="时间窗口（分钟）"),
     interval: int = Query(20, ge=5, le=120, description="采样间隔（分钟）"),
+    interval_seconds: Optional[int] = Query(
+        None, ge=5, le=3600, description="采样间隔（秒）"
+    ),
     db: Session = Depends(get_db),
     current_user: models.AuthUser = Depends(get_current_user),
 ):
     _require_permission(db, current_user, "clusterAgent.read", "集群查看")
     now = datetime.utcnow()
     start = now - timedelta(minutes=minutes)
-    interval_minutes = max(1, int(interval))
-    start_bucket = _floor_time_to_interval(start, interval_minutes)
-    end_bucket = _floor_time_to_interval(now, interval_minutes)
+    resolved_interval_seconds = (
+        max(1, int(interval_seconds))
+        if interval_seconds is not None
+        else max(1, int(interval)) * 60
+    )
+    interval_minutes = max(1, int(math.ceil(resolved_interval_seconds / 60)))
+    start_bucket = _floor_time_to_interval_seconds(start, resolved_interval_seconds)
+    end_bucket = _floor_time_to_interval_seconds(now, resolved_interval_seconds)
 
     clusters = crud.list_clusters(db)
     cluster_map = {cluster.id: cluster.name for cluster in clusters}
@@ -3415,6 +3424,7 @@ def get_overview_metrics(
         return schemas.OverviewMetricsOut(
             start=start_bucket,
             end=end_bucket,
+            interval_seconds=resolved_interval_seconds,
             interval_minutes=interval_minutes,
             series=[],
         )
@@ -3438,7 +3448,9 @@ def get_overview_metrics(
 
     for sample in samples:
         cluster_id = sample.cluster_id
-        bucket_time = _floor_time_to_interval(sample.reported_at, interval_minutes)
+        bucket_time = _floor_time_to_interval_seconds(
+            sample.reported_at, resolved_interval_seconds
+        )
         bucket_map = buckets.setdefault(cluster_id, {})
         count_map = counts.setdefault(cluster_id, {})
         bucket = bucket_map.setdefault(bucket_time, {"cpu_sum": 0.0, "mem_sum": 0.0})
@@ -3487,6 +3499,7 @@ def get_overview_metrics(
     return schemas.OverviewMetricsOut(
         start=start_bucket,
         end=end_bucket,
+        interval_seconds=resolved_interval_seconds,
         interval_minutes=interval_minutes,
         series=series,
     )

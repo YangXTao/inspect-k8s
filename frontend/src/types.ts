@@ -101,6 +101,7 @@ export type OverviewMetricsSeries = {
 export type OverviewMetrics = {
   start: string;
   end: string;
+  interval_seconds?: number;
   interval_minutes: number;
   series: OverviewMetricsSeries[];
 };

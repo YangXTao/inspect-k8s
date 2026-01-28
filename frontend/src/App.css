@@ -4165,6 +4165,14 @@ th {
   white-space: nowrap;
 }
 
+.overview-line-tooltip-left {
+  transform: translate(-100%, 0);
+}
+
+.overview-line-tooltip-right {
+  transform: translate(0, 0);
+}
+
 .overview-line-tooltip-time {
   font-weight: 600;
   margin-bottom: 6px;

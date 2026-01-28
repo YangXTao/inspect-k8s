@@ -21,7 +21,9 @@ config:
     batch_size: 1
     verify_ssl: false
     request_timeout: 15
-    status_report_interval: 60
+    node_report_interval: 30
+    metrics_report_interval: 30
+    status_report_interval: 30
   cluster:
     name: demo-cluster
   prometheus:

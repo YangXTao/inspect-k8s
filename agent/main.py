@@ -43,9 +43,9 @@ else:
 DEFAULT_POLL_INTERVAL = 10
 DEFAULT_BATCH_SIZE = 1
 DEFAULT_TIMEOUT = 15
-DEFAULT_NODE_REPORT_INTERVAL = 86400
-DEFAULT_METRICS_REPORT_INTERVAL = 60
-DEFAULT_STATUS_REPORT_INTERVAL = 60
+DEFAULT_NODE_REPORT_INTERVAL = 30
+DEFAULT_METRICS_REPORT_INTERVAL = 30
+DEFAULT_STATUS_REPORT_INTERVAL = 30
 
 
 def _as_bool(value: Any) -> bool:
@@ -607,6 +607,7 @@ class AgentClient:
     def get_run_status(self, run_id: int) -> Optional[str]:
         resp = self.session.get(
             f"{self.config.server_base}/inspection-runs/{run_id}",
+            headers=self._headers(),
             timeout=self.config.request_timeout,
         )
         resp.raise_for_status()

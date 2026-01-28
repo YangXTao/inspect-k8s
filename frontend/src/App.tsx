@@ -1106,10 +1106,10 @@ const DashboardOverviewView = ({
   overviewMetrics,
 }: DashboardOverviewProps) => {
   const chartWrapperRef = useRef<HTMLDivElement | null>(null);
-  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
-  const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number } | null>(
-    null
-  );
+  const [hoverState, setHoverState] = useState(() => ({
+    cpu: { index: null as number | null, point: null as { x: number; y: number } | null, align: "right" as "right" | "left" },
+    memory: { index: null as number | null, point: null as { x: number; y: number } | null, align: "right" as "right" | "left" },
+  }));
   const [runDetails, setRunDetails] = useState<Record<number, InspectionRun>>(
     {}
   );
@@ -1236,24 +1236,38 @@ const DashboardOverviewView = ({
     "#eab308",
   ];
 
+  const intervalSeconds = useMemo(() => {
+    if (!overviewMetrics) {
+      return 0;
+    }
+    if (
+      typeof overviewMetrics.interval_seconds === "number" &&
+      Number.isFinite(overviewMetrics.interval_seconds) &&
+      overviewMetrics.interval_seconds > 0
+    ) {
+      return overviewMetrics.interval_seconds;
+    }
+    const minutes = overviewMetrics.interval_minutes || 20;
+    return Math.max(1, minutes * 60);
+  }, [overviewMetrics]);
+
   const timeline = useMemo(() => {
     if (!overviewMetrics) {
       return [];
     }
     const start = parseDateValue(overviewMetrics.start);
     const end = parseDateValue(overviewMetrics.end);
-    const interval = overviewMetrics.interval_minutes || 20;
-    if (!start || !end || interval <= 0) {
+    if (!start || !end || intervalSeconds <= 0) {
       return [];
     }
     const points: Date[] = [];
     let cursor = new Date(start.getTime());
     while (cursor <= end) {
       points.push(new Date(cursor.getTime()));
-      cursor = new Date(cursor.getTime() + interval * 60 * 1000);
+      cursor = new Date(cursor.getTime() + intervalSeconds * 1000);
     }
     return points;
-  }, [overviewMetrics]);
+  }, [overviewMetrics, intervalSeconds]);
 
   const formatChartTime = (date: Date) =>
     date.toLocaleTimeString("zh-CN", {
@@ -1266,9 +1280,9 @@ const DashboardOverviewView = ({
       if (!overviewMetrics || timeline.length === 0) {
         return [];
       }
-      const interval = overviewMetrics.interval_minutes || 20;
+      const interval = intervalSeconds || 1;
       const toBucketKey = (value: Date) =>
-        Math.floor(value.getTime() / 60000 / interval) * interval;
+        Math.floor(value.getTime() / 1000 / interval) * interval;
       const timelineKeys = timeline.map((date) => toBucketKey(date));
       return overviewMetrics.series.map((series, index) => {
         const valueMap = new Map<number, number>();
@@ -1295,7 +1309,7 @@ const DashboardOverviewView = ({
         };
       });
     },
-    [overviewMetrics, timeline]
+    [overviewMetrics, timeline, intervalSeconds]
   );
 
   const renderLineChart = (metric: "cpu" | "memory") => {
@@ -1306,9 +1320,11 @@ const DashboardOverviewView = ({
     if (series.length === 0) {
       return <div className="placeholder">暂无数据</div>;
     }
+    const currentHover = hoverState[metric];
+    const otherMetric: "cpu" | "memory" = metric === "cpu" ? "memory" : "cpu";
     const width = 640;
     const height = 240;
-    const padding = { left: 14, right: 12, top: 12, bottom: 34 };
+    const padding = { left: 8, right: 12, top: 12, bottom: 34 };
     const plotWidth = width - padding.left - padding.right;
     const plotHeight = height - padding.top - padding.bottom;
     const maxIndex = Math.max(timeline.length - 1, 1);
@@ -1339,30 +1355,45 @@ const DashboardOverviewView = ({
       const scaledPlotWidth = plotWidth * scale;
       const scaledRight = padding.right * scale;
       if (x < scaledPaddingLeft || x > rect.width - scaledRight) {
-        setHoverIndex(null);
-        setHoverPoint(null);
+        setHoverState((prev) => ({
+          ...prev,
+          [metric]: { ...prev[metric], index: null, point: null },
+        }));
         return;
       }
       const index = Math.round(
         ((x - scaledPaddingLeft) / scaledPlotWidth) * maxIndex
       );
       const clamped = Math.min(Math.max(index, 0), maxIndex);
-      const tooltipX = Math.max(0, Math.min(rect.width, x + 12));
+      const align = x > rect.width * 0.72 ? "left" : "right";
+      const tooltipX =
+        align === "left"
+          ? Math.max(0, Math.min(rect.width, x - 12))
+          : Math.max(0, Math.min(rect.width, x + 12));
       const tooltipY = Math.max(0, Math.min(rect.height, y + 12));
-      setHoverIndex(clamped);
-      setHoverPoint({ x: tooltipX, y: tooltipY });
+      setHoverState((prev) => ({
+        ...prev,
+        [metric]: {
+          index: clamped,
+          point: { x: tooltipX, y: tooltipY },
+          align,
+        },
+        [otherMetric]: { ...prev[otherMetric], index: null, point: null },
+      }));
     };
 
     const handleMouseLeave = () => {
-      setHoverIndex(null);
-      setHoverPoint(null);
+      setHoverState((prev) => ({
+        ...prev,
+        [metric]: { ...prev[metric], index: null, point: null },
+      }));
     };
 
     const tooltipLines =
-      hoverIndex === null
+      currentHover.index === null
         ? []
         : series.map((entry) => {
-            const value = entry.values[hoverIndex];
+            const value = entry.values[currentHover.index ?? 0];
             const label =
               typeof value === "number" && Number.isFinite(value)
                 ? `${value.toFixed(2)}%`
@@ -1394,7 +1425,7 @@ const DashboardOverviewView = ({
                   className="overview-line-grid"
                 />
                 <text
-                  x={2}
+                  x={0}
                   y={y + 4}
                   textAnchor="start"
                   className="overview-line-axis-label"
@@ -1448,16 +1479,20 @@ const DashboardOverviewView = ({
             );
           })}
         </svg>
-        {hoverIndex !== null && hoverPoint && (
+        {currentHover.index !== null && currentHover.point && (
           <div
-            className="overview-line-tooltip"
+            className={`overview-line-tooltip ${
+              currentHover.align === "left"
+                ? "overview-line-tooltip-left"
+                : "overview-line-tooltip-right"
+            }`}
             style={{
-              left: hoverPoint.x,
-              top: hoverPoint.y,
+              left: currentHover.point.x,
+              top: currentHover.point.y,
             }}
           >
             <div className="overview-line-tooltip-time">
-              {formatChartTime(timeline[hoverIndex])}
+              {formatChartTime(timeline[currentHover.index])}
             </div>
             {tooltipLines.map((line) => (
               <div key={line.name} className="overview-line-tooltip-row">
@@ -11111,7 +11146,10 @@ const loginRedirectState = useMemo(
       return null;
     }
     try {
-      const data = await getOverviewMetrics({ minutes: 180, interval: 20 });
+      const data = await getOverviewMetrics({
+        minutes: 180,
+        interval_seconds: 30,
+      });
       setOverviewMetrics(data);
       return data;
     } catch (err) {

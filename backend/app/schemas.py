@@ -142,6 +142,7 @@ class OverviewMetricsSeriesOut(BaseModel):
 class OverviewMetricsOut(BaseModel):
     start: datetime
     end: datetime
+    interval_seconds: int
     interval_minutes: int
     series: List[OverviewMetricsSeriesOut] = Field(default_factory=list)
 

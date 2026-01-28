@@ -433,7 +433,7 @@ export function getOverviewSummary(): Promise<OverviewSummary> {
 }
 
 export function getOverviewMetrics(
-  params?: { minutes?: number; interval?: number }
+  params?: { minutes?: number; interval?: number; interval_seconds?: number }
 ): Promise<OverviewMetrics> {
   const query = new URLSearchParams();
   if (params?.minutes) {
@@ -441,6 +441,9 @@ export function getOverviewMetrics(
   }
   if (params?.interval) {
     query.set("interval", String(params.interval));
+  }
+  if (params?.interval_seconds) {
+    query.set("interval_seconds", String(params.interval_seconds));
   }
   const suffix = query.toString();
   return request<OverviewMetrics>(`/overview/metrics${suffix ? `?${suffix}` : ""}`);
