@@ -1412,10 +1412,11 @@ const DashboardOverviewView = ({
       const rect = event.currentTarget.getBoundingClientRect();
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
-      const scale = rect.width / width;
-      const scaledPaddingLeft = padding.left * scale;
-      const scaledPlotWidth = plotWidth * scale;
-      const scaledRight = padding.right * scale;
+      const scaleX = rect.width / width;
+      const scaleY = rect.height / height;
+      const scaledPaddingLeft = padding.left * scaleX;
+      const scaledPlotWidth = plotWidth * scaleX;
+      const scaledRight = padding.right * scaleX;
       if (x < scaledPaddingLeft || x > rect.width - scaledRight) {
         setHoverState((prev) => ({
           ...prev,
@@ -1439,12 +1440,12 @@ const DashboardOverviewView = ({
           : Math.max(0, Math.min(rect.width, x + 12));
       const tooltipY = Math.max(0, Math.min(rect.height, y + 12));
       const lineY = Math.min(
-        Math.max(y / scale, padding.top),
+        Math.max(y / scaleY, padding.top),
         height - padding.bottom
       );
       const lineX = Math.min(
-        Math.max(rawIndex, 0),
-        maxIndex
+        Math.max(x / scaleX, padding.left),
+        width - padding.right
       );
       setHoverState((prev) => ({
         ...prev,
@@ -1535,8 +1536,8 @@ const DashboardOverviewView = ({
             ))}
             {currentHover.lineX !== null && (
               <line
-                x1={toX(currentHover.lineX)}
-                x2={toX(currentHover.lineX)}
+                x1={currentHover.lineX}
+                x2={currentHover.lineX}
                 y1={padding.top}
                 y2={height - padding.bottom}
                 className="overview-line-hover"
@@ -1563,15 +1564,23 @@ const DashboardOverviewView = ({
               }
               const x = toX(index);
               return (
-                <text
-                  key={`x-${index}`}
-                  x={x}
-                  y={height - 10}
-                  textAnchor="middle"
-                  className="overview-line-axis-label"
-                >
-                  {formatChartTime(time)}
-                </text>
+                <g key={`x-${index}`}>
+                  <line
+                    x1={x}
+                    x2={x}
+                    y1={padding.top}
+                    y2={height - padding.bottom}
+                    className="overview-line-grid"
+                  />
+                  <text
+                    x={x}
+                    y={height - 10}
+                    textAnchor="middle"
+                    className="overview-line-axis-label"
+                  >
+                    {formatChartTime(time)}
+                  </text>
+                </g>
               );
             })}
           </svg>
