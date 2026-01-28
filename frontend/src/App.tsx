@@ -1362,7 +1362,7 @@ const DashboardOverviewView = ({
       }
       return target;
     };
-    const labelIntervalSeconds = 20 * 60;
+    const labelIntervalSeconds = 5 * 60;
     const labelBase =
       timeline.length > 0
         ? new Date(
