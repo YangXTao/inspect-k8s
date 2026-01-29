@@ -2458,7 +2458,7 @@ def agent_claim_run(
     updated = crud.get_inspection_run(ctx.db, run_id)
     if not updated:
         raise HTTPException(status_code=404, detail="巡检任务不存在。")
-    return _serialize_run(updated)
+    return _serialize_run(ctx.db, updated)
 
 
 
@@ -2551,7 +2551,7 @@ def agent_submit_results(
     crud.record_agent_heartbeat(ctx.db, ctx.agent)
     if run.status in {"paused", "cancelled"}:
         refreshed = crud.get_inspection_run(ctx.db, run.id) or run
-        return _serialize_run(refreshed)
+        return _serialize_run(ctx.db, refreshed)
     is_partial = bool(payload.partial)
     for result in payload.results:
         normalized_status = (result.status or "").strip().lower()
@@ -2593,7 +2593,7 @@ def agent_submit_results(
             processed_items=_clamp_processed(processed_total, display_total),
         )
         refreshed = crud.get_inspection_run(ctx.db, run.id) or run
-        return _serialize_run(refreshed)
+        return _serialize_run(ctx.db, refreshed)
 
     if run.total_items == 0 and processed_total > 0:
         run.total_items = processed_total
@@ -2626,7 +2626,7 @@ def agent_submit_results(
     if run.operator == CONNECTION_TEST_OPERATOR:
         _apply_connection_test_result(ctx.db, run, payload.results)
         refreshed = crud.get_inspection_run(ctx.db, run.id) or run
-        return _serialize_run(refreshed)
+        return _serialize_run(ctx.db, refreshed)
 
     try:
         run = _attach_run_report(ctx.db, run)
@@ -2636,7 +2636,7 @@ def agent_submit_results(
         ctx.db.add(run)
         ctx.db.commit()
         ctx.db.refresh(run)
-    return _serialize_run(run)
+    return _serialize_run(ctx.db, run)
 
 app.include_router(agent_router)
 
@@ -3281,11 +3281,36 @@ def _serialize_result(result: models.InspectionResult) -> schemas.InspectionResu
     )
 
 
-def _serialize_run(run: models.InspectionRun) -> schemas.InspectionRunOut:
+def _resolve_prometheus_versions(
+    db: Session, run: models.InspectionRun
+) -> Optional[List[str]]:
+    plan = _parse_run_plan(run)
+    if not plan:
+        return None
+    item_ids = [
+        int(entry.get("id"))
+        for entry in plan
+        if isinstance(entry, dict) and entry.get("id") is not None
+    ]
+    if not item_ids:
+        return None
+    items = crud.get_items_by_ids(db, item_ids)
+    versions = {
+        _normalize_prometheus_version(item.prometheus_version)
+        for item in items
+        if (item.check_type or "").strip() == "promql"
+    }
+    if not versions:
+        return None
+    return sorted(versions)
+
+
+def _serialize_run(db: Session, run: models.InspectionRun) -> schemas.InspectionRunOut:
     cluster = run.cluster
     if cluster is None:
         raise HTTPException(status_code=500, detail="Cluster information missing.")
     total_items, processed_items, progress = _calculate_run_progress(run)
+    prometheus_versions = _resolve_prometheus_versions(db, run)
     return schemas.InspectionRunOut(
         id=run.id,
         operator=run.operator,
@@ -3301,6 +3326,7 @@ def _serialize_run(run: models.InspectionRun) -> schemas.InspectionRunOut:
         created_at=run.created_at,
         completed_at=run.completed_at,
         prometheus_version=run.prometheus_version,
+        prometheus_versions=prometheus_versions,
         executor=run.executor,
         agent_status=run.agent_status,
         agent_id=run.agent_id,
@@ -3575,7 +3601,7 @@ def trigger_inspection(
     run = crud.get_inspection_run(db, run.id)
     if not run:
         raise HTTPException(status_code=500, detail="无法加载巡检任务。")
-    return _serialize_run(run)
+    return _serialize_run(db, run)
 
 
 @app.get("/inspection-runs", response_model=List[schemas.InspectionRunListOut])
@@ -3622,7 +3648,7 @@ def get_inspection_run(
         entity_id=run.id,
         description=f"查看巡检记录：{run_label}",
     )
-    return _serialize_run(run)
+    return _serialize_run(db, run)
 
 
 @app.post(
@@ -3640,14 +3666,14 @@ def pause_inspection_run(
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
     if run.status == "paused":
-        return _serialize_run(run)
+        return _serialize_run(db, run)
     if run.status != "running":
         raise HTTPException(status_code=400, detail="仅可暂停进行中的巡检。")
     crud.pause_inspection_run(db, run)
     refreshed = crud.get_inspection_run(db, run_id)
     if not refreshed:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
-    return _serialize_run(refreshed)
+    return _serialize_run(db, refreshed)
 
 
 @app.post(
@@ -3665,14 +3691,14 @@ def resume_inspection_run(
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
     if run.status == "running":
-        return _serialize_run(run)
+        return _serialize_run(db, run)
     if run.status != "paused":
         raise HTTPException(status_code=400, detail="仅可继续已暂停的巡检。")
     crud.resume_inspection_run(db, run)
     refreshed = crud.get_inspection_run(db, run_id)
     if not refreshed:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
-    return _serialize_run(refreshed)
+    return _serialize_run(db, refreshed)
 
 
 @app.post(
@@ -3695,7 +3721,7 @@ def cancel_inspection_run(
     refreshed = crud.get_inspection_run(db, run_id)
     if not refreshed:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
-    return _serialize_run(refreshed)
+    return _serialize_run(db, refreshed)
 
 
 @app.delete("/inspection-runs/{run_id}", status_code=204)

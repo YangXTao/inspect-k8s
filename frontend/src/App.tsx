@@ -1094,7 +1094,7 @@ interface DashboardOverviewProps {
   canViewHistory: boolean;
   overviewSummary: OverviewSummary | null;
   overviewMetrics: OverviewMetrics | null;
-  previousPathname?: string | null;
+  suppressDetailLoading?: boolean;
 }
 
 const DashboardOverviewView = ({
@@ -1105,7 +1105,7 @@ const DashboardOverviewView = ({
   canViewHistory,
   overviewSummary,
   overviewMetrics,
-  previousPathname,
+  suppressDetailLoading,
 }: DashboardOverviewProps) => {
   const chartWrapperRef = useRef<HTMLDivElement | null>(null);
   const [hoverState, setHoverState] = useState(() => ({
@@ -1761,7 +1761,7 @@ const DashboardOverviewView = ({
       {detailError && (
         <div className="feedback warning overview-feedback">{detailError}</div>
       )}
-      {detailLoading && !previousPathname?.includes("/runs/") && (
+      {detailLoading && false && (
         <div className="feedback info overview-feedback">正在加载巡检详情...</div>
       )}
 
@@ -9207,6 +9207,23 @@ const RunDetailView = ({
   const progressValue =
     run?.progress ?? summaryRun?.progress ??
     (totalItems > 0 ? Math.round((processedItems / totalItems) * 100) : 0);
+  const prometheusVersionLabel = useMemo(() => {
+    const versions =
+      summaryRun?.prometheus_versions?.filter(
+        (value) => value && value.trim()
+      ) ?? [];
+    if (versions.length > 0) {
+      return versions.join("、");
+    }
+    return normalizePrometheusVersion(
+      summaryRun?.prometheus_version,
+      prometheusVersionOptions
+    );
+  }, [
+    summaryRun?.prometheus_version,
+    summaryRun?.prometheus_versions,
+    prometheusVersionOptions,
+  ]);
   const statusLabel =
     summaryRun?.status_label ?? summaryRun?.status ?? "未知状态";
   const statusValue = summaryRun?.status ?? "queued";
@@ -9457,10 +9474,7 @@ const RunDetailView = ({
           </div>
           <div>
             <strong>Prometheus 版本：</strong>
-            {normalizePrometheusVersion(
-              summaryRun?.prometheus_version,
-              prometheusVersionOptions
-            )}
+            {prometheusVersionLabel}
           </div>
           <div>
             <strong>开始时间：</strong>
@@ -10892,9 +10906,20 @@ const App = () => {
 const location = useLocation();
 const navigate = useNavigate();
 const previousPathRef = useRef(location.pathname);
+const [suppressOverviewDetailLoading, setSuppressOverviewDetailLoading] =
+  useState(false);
 useEffect(() => {
+  const previousPath = previousPathRef.current;
+  if (location.pathname === "/" && previousPath !== "/") {
+    setSuppressOverviewDetailLoading(true);
+  } else if (location.pathname !== "/") {
+    setSuppressOverviewDetailLoading(false);
+  }
   previousPathRef.current = location.pathname;
 }, [location.pathname]);
+const effectiveSuppressDetailLoading =
+  suppressOverviewDetailLoading ||
+  (location.pathname === "/" && previousPathRef.current !== "/");
 const currentNoticeScope = useMemo(
   () => resolveNoticeScope(location.pathname),
   [location.pathname]
@@ -14027,7 +14052,7 @@ const hasManualKubeconfig = useMemo(
       canViewHistory={canViewHistory}
       overviewSummary={overviewSummary}
       overviewMetrics={overviewMetrics}
-      previousPathname={previousPathRef.current}
+      suppressDetailLoading={effectiveSuppressDetailLoading}
     />
   );
 

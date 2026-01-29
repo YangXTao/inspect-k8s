@@ -843,12 +843,11 @@ class AgentRunner:
 
     def _collect_cluster_utilization(self) -> Tuple[Optional[float], Optional[float]]:
         cpu_query = (
-            "sum(rate(container_cpu_usage_seconds_total{image!=\"\",container!~\"POD\"}[30m])) "
-            "/ sum(kube_node_status_allocatable{resource=\"cpu\"}) * 100"
+            "(1 - (avg(irate({__name__=~\"node_cpu_seconds_total|windows_cpu_time_total\",mode=\"idle\"}[1m])))) * 100"
         )
         memory_query = (
-            "sum(container_memory_working_set_bytes{image!=\"\",container!~\"POD\"}) "
-            "/ sum(kube_node_status_allocatable{resource=\"memory\"}) * 100"
+            "(1 - sum({__name__=~\"node_memory_MemAvailable_bytes|windows_os_physical_memory_free_bytes\"}) "
+            "/ sum({__name__=~\"node_memory_MemTotal_bytes|windows_cs_physical_memory_bytes\"})) * 100"
         )
         cpu_value = self._query_prometheus_value(cpu_query)
         memory_value = self._query_prometheus_value(memory_query)

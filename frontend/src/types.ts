@@ -148,6 +148,7 @@ export type InspectionRun = {
   created_at: string;
   completed_at?: string;
   prometheus_version?: string | null;
+  prometheus_versions?: string[] | null;
   executor: ExecutionMode;
   agent_status?: InspectionAgentStatus | null;
   agent_status_label?: string | null;

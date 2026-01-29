@@ -252,6 +252,7 @@ class InspectionRunOut(BaseModel):
     created_at: datetime
     completed_at: Optional[datetime]
     prometheus_version: Optional[str] = None
+    prometheus_versions: Optional[List[str]] = None
     executor: str
     agent_status: Optional[str]
     agent_id: Optional[int]
