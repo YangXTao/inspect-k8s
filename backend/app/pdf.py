@@ -319,6 +319,10 @@ def generate_pdf_report(
                     pass
 
         candidates: list[tuple[str, Path, int | None]] = [
+            ("MicrosoftYaHei", Path("data/fonts/msyh.ttc"), 0),
+            ("MicrosoftYaHei", Path("data/fonts/msyh.ttf"), None),
+            ("MicrosoftYaHei", Path("/usr/share/fonts/truetype/msttcorefonts/msyh.ttc"), 0),
+            ("MicrosoftYaHei", Path("/usr/share/fonts/truetype/microsoft/msyh.ttc"), 0),
             ("MicrosoftYaHei", Path("C:/Windows/Fonts/msyh.ttc"), 0),
             ("MicrosoftYaHei", Path("C:/Windows/Fonts/msyh.ttf"), None),
             ("MicrosoftYaHeiUI", Path("C:/Windows/Fonts/msyhl.ttc"), 0),
