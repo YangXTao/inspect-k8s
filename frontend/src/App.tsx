@@ -1284,16 +1284,83 @@ const DashboardOverviewView = ({
     return typeof total === "number" ? String(total) : "-";
   }, [overviewSummary]);
 
-  const chartColors = [
-    "#2563eb",
-    "#22c55e",
-    "#f97316",
-    "#ec4899",
-    "#8b5cf6",
-    "#0ea5e9",
-    "#10b981",
-    "#eab308",
-  ];
+  const chartColors = useMemo(
+    () => [
+      "#2563eb",
+      "#22c55e",
+      "#f97316",
+      "#ec4899",
+      "#8b5cf6",
+      "#0ea5e9",
+      "#10b981",
+      "#eab308",
+    ],
+    []
+  );
+  const [clusterColorMap, setClusterColorMap] = useState<
+    Record<number, string>
+  >({});
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      const raw = window.localStorage.getItem("cluster_chart_colors");
+      if (!raw) {
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        setClusterColorMap(parsed as Record<number, string>);
+      }
+    } catch {
+      // ignore malformed cache
+    }
+  }, []);
+  useEffect(() => {
+    if (!overviewMetrics) {
+      return;
+    }
+    setClusterColorMap((prev) => {
+      const next: Record<number, string> = { ...prev };
+      const existingIds = new Set(clusters.map((cluster) => cluster.id));
+      Object.keys(next).forEach((key) => {
+        const numericKey = Number(key);
+        if (!existingIds.has(numericKey)) {
+          delete next[numericKey];
+        }
+      });
+      const used = new Set(Object.values(next));
+      const assignColor = (clusterId: number) => {
+        if (next[clusterId]) {
+          return;
+        }
+        let color = chartColors.find((item) => !used.has(item));
+        if (!color) {
+          color = chartColors[clusterId % chartColors.length];
+        }
+        used.add(color);
+        next[clusterId] = color;
+      };
+      overviewMetrics.series.forEach((series) => {
+        assignColor(series.cluster_id);
+      });
+      const changed =
+        Object.keys(prev).length !== Object.keys(next).length ||
+        Object.keys(next).some((key) => prev[Number(key)] !== next[Number(key)]);
+      if (changed && typeof window !== "undefined") {
+        try {
+          window.localStorage.setItem(
+            "cluster_chart_colors",
+            JSON.stringify(next)
+          );
+        } catch {
+          // ignore write errors
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [overviewMetrics, clusters, chartColors]);
 
   const intervalSeconds = useMemo(() => {
     if (!overviewMetrics) {
@@ -1368,14 +1435,17 @@ const DashboardOverviewView = ({
           const value = valueMap.get(key);
           return typeof value === "number" ? value : null;
         });
+        const color =
+          clusterColorMap[series.cluster_id] ??
+          chartColors[index % chartColors.length];
         return {
           name: series.cluster_name,
           values,
-          color: chartColors[index % chartColors.length],
+          color,
         };
       });
     },
-    [overviewMetrics, timeline, intervalSeconds]
+    [overviewMetrics, timeline, intervalSeconds, chartColors, clusterColorMap]
   );
 
   const renderLineChart = (metric: "cpu" | "memory") => {
@@ -9285,21 +9355,6 @@ const RunDetailView = ({
     return filteredResults.slice(start, start + resultPageSize);
   }, [filteredResults, resultPage, resultPageSize]);
 
-  if (resolvedRunId === null) {
-    return (
-      <div className="detail-empty">
-        <p>巡检编号无效，无法打开详情。</p>
-        <button
-          type="button"
-          className="secondary"
-          onClick={() => navigate("/history")}
-        >
-          返回历史记录
-        </button>
-      </div>
-    );
-  }
-
   const totalItems =
     run?.total_items ?? summaryRun?.total_items ?? items.length ?? 0;
   const processedItems =
@@ -9324,6 +9379,21 @@ const RunDetailView = ({
     summaryRun?.prometheus_versions,
     prometheusVersionOptions,
   ]);
+
+  if (resolvedRunId === null) {
+    return (
+      <div className="detail-empty">
+        <p>巡检编号无效，无法打开详情。</p>
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => navigate("/history")}
+        >
+          返回历史记录
+        </button>
+      </div>
+    );
+  }
   const statusLabel =
     summaryRun?.status_label ?? summaryRun?.status ?? "未知状态";
   const statusValue = summaryRun?.status ?? "queued";
