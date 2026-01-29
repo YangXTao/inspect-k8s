@@ -1813,7 +1813,11 @@ const DashboardOverviewView = ({
                   ))}
                 </ul>
                 {card.reportPath && (
-                  <Link to={card.reportPath} className="link-button">
+                  <Link
+                    to={card.reportPath}
+                    className="link-button"
+                    state={{ fromOverviewDetail: true }}
+                  >
                     查看巡检详情
                   </Link>
                 )}
@@ -8955,6 +8959,9 @@ const RunDetailView = ({
   const [run, setRun] = useState<InspectionRun | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const showOverviewEntryLoading = Boolean(
+    (location.state as { fromOverviewDetail?: boolean } | null)?.fromOverviewDetail
+  );
   const [statusFilter, setStatusFilter] = useState<
     InspectionResultStatus | "all"
   >("all");
@@ -9429,7 +9436,9 @@ const RunDetailView = ({
       </div>
 
       {error && <div className="feedback error">{error}</div>}
-      {loading && <div className="feedback info">正在加载巡检详情...</div>}
+      {loading && showOverviewEntryLoading && (
+        <div className="feedback info">正在加载巡检详情...</div>
+      )}
 
       <section className="card run-detail-card">
         <div className="run-detail-grid">
