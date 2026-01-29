@@ -1066,15 +1066,6 @@ const OVERVIEW_INDICATORS = [
     keywords: ["apiserver", "api server", "api server availability"],
   },
   {
-    key: "controller",
-    label: "controller-manager 状态",
-    keywords: [
-      "controller-manager",
-      "controller manager",
-      "kube-controller-manager",
-    ],
-  },
-  {
     key: "cpu",
     label: "集群 CPU 使用率",
     keywords: ["cluster cpu usage", "cluster cpu", "集群cpu"],
@@ -1084,7 +1075,14 @@ const OVERVIEW_INDICATORS = [
     label: "集群内存使用率",
     keywords: ["cluster memory usage", "cluster memory", "集群内存"],
   },
+  {
+    key: "cert-expiry",
+    label: "证书过期时间",
+    keywords: ["k8s 证书过期时间检查", "证书过期时间", "证书过期"],
+  },
 ] as const;
+
+const OVERVIEW_INDICATOR_FALLBACK_RUNS = 3;
 
 interface DashboardOverviewProps {
   clusters: ClusterConfig[];
@@ -1155,13 +1153,36 @@ const DashboardOverviewView = ({
     return map;
   }, [latestRuns]);
 
+  const recentRunsByCluster = useMemo(() => {
+    const map = new Map<number, InspectionRunListItem[]>();
+    runs.forEach((run) => {
+      const list = map.get(run.cluster_id) ?? [];
+      list.push(run);
+      map.set(run.cluster_id, list);
+    });
+    map.forEach((list, clusterId) => {
+      list.sort((a, b) => {
+        const timeA = new Date(a.completed_at ?? a.created_at).getTime();
+        const timeB = new Date(b.completed_at ?? b.created_at).getTime();
+        return timeB - timeA;
+      });
+      map.set(
+        clusterId,
+        list.slice(0, OVERVIEW_INDICATOR_FALLBACK_RUNS)
+      );
+    });
+    return map;
+  }, [runs]);
+
   useEffect(() => {
-    if (latestRuns.length === 0) {
-      return;
-    }
-    const targetIds = latestRuns
-      .map((run) => run.id)
-      .filter((runId) => !runDetails[runId]);
+    const targetIds: number[] = [];
+    recentRunsByCluster.forEach((list) => {
+      list.forEach((run) => {
+        if (!runDetails[run.id]) {
+          targetIds.push(run.id);
+        }
+      });
+    });
     if (targetIds.length === 0) {
       return;
     }
@@ -1207,7 +1228,7 @@ const DashboardOverviewView = ({
     return () => {
       cancelled = true;
     };
-  }, [latestRuns, runDetails]);
+  }, [recentRunsByCluster, runDetails]);
 
   const clusterCountLabel = useMemo(() => {
     if (!overviewSummary) {
@@ -1681,10 +1702,23 @@ const DashboardOverviewView = ({
   const indicatorCards = useMemo(() => {
     return clusters.map((cluster) => {
       const latestRun = latestRunByCluster.get(cluster.id) ?? null;
-      const detail =
-        latestRun && latestRun.status === "finished"
-          ? runDetails[latestRun.id]
-          : null;
+      const findIndicatorResult = (indicator: (typeof OVERVIEW_INDICATORS)[number]) => {
+        const candidates = recentRunsByCluster.get(cluster.id) ?? [];
+        for (const run of candidates) {
+          if (run.status !== "finished") {
+            continue;
+          }
+          const detail = runDetails[run.id];
+          if (!detail) {
+            continue;
+          }
+          const result = findResultByKeywords(detail.results, [...indicator.keywords]);
+          if (result) {
+            return result;
+          }
+        }
+        return null;
+      };
       const indicators = OVERVIEW_INDICATORS.map((indicator) => {
         if (indicator.key === "connection") {
           const connectionStatus = cluster.connection_status;
@@ -1707,18 +1741,42 @@ const DashboardOverviewView = ({
             statusIcon: "✕",
           };
         }
-        const result = detail
-          ? findResultByKeywords(detail.results, [...indicator.keywords])
-          : null;
+        const result = findIndicatorResult(indicator);
         const status = result?.status ?? null;
+        const isCertIndicator = indicator.key === "cert-expiry";
+        const isCriticalCert = status === "critical" || status === "failed";
         const isPassed = status === "passed";
         return {
           key: indicator.key,
           label: indicator.label,
           status,
-          statusLabel: status ? (isPassed ? "正常" : "异常") : "-",
-          statusClass: status ? (isPassed ? "success" : "danger") : "muted",
-          statusIcon: status ? (isPassed ? "✓" : "✕") : "·",
+          statusLabel: status
+            ? isCertIndicator
+              ? isCriticalCert
+                ? "异常"
+                : "正常"
+              : isPassed
+                ? "正常"
+                : "异常"
+            : "-",
+          statusClass: status
+            ? isCertIndicator
+              ? isCriticalCert
+                ? "danger"
+                : "success"
+              : isPassed
+                ? "success"
+                : "danger"
+            : "muted",
+          statusIcon: status
+            ? isCertIndicator
+              ? isCriticalCert
+                ? "✕"
+                : "✓"
+              : isPassed
+                ? "✓"
+                : "✕"
+            : "·",
         };
       });
       const clusterSlug = getClusterDisplayId(
@@ -1739,7 +1797,15 @@ const DashboardOverviewView = ({
         reportPath: canViewHistory ? reportPath : null,
       };
     });
-  }, [clusters, latestRunByCluster, runDetails, clusterDisplayIds, runDisplayIds, canViewHistory]);
+  }, [
+    clusters,
+    latestRunByCluster,
+    recentRunsByCluster,
+    runDetails,
+    clusterDisplayIds,
+    runDisplayIds,
+    canViewHistory,
+  ]);
 
   return (
     <div className="overview-dashboard">
@@ -2156,17 +2222,13 @@ const AgentQuickCreate = ({
   const [name, setName] = useState("");
   const [backendUrl, setBackendUrl] = useState("");
   const [description, setDescription] = useState("");
-  const [prometheusUrl, setPrometheusUrl] = useState(DEFAULT_AGENT_PROM_URL);
+  const resolvedPrometheusUrl = DEFAULT_AGENT_PROM_URL;
   const [formError, setFormError] = useState<string | null>(null);
 
   const trimmedName = name.trim();
   const trimmedBackendUrl = backendUrl.trim();
-  const trimmedPrometheusUrl = prometheusUrl.trim();
   const invalidBackendUrl =
     trimmedBackendUrl.length > 0 && !/^https?:\/\//i.test(trimmedBackendUrl);
-  const invalidPrometheusUrl =
-    trimmedPrometheusUrl.length > 0 &&
-    !/^https?:\/\//i.test(trimmedPrometheusUrl);
   const duplicateAgent = useMemo(
     () =>
       trimmedName.length > 0 &&
@@ -2211,10 +2273,6 @@ const AgentQuickCreate = ({
       setFormError("Backend 地址需以 http:// 或 https:// 开头");
       return;
     }
-    if (invalidPrometheusUrl) {
-      setFormError("Prometheus 地址需以 http:// 或 https:// 开头");
-      return;
-    }
     if (duplicateAgent) {
       setFormError("Agent 名称已存在，请更换其他名称");
       return;
@@ -2225,8 +2283,6 @@ const AgentQuickCreate = ({
     }
     setFormError(null);
     try {
-      const resolvedPrometheusUrl =
-        trimmedPrometheusUrl || DEFAULT_AGENT_PROM_URL;
       await onCreate({
         name: normalizedName,
         backend_url: trimmedBackendUrl,
@@ -2236,7 +2292,6 @@ const AgentQuickCreate = ({
       setName("");
       setBackendUrl("");
       setDescription("");
-      setPrometheusUrl(DEFAULT_AGENT_PROM_URL);
     } catch (err) {
       const message = err instanceof Error ? err.message : "创建 Agent 失败";
       setFormError(message);
@@ -2274,13 +2329,6 @@ const AgentQuickCreate = ({
           value={backendUrl}
           onChange={(event) => setBackendUrl(event.target.value)}
           placeholder="Backend 地址（必填）"
-          disabled={submitting || !canCreateAgents}
-        />
-        <input
-          type="text"
-          value={prometheusUrl}
-          onChange={(event) => setPrometheusUrl(event.target.value)}
-          placeholder="Prometheus 地址（可选）"
           disabled={submitting || !canCreateAgents}
         />
         <button
