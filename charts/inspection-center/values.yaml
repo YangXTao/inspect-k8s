@@ -17,6 +17,8 @@ backend:
     MYSQL_PASSWORD: root
     MYSQL_DATABASE: demo
     LICENSE_SECRET: demo-secret
+    METRICS_RETENTION_DAYS: "30"
+    # METRICS_CLEANUP_INTERVAL_HOURS: "12"
   persistence:
     enabled: true
     create: true

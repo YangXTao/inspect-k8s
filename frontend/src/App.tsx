@@ -1090,6 +1090,22 @@ const OVERVIEW_INDICATORS = [
     keywords: ["apiserver", "api server", "api server availability"],
   },
   {
+    key: "controller-manager",
+    label: "controller-manager 状态",
+    keywords: [
+      "controller manager",
+      "controller-manager",
+      "controller manager status",
+      "检查controller manager",
+      "检查controller-manager",
+    ],
+  },
+  {
+    key: "scheduler",
+    label: "scheduler 状态",
+    keywords: ["scheduler", "scheduler status", "检查scheduler"],
+  },
+  {
     key: "cpu",
     label: "集群 CPU 使用率",
     keywords: ["cluster cpu usage", "cluster cpu", "集群cpu"],

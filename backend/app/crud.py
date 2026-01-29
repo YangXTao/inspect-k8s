@@ -783,6 +783,22 @@ def create_cluster_metric_sample(
     return sample
 
 
+def delete_metric_samples_before(
+    db: Session,
+    *,
+    cutoff: datetime,
+) -> int:
+    if not cutoff:
+        return 0
+    deleted = (
+        db.query(models.ClusterMetricSample)
+        .filter(models.ClusterMetricSample.reported_at < cutoff)
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return int(deleted or 0)
+
+
 def request_agent_nodes_report(
     db: Session,
     agent: models.InspectionAgent,
