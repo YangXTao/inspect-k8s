@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import shlex
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List, Tuple
+from typing import Callable, Dict, Iterable, List, Tuple, Optional
 
 from ..prometheus import PrometheusClient
 
@@ -76,6 +76,27 @@ def _truncate_output(value: str) -> str:
     if len(value) <= MAX_OUTPUT_LENGTH:
         return value
     return value[: MAX_OUTPUT_LENGTH - 3] + "..."
+
+
+def _extract_structured_output(
+    config: Dict[str, object], stdout: str
+) -> tuple[Optional[str], Optional[str]]:
+    if not config.get("structured_output"):
+        return None, None
+    if not stdout:
+        return None, None
+    normalized = stdout.replace("\r\n", "\n").replace("\r", "\n")
+    lines = normalized.split("\n")
+    marker_index = None
+    for idx, line in enumerate(lines):
+        if line.strip() in {"SUGGESTION:", "SUGGESTION"}:
+            marker_index = idx
+            break
+    if marker_index is None:
+        return None, None
+    detail = "\n".join(lines[:marker_index]).strip()
+    suggestion = "\n".join(lines[marker_index + 1 :]).strip()
+    return (detail or None, suggestion or None)
 
 
 def _execute_command_check(config: Dict[str, object], context: CheckContext) -> Tuple[str, str, str]:
@@ -187,6 +208,9 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
     stdout = result.stdout or ""
     stderr = result.stderr or ""
     exit_code = result.returncode
+    structured_detail, structured_suggestion = _extract_structured_output(
+        config, stdout
+    )
 
     if exit_code in success_codes:
         expected = config.get("expect_substrings") or []
@@ -209,6 +233,10 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
         else:
             detail = "命令执行成功（无输出）"
         suggestion = config.get("suggestion_on_success") or ""
+        if structured_detail is not None:
+            detail = _truncate_output(structured_detail)
+        if structured_suggestion:
+            suggestion = structured_suggestion
         if force_critical:
             return (
                 CHECK_STATUS_CRITICAL,
@@ -229,6 +257,10 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
         or config.get("suggestion_on_fail")
         or "Inspect command output for details."
     )
+    if structured_detail is not None:
+        detail = _truncate_output(structured_detail)
+    if structured_suggestion:
+        suggestion = structured_suggestion
     if exit_code in critical_codes:
         return CHECK_STATUS_CRITICAL, detail, config.get("suggestion_on_critical") or suggestion
     if exit_code in warn_codes:

@@ -9352,9 +9352,6 @@ const RunDetailView = ({
     if (!detailText || detailText === "-") {
       return null;
     }
-    if (!detailText.includes("证书名称") || !detailText.includes("过期时间")) {
-      return null;
-    }
     const lines = detailText
       .replace(/\r\n/g, "\n")
       .replace(/\r/g, "\n")
@@ -9364,10 +9361,23 @@ const RunDetailView = ({
     if (lines.length < 2) {
       return null;
     }
-    const rows: Array<[string, string, string]> = [];
+    const headerLine = lines[0];
+    const hasNameColumn =
+      headerLine.includes("证书名称") && headerLine.includes("过期时间");
+    const hasTwoColumns =
+      headerLine.includes("组件") &&
+      (headerLine.includes("过期时间") || headerLine.includes("证书过期时间"));
+    if (!hasNameColumn && !hasTwoColumns) {
+      return null;
+    }
+    const rows: Array<string[]> = [];
     for (const line of lines.slice(1)) {
       const tokens = line.split(/\s+/).filter(Boolean);
       if (tokens.length < 3) {
+        continue;
+      }
+      if (hasTwoColumns && !hasNameColumn) {
+        rows.push([tokens[0], tokens.slice(1).join(" ")]);
         continue;
       }
       let dateTokens: string[] = [];
@@ -9389,7 +9399,7 @@ const RunDetailView = ({
       return null;
     }
     return {
-      headers: ["组件", "证书名称", "过期时间"],
+      headers: hasNameColumn ? ["组件", "证书名称", "过期时间"] : ["组件", "过期时间"],
       rows,
     };
   };
@@ -9410,9 +9420,9 @@ const RunDetailView = ({
         <tbody>
           {parsed.rows.map((row, index) => (
             <tr key={`${row[0]}-${index}`}>
-              <td>{row[0]}</td>
-              <td>{row[1]}</td>
-              <td>{row[2]}</td>
+              {row.map((cell, cellIndex) => (
+                <td key={`${row[0]}-${index}-${cellIndex}`}>{cell}</td>
+              ))}
             </tr>
           ))}
         </tbody>

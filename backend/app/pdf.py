@@ -51,7 +51,7 @@ def _parse_certificate_detail(
     if not text:
         return None
     raw = str(text).strip()
-    if not raw or "证书名称" not in raw or "过期时间" not in raw:
+    if not raw:
         return None
     lines = [
         line.strip()
@@ -60,10 +60,20 @@ def _parse_certificate_detail(
     ]
     if len(lines) < 2:
         return None
+    header_line = lines[0]
+    has_name_column = "证书名称" in header_line and "过期时间" in header_line
+    has_two_columns = "组件" in header_line and (
+        "过期时间" in header_line or "证书过期时间" in header_line
+    )
+    if not has_name_column and not has_two_columns:
+        return None
     rows: list[list[str]] = []
     for line in lines[1:]:
         tokens = [token for token in line.split() if token]
         if len(tokens) < 3:
+            continue
+        if has_two_columns and not has_name_column:
+            rows.append([tokens[0], " ".join(tokens[1:])])
             continue
         date_tokens: list[str] = []
         last_token = tokens[-1]
@@ -79,7 +89,8 @@ def _parse_certificate_detail(
         rows.append([tokens[0], " ".join(name_tokens), " ".join(date_tokens)])
     if not rows:
         return None
-    return (["组件", "证书名称", "过期时间"], rows)
+    headers = ["组件", "证书名称", "过期时间"] if has_name_column else ["组件", "过期时间"]
+    return (headers, rows)
 
 
 def _hash_cluster_slug(seed: str) -> str:
@@ -654,7 +665,8 @@ def generate_pdf_report(
             table_data.append(
                 [Paragraph(_wrap_latin(cell), styles["CertCell"]) for cell in row]
             )
-        cert_table = Table(table_data, colWidths=[55, 95, 60])
+        col_widths = [70, 120] if len(headers) == 2 else [55, 95, 60]
+        cert_table = Table(table_data, colWidths=col_widths)
         cert_table.setStyle(
             TableStyle(
                 [
