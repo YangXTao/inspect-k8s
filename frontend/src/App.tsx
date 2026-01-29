@@ -1007,6 +1007,9 @@ const extractPercentageValue = (value?: string | null) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const normalize = (value: string) =>
+  value.toLowerCase().replace(/[\s._-]+/g, "");
+
 const findResultByKeywords = (
   results: InspectionResult[],
   keywords: string[]
@@ -1014,8 +1017,6 @@ const findResultByKeywords = (
   if (!results.length) {
     return null;
   }
-  const normalize = (value: string) =>
-    value.toLowerCase().replace(/[\s._-]+/g, "");
   const lowered = keywords.map((keyword) => keyword.toLowerCase());
   const normalizedKeywords = keywords.map((keyword) => normalize(keyword));
   return (
