@@ -348,7 +348,7 @@ def generate_pdf_report(
         return fallback
 
     base_font = _register_font_family()
-    latin_font = "Helvetica"
+    latin_font = base_font
 
     def _wrap_latin(text: str | None) -> str:
         if text is None:
@@ -361,6 +361,8 @@ def generate_pdf_report(
         def _wrap_line(line: str) -> str:
             if line == "":
                 return ""
+            if latin_font == base_font:
+                return escape(line)
             parts: list[str] = []
             last = 0
             for match in re.finditer(r"[A-Za-z0-9][A-Za-z0-9 .:/_%+=,-]*", line):
