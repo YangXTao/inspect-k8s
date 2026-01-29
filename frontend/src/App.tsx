@@ -1094,6 +1094,7 @@ interface DashboardOverviewProps {
   canViewHistory: boolean;
   overviewSummary: OverviewSummary | null;
   overviewMetrics: OverviewMetrics | null;
+  previousPathname?: string | null;
 }
 
 const DashboardOverviewView = ({
@@ -1104,6 +1105,7 @@ const DashboardOverviewView = ({
   canViewHistory,
   overviewSummary,
   overviewMetrics,
+  previousPathname,
 }: DashboardOverviewProps) => {
   const chartWrapperRef = useRef<HTMLDivElement | null>(null);
   const [hoverState, setHoverState] = useState(() => ({
@@ -1758,7 +1760,7 @@ const DashboardOverviewView = ({
       {detailError && (
         <div className="feedback warning overview-feedback">{detailError}</div>
       )}
-      {detailLoading && (
+      {detailLoading && !previousPathname?.includes("/runs/") && (
         <div className="feedback info overview-feedback">正在加载巡检详情...</div>
       )}
 
@@ -10879,6 +10881,10 @@ const App = () => {
 
 const location = useLocation();
 const navigate = useNavigate();
+const previousPathRef = useRef(location.pathname);
+useEffect(() => {
+  previousPathRef.current = location.pathname;
+}, [location.pathname]);
 const currentNoticeScope = useMemo(
   () => resolveNoticeScope(location.pathname),
   [location.pathname]
@@ -14011,6 +14017,7 @@ const hasManualKubeconfig = useMemo(
       canViewHistory={canViewHistory}
       overviewSummary={overviewSummary}
       overviewMetrics={overviewMetrics}
+      previousPathname={previousPathRef.current}
     />
   );
 
