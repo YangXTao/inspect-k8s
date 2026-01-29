@@ -1539,6 +1539,7 @@ const DashboardOverviewView = ({
           <svg
             viewBox={`0 0 ${width} ${height}`}
             className="overview-line-svg"
+            preserveAspectRatio="none"
             onMouseMove={handleMouseMove}
             onMouseLeave={handleMouseLeave}
           >
@@ -1619,7 +1620,7 @@ const DashboardOverviewView = ({
                     x2={x}
                     y1={padding.top}
                     y2={height - padding.bottom}
-                    className="overview-line-grid"
+                    className="overview-line-grid overview-line-grid-x"
                   />
                   <text
                     x={x}
