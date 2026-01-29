@@ -76,6 +76,9 @@ AGENT_HEARTBEAT_TIMEOUT_MINUTES = 1
 AGENT_HEARTBEAT_TIMEOUT = timedelta(minutes=AGENT_HEARTBEAT_TIMEOUT_MINUTES)
 CONNECTION_TEST_OPERATOR = "__system_connection_test__"
 MAX_CLUSTER_NAME_LENGTH = 150
+DEFAULT_PROMETHEUS_URL = (
+    "http://rancher-monitoring-prometheus.cattle-monitoring-system:9090"
+)
 inspection_scheduler = InspectionScheduler(
     operator_label="定时巡检任务",
     multi_version_label="多版本",
@@ -905,38 +908,6 @@ def _require_any_permission(
 def _seed_defaults(db: Session) -> None:
     if _DEFAULT_INSPECTIONS_SENTINEL.exists():
         return
-
-    has_any = db.query(models.InspectionItem.id).limit(1).first()
-    if has_any:
-        try:
-            _DEFAULT_INSPECTIONS_SENTINEL.parent.mkdir(parents=True, exist_ok=True)
-            _DEFAULT_INSPECTIONS_SENTINEL.write_text(
-                datetime.utcnow().isoformat(), encoding="utf-8"
-            )
-        except Exception:
-            logger.debug("无法写入默认巡检项标记文件，继续运行。", exc_info=True)
-        return
-
-    existing_names = {
-        name for (name,) in db.query(models.InspectionItem.name).all()
-    }
-    new_items = []
-    for payload in DEFAULT_CHECKS:
-        if payload["name"] in existing_names:
-            continue
-        data = payload.copy()
-        config = data.pop("config", None)
-        item = models.InspectionItem(**data)
-        if config is not None:
-            item.set_config(config if isinstance(config, dict) else None)
-        new_items.append(item)
-
-    if not new_items:
-        return
-    for item in new_items:
-        db.add(item)
-    db.commit()
-
     try:
         _DEFAULT_INSPECTIONS_SENTINEL.parent.mkdir(parents=True, exist_ok=True)
         _DEFAULT_INSPECTIONS_SENTINEL.write_text(
@@ -2085,6 +2056,8 @@ def register_agent(
 
     normalized_description = (payload.description or "").strip() or None
     normalized_prometheus_url = _normalize_prometheus_url(payload.prometheus_url)
+    if not normalized_prometheus_url:
+        normalized_prometheus_url = DEFAULT_PROMETHEUS_URL
 
     cluster: Optional[models.ClusterConfig] = None
     if payload.cluster_id is not None:
@@ -2237,7 +2210,9 @@ def agent_bootstrap(
             )
         agent_prom_url = _normalize_prometheus_url(agent.prometheus_url)
         incoming_prom_url = _normalize_prometheus_url(payload.prometheus_url)
-        effective_prom_url = agent_prom_url or incoming_prom_url
+        effective_prom_url = (
+            agent_prom_url or incoming_prom_url or DEFAULT_PROMETHEUS_URL
+        )
 
         contexts_json: Optional[str] = None
         if cluster_payload.kubeconfig_b64:
@@ -2480,6 +2455,19 @@ def agent_claim_run(
     if not updated:
         raise HTTPException(status_code=404, detail="巡检任务不存在。")
     return _serialize_run(ctx.db, updated)
+
+
+@agent_router.get("/runs/{run_id}/status")
+def agent_get_run_status(
+    run_id: int,
+    ctx: AgentRequestContext = Depends(_agent_request_dependency),
+):
+    run = crud.get_inspection_run(ctx.db, run_id)
+    if not run or run.executor != "agent":
+        raise HTTPException(status_code=404, detail="巡检任务不存在或非 Agent 类型。")
+    if run.agent_id != ctx.agent.id:
+        raise HTTPException(status_code=403, detail="巡检任务不属于当前 Agent。")
+    return {"status": run.status}
 
 
 

@@ -606,7 +606,7 @@ class AgentClient:
 
     def get_run_status(self, run_id: int) -> Optional[str]:
         resp = self.session.get(
-            f"{self.config.server_base}/inspection-runs/{run_id}",
+            f"{self.config.server_base}/agent/runs/{run_id}/status",
             headers=self._headers(),
             timeout=self.config.request_timeout,
         )

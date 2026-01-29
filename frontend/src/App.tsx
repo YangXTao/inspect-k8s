@@ -2138,6 +2138,9 @@ interface AgentQuickCreateProps {
   onClearCommand: () => void;
 }
 
+const DEFAULT_AGENT_PROM_URL =
+  "http://rancher-monitoring-prometheus.cattle-monitoring-system:9090";
+
 const AgentQuickCreate = ({
   clusters,
   agents,
@@ -2153,7 +2156,7 @@ const AgentQuickCreate = ({
   const [name, setName] = useState("");
   const [backendUrl, setBackendUrl] = useState("");
   const [description, setDescription] = useState("");
-  const [prometheusUrl, setPrometheusUrl] = useState("");
+  const [prometheusUrl, setPrometheusUrl] = useState(DEFAULT_AGENT_PROM_URL);
   const [formError, setFormError] = useState<string | null>(null);
 
   const trimmedName = name.trim();
@@ -2222,16 +2225,18 @@ const AgentQuickCreate = ({
     }
     setFormError(null);
     try {
+      const resolvedPrometheusUrl =
+        trimmedPrometheusUrl || DEFAULT_AGENT_PROM_URL;
       await onCreate({
         name: normalizedName,
         backend_url: trimmedBackendUrl,
         description: description.trim() || undefined,
-        prometheus_url: trimmedPrometheusUrl || undefined,
+        prometheus_url: resolvedPrometheusUrl || undefined,
       });
       setName("");
       setBackendUrl("");
       setDescription("");
-      setPrometheusUrl("");
+      setPrometheusUrl(DEFAULT_AGENT_PROM_URL);
     } catch (err) {
       const message = err instanceof Error ? err.message : "创建 Agent 失败";
       setFormError(message);

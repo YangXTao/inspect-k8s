@@ -47,7 +47,7 @@ data:
     cluster:
       name: demo-cluster
     prometheus:
-      base_url: http://prometheus.monitoring:9090
+      base_url: http://rancher-monitoring-prometheus.cattle-monitoring-system:9090
 ---
 apiVersion: v1
 kind: Secret

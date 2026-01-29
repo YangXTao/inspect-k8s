@@ -16,4 +16,4 @@ cluster:
   name: ""
   # 在集群内运行时会自动使用 ServiceAccount 生成 kubeconfig
 prometheus:
-  base_url: http://prometheus:9090
+  base_url: http://rancher-monitoring-prometheus.cattle-monitoring-system:9090
