@@ -45,6 +45,43 @@ def _to_base36(value: int) -> str:
     return result
 
 
+def _parse_certificate_detail(
+    text: str | None,
+) -> Optional[tuple[list[str], list[list[str]]]]:
+    if not text:
+        return None
+    raw = str(text).strip()
+    if not raw or "证书名称" not in raw or "过期时间" not in raw:
+        return None
+    lines = [
+        line.strip()
+        for line in raw.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        if line.strip()
+    ]
+    if len(lines) < 2:
+        return None
+    rows: list[list[str]] = []
+    for line in lines[1:]:
+        tokens = [token for token in line.split() if token]
+        if len(tokens) < 3:
+            continue
+        date_tokens: list[str] = []
+        last_token = tokens[-1]
+        if len(tokens) >= 5 and last_token in {"GMT", "UTC"}:
+            date_tokens = tokens[-5:]
+        elif re.match(r"\d{4}-\d{2}-\d{2}", last_token):
+            date_tokens = tokens[-1:]
+        else:
+            date_tokens = tokens[-3:]
+        name_tokens = tokens[1 : len(tokens) - len(date_tokens)]
+        if not name_tokens:
+            continue
+        rows.append([tokens[0], " ".join(name_tokens), " ".join(date_tokens)])
+    if not rows:
+        return None
+    return (["组件", "证书名称", "过期时间"], rows)
+
+
 def _hash_cluster_slug(seed: str) -> str:
     encoded = seed.encode("utf-16-le")
     hash_value = 0
@@ -176,6 +213,20 @@ def generate_markdown_report(
             .strip()
         )
 
+    def _format_detail(text: str | None) -> str:
+        parsed = _parse_certificate_detail(text)
+        if not parsed:
+            return _sanitize(text)
+        headers, rows = parsed
+        header_html = "".join(f"<th>{escape(header)}</th>" for header in headers)
+        body_html = "".join(
+            "<tr>"
+            + "".join(f"<td>{escape(cell)}</td>" for cell in row)
+            + "</tr>"
+            for row in rows
+        )
+        return f"<table><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
+
     display_label = str(display_id or run.id)
     lines: list[str] = []
     lines.append(f"# {cluster_name} 巡检报告")
@@ -222,7 +273,7 @@ def generate_markdown_report(
         status = item.status.lower()
         status_label = status_labels.get(status, item.status)
         item_name = _sanitize(item.item.name if item.item else item.item_name_cached or "巡检项已删除")
-        detail = _sanitize(item.detail)
+        detail = _format_detail(item.detail)
         suggestion = _sanitize(item.suggestion)
         lines.append(f"| {item_name} | {status_label} | {detail} | {suggestion} |")
 
@@ -455,6 +506,26 @@ def generate_pdf_report(
             textColor=colors.HexColor("#1f2937"),
         )
     )
+    styles.add(
+        ParagraphStyle(
+            name="CertHeader",
+            parent=styles["BodyText"],
+            fontName=base_font,
+            fontSize=9.5,
+            leading=12,
+            textColor=colors.HexColor("#475569"),
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="CertCell",
+            parent=styles["BodyText"],
+            fontName=base_font,
+            fontSize=9.5,
+            leading=12,
+            textColor=colors.HexColor("#0f172a"),
+        )
+    )
 
     tz = _resolve_cst_timezone()
 
@@ -575,6 +646,28 @@ def generate_pdf_report(
     detail_style = styles["BodyText"]
     suggestion_style = styles["Muted"]
 
+    def _build_cert_table(headers: list[str], rows: list[list[str]]) -> Table:
+        table_data: list[list[Paragraph]] = [
+            [Paragraph(escape(header), styles["CertHeader"]) for header in headers]
+        ]
+        for row in rows:
+            table_data.append(
+                [Paragraph(_wrap_latin(cell), styles["CertCell"]) for cell in row]
+            )
+        cert_table = Table(table_data, colWidths=[55, 95, 60])
+        cert_table.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 2),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ]
+            )
+        )
+        return cert_table
+
     for result in results_list:
         status = result.status.lower()
         status_label = {
@@ -583,7 +676,10 @@ def generate_pdf_report(
             "critical": "严重",
             "failed": "失败",
         }.get(status, result.status)
-        detail_chunks = _split_text_for_table(result.detail)
+        cert_table = _parse_certificate_detail(result.detail)
+        detail_chunks = ["__cert_table__"] if cert_table else _split_text_for_table(
+            result.detail
+        )
         suggestion_chunks = _split_text_for_table(result.suggestion)
         chunk_count = max(len(detail_chunks), len(suggestion_chunks))
         for chunk_index in range(chunk_count):
@@ -596,15 +692,23 @@ def generate_pdf_report(
                     else (result.item_name_cached or "巡检项已删除")
                 )
                 status_cell = status_label
-            detail_text = detail_chunks[chunk_index] if chunk_index < len(detail_chunks) else ""
+            detail_text = (
+                detail_chunks[chunk_index] if chunk_index < len(detail_chunks) else ""
+            )
             suggestion_text = (
                 suggestion_chunks[chunk_index] if chunk_index < len(suggestion_chunks) else ""
             )
+            detail_cell = ""
+            if cert_table and chunk_index == 0:
+                headers, rows = cert_table
+                detail_cell = _build_cert_table(headers, rows)
+            elif detail_text:
+                detail_cell = Paragraph(_wrap_latin(detail_text), detail_style)
             data.append(
                 [
                     Paragraph(_wrap_latin(name_cell), styles["BodyText"]) if name_cell else "",
                     Paragraph(status_cell, styles["TableStatus"]) if status_cell else "",
-                    Paragraph(_wrap_latin(detail_text), detail_style) if detail_text else "",
+                    detail_cell,
                     Paragraph(_wrap_latin(suggestion_text), suggestion_style)
                     if suggestion_text
                     else "",

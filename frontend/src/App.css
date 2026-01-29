@@ -1223,12 +1223,24 @@ button:disabled {
   word-break: break-word;
 }
 
-.result-text.detail-text.aligned {
-  white-space: pre;
-  font-family: Consolas, "Liberation Mono", Menlo, "Courier New", monospace;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0;
-  word-break: normal;
+.result-text.detail-text .detail-cert-table {
+  border-collapse: collapse;
+  width: auto;
+  font: inherit;
+}
+
+.result-text.detail-text .detail-cert-table th,
+.result-text.detail-text .detail-cert-table td {
+  padding: 2px 14px 2px 0;
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+  font-weight: 400;
+}
+
+.result-text.detail-text .detail-cert-table th {
+  color: #475569;
+  font-weight: 600;
 }
 
 .result-text.suggestion-text {

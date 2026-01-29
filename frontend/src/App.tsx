@@ -9348,19 +9348,75 @@ const RunDetailView = ({
     const detail = (result.detail ?? "").trim();
     return detail || "未提供详情";
   };
-  const shouldUseAlignedDetail = (
-    result: InspectionResult,
-    detailText: string,
-  ) => {
+  const parseCertificateDetail = (detailText: string) => {
     if (!detailText || detailText === "-") {
-      return false;
+      return null;
     }
-    const name = (result.item_name ?? "").toLowerCase();
-    const hasCertHint = name.includes("证书") || name.includes("certificate");
+    if (!detailText.includes("证书名称") || !detailText.includes("过期时间")) {
+      return null;
+    }
+    const lines = detailText
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length < 2) {
+      return null;
+    }
+    const rows: Array<[string, string, string]> = [];
+    for (const line of lines.slice(1)) {
+      const tokens = line.split(/\s+/).filter(Boolean);
+      if (tokens.length < 3) {
+        continue;
+      }
+      let dateTokens: string[] = [];
+      const lastToken = tokens[tokens.length - 1] ?? "";
+      if (tokens.length >= 5 && (lastToken === "GMT" || lastToken === "UTC")) {
+        dateTokens = tokens.slice(-5);
+      } else if (/\d{4}-\d{2}-\d{2}/.test(lastToken)) {
+        dateTokens = tokens.slice(-1);
+      } else {
+        dateTokens = tokens.slice(-3);
+      }
+      const nameTokens = tokens.slice(1, tokens.length - dateTokens.length);
+      if (!nameTokens.length) {
+        continue;
+      }
+      rows.push([tokens[0], nameTokens.join(" "), dateTokens.join(" ")]);
+    }
+    if (!rows.length) {
+      return null;
+    }
+    return {
+      headers: ["组件", "证书名称", "过期时间"],
+      rows,
+    };
+  };
+  const renderResultDetail = (detailText: string) => {
+    const parsed = parseCertificateDetail(detailText);
+    if (!parsed) {
+      return detailText;
+    }
     return (
-      hasCertHint &&
-      detailText.includes("证书名称") &&
-      detailText.includes("过期时间")
+      <table className="detail-cert-table">
+        <thead>
+          <tr>
+            {parsed.headers.map((header) => (
+              <th key={header}>{header}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {parsed.rows.map((row, index) => (
+            <tr key={`${row[0]}-${index}`}>
+              <td>{row[0]}</td>
+              <td>{row[1]}</td>
+              <td>{row[2]}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     );
   };
 
@@ -9583,10 +9639,7 @@ const RunDetailView = ({
                   const meta = getInspectionResultStatusMeta(result.status);
                   const detailText = formatResultDetail(result);
                   const suggestionText = formatResultSuggestion(result);
-                  const useAlignedDetail = shouldUseAlignedDetail(
-                    result,
-                    detailText,
-                  );
+                  const detailContent = renderResultDetail(detailText);
                   return (
                     <tr key={result.id}>
                       <td>{result.item_name}</td>
@@ -9599,9 +9652,9 @@ const RunDetailView = ({
                         <div
                           className={`result-text detail-text${
                             detailText === "-" ? " empty" : ""
-                          }${useAlignedDetail ? " aligned" : ""}`}
+                          }`}
                         >
-                          {detailText}
+                          {detailContent}
                         </div>
                       </td>
                       <td>
