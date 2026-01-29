@@ -1223,6 +1223,14 @@ button:disabled {
   word-break: break-word;
 }
 
+.result-text.detail-text.aligned {
+  white-space: pre;
+  font-family: Consolas, "Liberation Mono", Menlo, "Courier New", monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  word-break: normal;
+}
+
 .result-text.suggestion-text {
   word-break: normal;
 }

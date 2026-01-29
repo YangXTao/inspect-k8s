@@ -9348,6 +9348,21 @@ const RunDetailView = ({
     const detail = (result.detail ?? "").trim();
     return detail || "未提供详情";
   };
+  const shouldUseAlignedDetail = (
+    result: InspectionResult,
+    detailText: string,
+  ) => {
+    if (!detailText || detailText === "-") {
+      return false;
+    }
+    const name = (result.item_name ?? "").toLowerCase();
+    const hasCertHint = name.includes("证书") || name.includes("certificate");
+    return (
+      hasCertHint &&
+      detailText.includes("证书名称") &&
+      detailText.includes("过期时间")
+    );
+  };
 
   const formatResultSuggestion = (result: InspectionResult) => {
     if (result.status === "passed") {
@@ -9568,6 +9583,10 @@ const RunDetailView = ({
                   const meta = getInspectionResultStatusMeta(result.status);
                   const detailText = formatResultDetail(result);
                   const suggestionText = formatResultSuggestion(result);
+                  const useAlignedDetail = shouldUseAlignedDetail(
+                    result,
+                    detailText,
+                  );
                   return (
                     <tr key={result.id}>
                       <td>{result.item_name}</td>
@@ -9580,7 +9599,7 @@ const RunDetailView = ({
                         <div
                           className={`result-text detail-text${
                             detailText === "-" ? " empty" : ""
-                          }`}
+                          }${useAlignedDetail ? " aligned" : ""}`}
                         >
                           {detailText}
                         </div>
