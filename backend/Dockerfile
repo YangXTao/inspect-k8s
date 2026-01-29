@@ -16,16 +16,16 @@ RUN if command -v apt-get >/dev/null 2>&1; then \
     fi
 
 
-# 瀹夎渚濊禆
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 鎷疯礉婧愮爜
+
 # copy bundled fonts (optional)
-COPY backend/fonts/ /opt/inspect-fonts/
+COPY fonts/ /opt/inspect-fonts/
 
 COPY . /app
-COPY backend/entrypoint.sh /app/entrypoint.sh
+COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 ENV PYTHONUNBUFFERED=1

@@ -1044,6 +1044,29 @@ const findResultByKeywords = (
   );
 };
 
+const findResultByNameKeywords = (
+  results: InspectionResult[],
+  keywords: string[]
+) => {
+  if (!results.length) {
+    return null;
+  }
+  const lowered = keywords.map((keyword) => keyword.toLowerCase());
+  const normalizedKeywords = lowered.map((keyword) => normalize(keyword));
+  return (
+    results.find((result) => {
+      const name = (result.item_name ?? "").toLowerCase();
+      const normalizedName = normalize(name);
+      return lowered.some((keyword, index) => {
+        if (name.includes(keyword)) {
+          return true;
+        }
+        return normalizedName.includes(normalizedKeywords[index]);
+      });
+    }) ?? null
+  );
+};
+
 const OVERVIEW_INDICATORS = [
   {
     key: "connection",
@@ -1702,7 +1725,9 @@ const DashboardOverviewView = ({
   const indicatorCards = useMemo(() => {
     return clusters.map((cluster) => {
       const latestRun = latestRunByCluster.get(cluster.id) ?? null;
-      const findIndicatorResult = (indicator: (typeof OVERVIEW_INDICATORS)[number]) => {
+      const findIndicatorResult = (
+        indicator: (typeof OVERVIEW_INDICATORS)[number]
+      ) => {
         const candidates = recentRunsByCluster.get(cluster.id) ?? [];
         for (const run of candidates) {
           if (run.status !== "finished") {
@@ -1712,7 +1737,10 @@ const DashboardOverviewView = ({
           if (!detail) {
             continue;
           }
-          const result = findResultByKeywords(detail.results, [...indicator.keywords]);
+          const result = findResultByNameKeywords(
+            detail.results,
+            [...indicator.keywords]
+          );
           if (result) {
             return result;
           }
@@ -2222,13 +2250,17 @@ const AgentQuickCreate = ({
   const [name, setName] = useState("");
   const [backendUrl, setBackendUrl] = useState("");
   const [description, setDescription] = useState("");
-  const resolvedPrometheusUrl = DEFAULT_AGENT_PROM_URL;
+  const [prometheusUrl, setPrometheusUrl] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
   const trimmedName = name.trim();
   const trimmedBackendUrl = backendUrl.trim();
+  const trimmedPrometheusUrl = prometheusUrl.trim();
   const invalidBackendUrl =
     trimmedBackendUrl.length > 0 && !/^https?:\/\//i.test(trimmedBackendUrl);
+  const invalidPrometheusUrl =
+    trimmedPrometheusUrl.length > 0 &&
+    !/^https?:\/\//i.test(trimmedPrometheusUrl);
   const duplicateAgent = useMemo(
     () =>
       trimmedName.length > 0 &&
@@ -2273,6 +2305,10 @@ const AgentQuickCreate = ({
       setFormError("Backend 地址需以 http:// 或 https:// 开头");
       return;
     }
+    if (invalidPrometheusUrl) {
+      setFormError("Prometheus 地址需以 http:// 或 https:// 开头");
+      return;
+    }
     if (duplicateAgent) {
       setFormError("Agent 名称已存在，请更换其他名称");
       return;
@@ -2283,6 +2319,8 @@ const AgentQuickCreate = ({
     }
     setFormError(null);
     try {
+      const resolvedPrometheusUrl =
+        trimmedPrometheusUrl || DEFAULT_AGENT_PROM_URL;
       await onCreate({
         name: normalizedName,
         backend_url: trimmedBackendUrl,
@@ -2292,6 +2330,7 @@ const AgentQuickCreate = ({
       setName("");
       setBackendUrl("");
       setDescription("");
+      setPrometheusUrl("");
     } catch (err) {
       const message = err instanceof Error ? err.message : "创建 Agent 失败";
       setFormError(message);
@@ -2329,6 +2368,13 @@ const AgentQuickCreate = ({
           value={backendUrl}
           onChange={(event) => setBackendUrl(event.target.value)}
           placeholder="Backend 地址（必填）"
+          disabled={submitting || !canCreateAgents}
+        />
+        <input
+          type="text"
+          value={prometheusUrl}
+          onChange={(event) => setPrometheusUrl(event.target.value)}
+          placeholder="Prometheus 地址（可选）"
           disabled={submitting || !canCreateAgents}
         />
         <button
