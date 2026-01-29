@@ -2274,7 +2274,18 @@ def agent_bootstrap(
 
         now = datetime.utcnow()
         connection_status = "connected"
-        connection_message = "Agent 已完成注册，Server 端已托管 kubeconfig。"
+        existing_message = cluster.connection_message if cluster else None
+        existing_version, existing_nodes = schemas._extract_connection_meta(
+            existing_message
+        )
+        has_connection_meta = (
+            existing_version is not None or existing_nodes is not None
+        )
+        connection_message = (
+            existing_message
+            if has_connection_meta
+            else "Agent 已完成注册，Server 端已托管 kubeconfig。"
+        )
 
         agent_description = (agent.description or "").strip() or None
 
@@ -2331,6 +2342,16 @@ def agent_bootstrap(
             log_audit=False,
         )
         if cluster_was_pending and cluster is not None:
+            try:
+                _trigger_auto_connection_test(
+                    db,
+                    cluster,
+                    agent,
+                    message="已自动触发连接测试，等待结果更新。",
+                )
+            except Exception:
+                logger.warning("自动触发连接测试失败。", exc_info=True)
+        elif cluster is not None and not has_connection_meta:
             try:
                 _trigger_auto_connection_test(
                     db,
