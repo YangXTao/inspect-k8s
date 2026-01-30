@@ -7,6 +7,8 @@ import os
 import re
 import secrets
 import shutil
+import socket
+import ssl
 from dataclasses import dataclass
 import base64
 import binascii
@@ -15,6 +17,8 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Any, Generator, Iterable
 from uuid import uuid4
 import yaml
+from urllib.parse import urlparse
+import requests
 from fastapi import (
     APIRouter,
     Depends,
@@ -79,6 +83,103 @@ MAX_CLUSTER_NAME_LENGTH = 150
 DEFAULT_PROMETHEUS_URL = (
     "http://rancher-monitoring-prometheus.cattle-monitoring-system:9090"
 )
+
+
+def _split_rancher_api_key(api_key: str) -> tuple[str, str]:
+    raw = (api_key or "").strip()
+    if not raw:
+        return "", ""
+    if ":" in raw:
+        user, password = raw.split(":", 1)
+        return user, password
+    return raw, ""
+
+
+def _fetch_rancher_version_from_cluster(
+    cluster: models.ClusterConfig,
+) -> Optional[str]:
+    rancher_url = (getattr(cluster, "rancher_url", None) or "").strip()
+    rancher_api_key = (getattr(cluster, "rancher_api_key", None) or "").strip()
+    if not rancher_url or not rancher_api_key:
+        return None
+    url = rancher_url.rstrip("/") + "/v3/settings/server-version"
+    user, password = _split_rancher_api_key(rancher_api_key)
+    try:
+        resp = requests.get(url, auth=(user, password), timeout=10, verify=False)
+        resp.raise_for_status()
+        payload = resp.json()
+        version = str(payload.get("value") or "").strip()
+        return version or None
+    except Exception as exc:
+        logger.warning("获取 Rancher 版本失败: %s", exc)
+        return None
+
+
+def _fetch_rancher_cert_expiry(rancher_url: str) -> Optional[str]:
+    if not rancher_url:
+        return None
+    parsed = urlparse(rancher_url)
+    if not parsed.hostname:
+        return None
+    scheme = (parsed.scheme or "https").lower()
+    if scheme != "https":
+        return None
+    port = parsed.port or 443
+    try:
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        with socket.create_connection((parsed.hostname, port), timeout=10) as sock:
+            with context.wrap_socket(sock, server_hostname=parsed.hostname) as ssock:
+                cert = ssock.getpeercert()
+        not_after = cert.get("notAfter") if cert else None
+        return not_after.strip() if isinstance(not_after, str) and not_after.strip() else None
+    except Exception as exc:
+        logger.warning("获取 Rancher 证书过期时间失败: %s", exc)
+        return None
+
+
+def _is_k8s_cert_expiry_item(name: str) -> bool:
+    if not name:
+        return False
+    trimmed = name.strip()
+    lowered = trimmed.lower()
+    if trimmed == "K8s 证书过期时间检查":
+        return True
+    if "证书过期时间" in trimmed and ("k8s" in lowered or "kubernetes" in lowered):
+        return True
+    return False
+
+
+def _append_rancher_cert_detail(
+    detail: Optional[str], expiry: str
+) -> Optional[str]:
+    if not expiry:
+        return detail
+    line = f"rancher证书 {expiry}"
+    if not detail:
+        return f"组件 过期时间\n{line}"
+    normalized = (
+        str(detail)
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .strip()
+    )
+    if not normalized:
+        return f"组件 过期时间\n{line}"
+    lines = [item.strip() for item in normalized.split("\n") if item.strip()]
+    if any("rancher证书" in item for item in lines):
+        return detail
+    header = lines[0]
+    has_name_column = "证书名称" in header and "过期时间" in header
+    has_two_columns = "组件" in header and (
+        "过期时间" in header or "证书过期时间" in header
+    )
+    if has_name_column:
+        line = f"rancher证书 Rancher证书 {expiry}"
+    elif not has_two_columns:
+        line = f"rancher证书 {expiry}"
+    return f"{detail.rstrip()}\n{line}"
 inspection_scheduler = InspectionScheduler(
     operator_label="定时巡检任务",
     multi_version_label="多版本",
@@ -2627,16 +2728,32 @@ def agent_submit_results(
         refreshed = crud.get_inspection_run(ctx.db, run.id) or run
         return _serialize_run(ctx.db, refreshed)
     is_partial = bool(payload.partial)
+    cluster = crud.get_cluster(ctx.db, run.cluster_id)
+    is_rancher_local = bool(getattr(cluster, "is_rancher_local", False)) if cluster else False
+    rancher_url = (getattr(cluster, "rancher_url", None) or "").strip() if cluster else ""
     rancher_version = _sanitize_optional_text(payload.rancher_version)
-    if rancher_version:
-        cluster = crud.get_cluster(ctx.db, run.cluster_id)
-        if cluster and getattr(cluster, "is_rancher_local", False):
-            crud.update_cluster(ctx.db, cluster, rancher_version=rancher_version)
+    if not rancher_version and (not is_partial) and is_rancher_local and cluster:
+        rancher_version = _fetch_rancher_version_from_cluster(cluster)
+    if rancher_version and cluster and is_rancher_local:
+        crud.update_cluster(ctx.db, cluster, rancher_version=rancher_version)
+    item_lookup: dict[int, models.InspectionItem] = {}
+    if is_rancher_local:
+        item_ids = [result.item_id for result in payload.results if result.item_id]
+        if item_ids:
+            item_lookup = {item.id: item for item in crud.get_items_by_ids(ctx.db, item_ids)}
+    rancher_cert_expiry: Optional[str] = None
     for result in payload.results:
         normalized_status = (result.status or "").strip().lower()
         if normalized_status not in {"passed", "warning", "critical", "failed"}:
             normalized_status = "warning"
         detail = _sanitize_optional_text(result.detail)
+        if is_rancher_local and rancher_url and result.item_id:
+            item = item_lookup.get(result.item_id)
+            if item and _is_k8s_cert_expiry_item(item.name or ""):
+                if rancher_cert_expiry is None:
+                    rancher_cert_expiry = _fetch_rancher_cert_expiry(rancher_url)
+                if rancher_cert_expiry:
+                    detail = _append_rancher_cert_detail(detail, rancher_cert_expiry)
         suggestion = _sanitize_optional_text(result.suggestion)
         crud.add_run_result_by_item_id(
             ctx.db,
