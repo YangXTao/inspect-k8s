@@ -160,6 +160,11 @@ def create_cluster(
     kubeconfig_path: str,
     contexts_json: Optional[str],
     prometheus_url: Optional[str],
+    is_rancher_local: bool = False,
+    rancher_url: Optional[str] = None,
+    rancher_api_key: Optional[str] = None,
+    rancher_version: Optional[str] = None,
+    rancher_cluster_count: Optional[int] = None,
     connection_status: str = "unknown",
     connection_message: Optional[str] = None,
     last_checked_at: Optional[datetime] = None,
@@ -172,6 +177,11 @@ def create_cluster(
         kubeconfig_path=kubeconfig_path,
         contexts_json=contexts_json,
         prometheus_url=prometheus_url,
+        is_rancher_local=is_rancher_local,
+        rancher_url=rancher_url,
+        rancher_api_key=rancher_api_key,
+        rancher_version=rancher_version,
+        rancher_cluster_count=rancher_cluster_count,
         connection_status=connection_status,
         connection_message=connection_message,
         last_checked_at=last_checked_at,
@@ -201,6 +211,11 @@ def update_cluster(
     kubeconfig_path: Optional[str] = None,
     contexts_json: Optional[str] = None,
     prometheus_url: Optional[str] = None,
+    is_rancher_local: Optional[bool] = None,
+    rancher_url: Optional[str] = None,
+    rancher_api_key: Optional[str] = None,
+    rancher_version: Optional[str] = None,
+    rancher_cluster_count: Optional[int] = None,
     connection_status: Optional[str] = None,
     connection_message: Optional[str] = None,
     last_checked_at: Optional[datetime] = None,
@@ -220,6 +235,16 @@ def update_cluster(
         cluster.contexts_json = contexts_json
     if prometheus_url is not None:
         cluster.prometheus_url = prometheus_url
+    if is_rancher_local is not None:
+        cluster.is_rancher_local = bool(is_rancher_local)
+    if rancher_url is not None:
+        cluster.rancher_url = rancher_url
+    if rancher_api_key is not None:
+        cluster.rancher_api_key = rancher_api_key
+    if rancher_version is not None:
+        cluster.rancher_version = rancher_version
+    if rancher_cluster_count is not None:
+        cluster.rancher_cluster_count = rancher_cluster_count
     if connection_status is not None:
         cluster.connection_status = connection_status
     if connection_message is not None:
@@ -477,6 +502,19 @@ def get_items_by_ids(
     )
     item_map = {item.id: item for item in items}
     return [item_map[item_id] for item_id in ids if item_id in item_map]
+
+
+def filter_items_for_cluster(
+    cluster: models.ClusterConfig,
+    items: Iterable[models.InspectionItem],
+) -> List[models.InspectionItem]:
+    if getattr(cluster, "is_rancher_local", False):
+        return list(items)
+    return [
+        item
+        for item in items
+        if (item.check_type or "").strip() != "rancher_local"
+    ]
 
 
 def create_inspection_run(

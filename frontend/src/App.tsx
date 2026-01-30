@@ -387,6 +387,23 @@ const isLicenseRelatedMessage = (value?: string | null) => {
 const isPromqlType = (value?: string | null) =>
   (value ?? "").trim() === "promql";
 
+const isRancherLocalType = (value?: string | null) =>
+  (value ?? "").trim() === "rancher_local";
+
+const resolveClusterRancherLocal = (cluster?: ClusterConfig | null) =>
+  Boolean(
+    cluster && (cluster.isRancherLocal ?? cluster.is_rancher_local)
+  );
+
+const resolveClusterRancherUrl = (cluster?: ClusterConfig | null) =>
+  cluster?.rancherUrl ?? cluster?.rancher_url ?? "";
+
+const resolveClusterRancherApiKey = (cluster?: ClusterConfig | null) =>
+  cluster?.rancherApiKey ?? cluster?.rancher_api_key ?? "";
+
+const resolveClusterRancherVersion = (cluster?: ClusterConfig | null) =>
+  cluster?.rancherVersion ?? cluster?.rancher_version ?? "";
+
 const HISTORY_STATUS_OPTIONS: {
   value: InspectionRunStatus | "all";
   label: string;
@@ -1476,7 +1493,7 @@ const DashboardOverviewView = ({
     const otherMetric: "cpu" | "memory" = metric === "cpu" ? "memory" : "cpu";
     const width = 640;
     const height = 240;
-    const padding = { left: 14, right: 12, top: 12, bottom: 34 };
+    const padding = { left: 30, right: 12, top: 12, bottom: 34 };
     const plotWidth = width - padding.left - padding.right;
     const plotHeight = height - padding.top - padding.bottom;
     const maxIndex = Math.max(timeline.length - 1, 1);
@@ -2315,6 +2332,9 @@ interface AgentQuickCreateProps {
     backend_url: string;
     description?: string;
     prometheus_url?: string | null;
+    isRancherLocal?: boolean;
+    rancherUrl?: string | null;
+    rancherApiKey?: string | null;
   }) => Promise<void>;
   onClearCommand: () => void;
 }
@@ -2338,16 +2358,23 @@ const AgentQuickCreate = ({
   const [backendUrl, setBackendUrl] = useState("");
   const [description, setDescription] = useState("");
   const [prometheusUrl, setPrometheusUrl] = useState("");
+  const [isRancherLocal, setIsRancherLocal] = useState(false);
+  const [rancherUrl, setRancherUrl] = useState("");
+  const [rancherApiKey, setRancherApiKey] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
   const trimmedName = name.trim();
   const trimmedBackendUrl = backendUrl.trim();
   const trimmedPrometheusUrl = prometheusUrl.trim();
+  const trimmedRancherUrl = rancherUrl.trim();
+  const trimmedRancherApiKey = rancherApiKey.trim();
   const invalidBackendUrl =
     trimmedBackendUrl.length > 0 && !/^https?:\/\//i.test(trimmedBackendUrl);
   const invalidPrometheusUrl =
     trimmedPrometheusUrl.length > 0 &&
     !/^https?:\/\//i.test(trimmedPrometheusUrl);
+  const invalidRancherUrl =
+    trimmedRancherUrl.length > 0 && !/^https?:\/\//i.test(trimmedRancherUrl);
   const duplicateAgent = useMemo(
     () =>
       trimmedName.length > 0 &&
@@ -2396,6 +2423,20 @@ const AgentQuickCreate = ({
       setFormError("Prometheus 地址需以 http:// 或 https:// 开头");
       return;
     }
+    if (isRancherLocal) {
+      if (!trimmedRancherUrl) {
+        setFormError("Rancher 地址不能为空");
+        return;
+      }
+      if (invalidRancherUrl) {
+        setFormError("Rancher 地址需以 http:// 或 https:// 开头");
+        return;
+      }
+      if (!trimmedRancherApiKey) {
+        setFormError("Rancher API 密钥不能为空");
+        return;
+      }
+    }
     if (duplicateAgent) {
       setFormError("Agent 名称已存在，请更换其他名称");
       return;
@@ -2413,11 +2454,21 @@ const AgentQuickCreate = ({
         backend_url: trimmedBackendUrl,
         description: description.trim() || undefined,
         prometheus_url: resolvedPrometheusUrl || undefined,
+        ...(isRancherLocal
+          ? {
+              isRancherLocal: true,
+              rancherUrl: trimmedRancherUrl,
+              rancherApiKey: trimmedRancherApiKey,
+            }
+          : {}),
       });
       setName("");
       setBackendUrl("");
       setDescription("");
       setPrometheusUrl("");
+      setIsRancherLocal(false);
+      setRancherUrl("");
+      setRancherApiKey("");
     } catch (err) {
       const message = err instanceof Error ? err.message : "创建 Agent 失败";
       setFormError(message);
@@ -2464,6 +2515,33 @@ const AgentQuickCreate = ({
           placeholder="Prometheus 地址（可选）"
           disabled={submitting || !canCreateAgents}
         />
+        <label className="agent-inline-toggle">
+          <input
+            type="checkbox"
+            checked={isRancherLocal}
+            onChange={(event) => setIsRancherLocal(event.target.checked)}
+            disabled={submitting || !canCreateAgents}
+          />
+          <span>Rancher Local 集群</span>
+        </label>
+        {isRancherLocal && (
+          <>
+            <input
+              type="text"
+              value={rancherUrl}
+              onChange={(event) => setRancherUrl(event.target.value)}
+              placeholder="Rancher 地址（必填）"
+              disabled={submitting || !canCreateAgents}
+            />
+            <input
+              type="password"
+              value={rancherApiKey}
+              onChange={(event) => setRancherApiKey(event.target.value)}
+              placeholder="Rancher API 密钥（必填）"
+              disabled={submitting || !canCreateAgents}
+            />
+          </>
+        )}
         <button
           type="submit"
           className="secondary"
@@ -2526,6 +2604,9 @@ interface OverviewProps {
     backend_url: string;
     description?: string;
     prometheus_url?: string | null;
+    isRancherLocal?: boolean;
+    rancherUrl?: string | null;
+    rancherApiKey?: string | null;
   }) => Promise<void>;
   onClearAgentCommand: () => void;
 }
@@ -4394,6 +4475,7 @@ const ClusterDetailView = ({
       items.filter(
         (item) =>
           !isPromqlType(item.check_type) &&
+          !isRancherLocalType(item.check_type) &&
           matchesInspectionKeyword(item)
       ),
     [items, matchesInspectionKeyword]
@@ -4401,6 +4483,15 @@ const ClusterDetailView = ({
   const filteredInspectionItems = useMemo(
     () => [...filteredPromqlItems, ...filteredCommonItems],
     [filteredPromqlItems, filteredCommonItems]
+  );
+  const rancherItemIdSet = useMemo(
+    () =>
+      new Set(
+        items
+          .filter((item) => isRancherLocalType(item.check_type))
+          .map((item) => item.id)
+      ),
+    [items]
   );
 
   const totalInspectionPages = useMemo(
@@ -4421,6 +4512,13 @@ const ClusterDetailView = ({
     setItemPage((prev) => Math.min(Math.max(prev, 1), totalInspectionPages));
   }, [totalInspectionPages]);
 
+  useEffect(() => {
+    if (rancherItemIdSet.size === 0) {
+      return;
+    }
+    setSelectedIds((prev) => prev.filter((id) => !rancherItemIdSet.has(id)));
+  }, [rancherItemIdSet, setSelectedIds]);
+
   const pagedInspectionItems = useMemo(() => {
     if (filteredInspectionItems.length === 0) {
       return [];
@@ -4434,7 +4532,11 @@ const ClusterDetailView = ({
   );
   const pagedCommonItems = useMemo(
     () =>
-      pagedInspectionItems.filter((item) => !isPromqlType(item.check_type)),
+      pagedInspectionItems.filter(
+        (item) =>
+          !isPromqlType(item.check_type) &&
+          !isRancherLocalType(item.check_type)
+      ),
     [pagedInspectionItems]
   );
   const versionHint = useMemo(() => {
@@ -6015,7 +6117,9 @@ const InspectionSettingsPanel = ({
           prometheusVersionOptions
         )
       : null;
-    let nextItems = sortedItems;
+    let nextItems = sortedItems.filter(
+      (item) => !isRancherLocalType(item.check_type)
+    );
     if (versionFilter) {
       nextItems = nextItems.filter(
         (item) =>
@@ -6966,7 +7070,14 @@ const ScheduleSettingsPanel = ({
       prev.filter((id) => scheduleItemMap.has(id))
     );
   }, [scheduleItemMap]);
-
+  useEffect(() => {
+    setSelectedItemIds((prev) =>
+      prev.filter((id) => {
+        const item = scheduleItemMap.get(id);
+        return item ? !isRancherLocalType(item.check_type) : false;
+      })
+    );
+  }, [scheduleItemMap]);
   useEffect(() => {
     if (
       itemVersionFilter !== "all" &&
@@ -7118,20 +7229,23 @@ const ScheduleSettingsPanel = ({
             itemVersionFilter,
             prometheusVersionOptions
           );
-    return items.filter((item) => {
-      const name = (item.name ?? "").toLowerCase();
-      const desc = (item.description ?? "").toLowerCase();
-      const keywordMatch =
-        !keyword || name.includes(keyword) || desc.includes(keyword);
-      if (!keywordMatch) {
-        return false;
-      }
-      if (!isPromqlType(item.check_type)) {
-        return true;
-      }
-      if (!resolvedVersion) {
-        return true;
-      }
+      return items.filter((item) => {
+        const name = (item.name ?? "").toLowerCase();
+        const desc = (item.description ?? "").toLowerCase();
+        const keywordMatch =
+          !keyword || name.includes(keyword) || desc.includes(keyword);
+        if (!keywordMatch) {
+          return false;
+        }
+        if (isRancherLocalType(item.check_type)) {
+          return false;
+        }
+        if (!isPromqlType(item.check_type)) {
+          return true;
+        }
+        if (!resolvedVersion) {
+          return true;
+        }
       return (
         normalizePrometheusVersion(
           item.prometheus_version,
@@ -7139,12 +7253,7 @@ const ScheduleSettingsPanel = ({
         ) === resolvedVersion
       );
     });
-  }, [
-    itemKeyword,
-    itemVersionFilter,
-    items,
-    prometheusVersionOptions,
-  ]);
+    }, [itemKeyword, itemVersionFilter, items, prometheusVersionOptions]);
 
   const filteredItemIdSet = useMemo(
     () => new Set(filteredItems.map((item) => item.id)),
@@ -7187,7 +7296,12 @@ const ScheduleSettingsPanel = ({
     [filteredItems]
   );
   const filteredCommonItems = useMemo(
-    () => filteredItems.filter((item) => !isPromqlType(item.check_type)),
+    () =>
+      filteredItems.filter(
+        (item) =>
+          !isPromqlType(item.check_type) &&
+          !isRancherLocalType(item.check_type)
+      ),
     [filteredItems]
   );
 
@@ -7911,7 +8025,9 @@ const ScheduleSettingsPanel = ({
                 ) : filteredItems.length === 0 ? (
                   <div className="placeholder">未找到匹配的巡检项</div>
                 ) : (
-                  <div className="inspection-item-columns">
+                  <div
+                    className="inspection-item-columns"
+                  >
                     <div className="inspection-item-column">
                       <details className="schedule-dropdown">
                         <summary>
@@ -9395,6 +9511,10 @@ const RunDetailView = ({
     summaryRun?.prometheus_versions,
     prometheusVersionOptions,
   ]);
+  const clusterIsRancherLocal = resolveClusterRancherLocal(cluster);
+  const rancherVersionLabel = clusterIsRancherLocal
+    ? (resolveClusterRancherVersion(cluster).trim() || "未知")
+    : null;
 
   if (resolvedRunId === null) {
     return (
@@ -9743,6 +9863,12 @@ const RunDetailView = ({
             <strong>Prometheus 版本：</strong>
             {prometheusVersionLabel}
           </div>
+          {rancherVersionLabel && (
+            <div>
+              <strong>Rancher 版本：</strong>
+              {rancherVersionLabel}
+            </div>
+          )}
           <div>
             <strong>开始时间：</strong>
             {summaryRun?.created_at ? formatDate(summaryRun.created_at) : "-"}
@@ -9945,6 +10071,8 @@ interface ClusterEditModalProps {
     name: string;
     prometheusUrl: string;
     file: File | null;
+    rancherUrl?: string;
+    rancherApiKey?: string;
   }) => Promise<void>;
 }
 
@@ -9959,6 +10087,12 @@ const ClusterEditModal = ({
   const [prometheusUrl, setPrometheusUrl] = useState(
     cluster.prometheus_url ?? ""
   );
+  const [rancherUrl, setRancherUrl] = useState(
+    resolveClusterRancherUrl(cluster)
+  );
+  const [rancherApiKey, setRancherApiKey] = useState(
+    resolveClusterRancherApiKey(cluster)
+  );
   const [kubeconfigModalOpen, setKubeconfigModalOpen] = useState(false);
   const [kubeconfigText, setKubeconfigText] = useState("");
   const [kubeconfigFile, setKubeconfigFile] = useState<File | null>(null);
@@ -9972,6 +10106,8 @@ const ClusterEditModal = ({
   useEffect(() => {
     setName(cluster.name);
     setPrometheusUrl(cluster.prometheus_url ?? "");
+    setRancherUrl(resolveClusterRancherUrl(cluster));
+    setRancherApiKey(resolveClusterRancherApiKey(cluster));
     setKubeconfigModalOpen(false);
     setKubeconfigText("");
     setKubeconfigFile(null);
@@ -9982,7 +10118,10 @@ const ClusterEditModal = ({
 
   const nameInputId = `cluster-edit-name-${cluster.id}`;
   const promInputId = `cluster-edit-prom-${cluster.id}`;
+  const rancherUrlInputId = `cluster-edit-rancher-url-${cluster.id}`;
+  const rancherKeyInputId = `cluster-edit-rancher-key-${cluster.id}`;
   const modalFileInputId = `cluster-edit-file-${cluster.id}`;
+  const clusterIsRancherLocal = resolveClusterRancherLocal(cluster);
 
   const hasManualKubeconfig = useMemo(
     () => kubeconfigEdited && kubeconfigText.trim().length > 0,
@@ -10089,7 +10228,17 @@ const ClusterEditModal = ({
     const fileForSubmit = enableServerKubeconfigEdit
       ? resolveFileToUpload()
       : null;
-    await onSubmit({ name, prometheusUrl, file: fileForSubmit });
+    await onSubmit({
+      name,
+      prometheusUrl,
+      file: fileForSubmit,
+      ...(clusterIsRancherLocal
+        ? {
+            rancherUrl,
+            rancherApiKey,
+          }
+        : {}),
+    });
   };
 
   return (
@@ -10120,6 +10269,30 @@ const ClusterEditModal = ({
             disabled={submitting}
           />
         </div>
+        {clusterIsRancherLocal && (
+          <>
+            <div className="modal-field">
+              <label htmlFor={rancherUrlInputId}>Rancher 地址</label>
+              <input
+                id={rancherUrlInputId}
+                type="text"
+                value={rancherUrl}
+                onChange={(event) => setRancherUrl(event.target.value)}
+                disabled={submitting}
+              />
+            </div>
+            <div className="modal-field">
+              <label htmlFor={rancherKeyInputId}>Rancher API 密钥</label>
+              <input
+                id={rancherKeyInputId}
+                type="password"
+                value={rancherApiKey}
+                onChange={(event) => setRancherApiKey(event.target.value)}
+                disabled={submitting}
+              />
+            </div>
+          </>
+        )}
         {enableServerKubeconfigEdit ? (
           <div className="modal-field">
             <span className="modal-field-label">重新上传 kubeconfig(可选)</span>
@@ -11732,6 +11905,9 @@ const loginRedirectState = useMemo(
       backend_url: string;
       description?: string;
       prometheus_url?: string | null;
+      isRancherLocal?: boolean;
+      rancherUrl?: string | null;
+      rancherApiKey?: string | null;
     }) => {
       if (!canCreateClusterAgents) {
         setAgentError("当前账户没有创建 Agent 集群的权限。");
@@ -11756,6 +11932,10 @@ const loginRedirectState = useMemo(
       const normalizedBackendUrl = normalizeBackendUrl(backend_url);
       const normalizedPrometheusUrl =
         requestPayload.prometheus_url?.trim() || undefined;
+      const normalizedRancherUrl =
+        requestPayload.rancherUrl?.trim() || undefined;
+      const normalizedRancherApiKey =
+        requestPayload.rancherApiKey?.trim() || undefined;
       setAgentSubmitting(true);
       setAgentNotice(null);
       setAgentError(null);
@@ -11765,6 +11945,12 @@ const loginRedirectState = useMemo(
           ...requestPayload,
           name: normalizedName,
           prometheus_url: normalizedPrometheusUrl,
+          ...(requestPayload.isRancherLocal
+            ? {
+                rancherUrl: normalizedRancherUrl,
+                rancherApiKey: normalizedRancherApiKey,
+              }
+            : {}),
         });
         setGeneratedAgentCommand(
           buildAgentRegisterCommand({
@@ -14208,10 +14394,14 @@ const hasManualKubeconfig = useMemo(
       name,
       prometheusUrl,
       file,
+      rancherUrl,
+      rancherApiKey,
     }: {
       name: string;
       prometheusUrl: string;
       file: File | null;
+      rancherUrl?: string;
+      rancherApiKey?: string;
     }) => {
       if (!clusterEditState) {
         return;
@@ -14232,10 +14422,31 @@ const hasManualKubeconfig = useMemo(
         setClusterEditError("集群名称不能为空");
         return;
       }
+      const trimmedRancherUrl = rancherUrl?.trim() ?? "";
+      const trimmedRancherApiKey = rancherApiKey?.trim() ?? "";
+      const editIsRancherLocal = resolveClusterRancherLocal(clusterEditState);
+      if (editIsRancherLocal) {
+        if (!trimmedRancherUrl) {
+          setClusterEditError("Rancher 地址不能为空");
+          return;
+        }
+        if (!/^https?:\/\//i.test(trimmedRancherUrl)) {
+          setClusterEditError("Rancher 地址需以 http:// 或 https:// 开头");
+          return;
+        }
+        if (!trimmedRancherApiKey) {
+          setClusterEditError("Rancher API 密钥不能为空");
+          return;
+        }
+      }
 
       const formData = new FormData();
       formData.append("name", trimmedName);
       formData.append("prometheus_url", prometheusUrl.trim());
+      if (editIsRancherLocal) {
+        formData.append("rancherUrl", trimmedRancherUrl);
+        formData.append("rancherApiKey", trimmedRancherApiKey);
+      }
       if (file) {
         formData.append("file", file);
       }

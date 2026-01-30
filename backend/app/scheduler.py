@@ -152,9 +152,6 @@ def _dispatch_schedule_runs(
     ]
     if not items:
         return 0
-
-    plan_json = _build_run_plan(items)
-    prometheus_version = _derive_prometheus_version(items, multi_version_label)
     operator = _format_schedule_operator(schedule.name, operator_label)
     created_by_user_id, created_by_username = _resolve_schedule_creator(db, schedule)
 
@@ -163,6 +160,13 @@ def _dispatch_schedule_runs(
         cluster = crud.get_cluster(db, cluster_id)
         if not cluster or cluster.is_archived:
             continue
+        cluster_items = crud.filter_items_for_cluster(cluster, items)
+        if not cluster_items:
+            continue
+        plan_json = _build_run_plan(cluster_items)
+        prometheus_version = _derive_prometheus_version(
+            cluster_items, multi_version_label
+        )
         agent = _resolve_active_agent(db, cluster)
         if not agent:
             continue
@@ -171,7 +175,7 @@ def _dispatch_schedule_runs(
             operator=operator,
             cluster=cluster,
             status="queued",
-            total_items=len(items),
+            total_items=len(cluster_items),
             processed_items=0,
             plan_json=plan_json,
             prometheus_version=prometheus_version,

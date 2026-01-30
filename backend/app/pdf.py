@@ -181,6 +181,17 @@ def _get_cluster_meta(run: InspectionRun) -> Tuple[str, str, str]:
     return cluster_name, version_label, node_count_label
 
 
+def _get_rancher_meta(run: InspectionRun) -> Tuple[Optional[str], Optional[str]]:
+    cluster = getattr(run, "cluster", None)
+    if not cluster or not getattr(cluster, "is_rancher_local", False):
+        return None, None
+    rancher_version = getattr(cluster, "rancher_version", None)
+    rancher_count = getattr(cluster, "rancher_cluster_count", None)
+    version_label = rancher_version or "未知"
+    count_label = str(rancher_count) if rancher_count is not None else "未知"
+    return version_label, count_label
+
+
 def generate_markdown_report(
     *,
     run: InspectionRun,
@@ -249,6 +260,9 @@ def generate_markdown_report(
     lines.append(f"| 目标集群 | {cluster_label} |")
     lines.append(f"| 集群版本 | {version_label} |")
     lines.append(f"| 节点数量 | {node_count_label} |")
+    rancher_version_label, rancher_count_label = _get_rancher_meta(run)
+    if rancher_version_label is not None:
+        lines.append(f"| Rancher 版本 | {rancher_version_label} |")
     lines.append(f"| 巡检开始时间 | {_format_dt(run.created_at)} |")
     lines.append(f"| 巡检完成时间 | {_format_dt(run.completed_at or datetime.utcnow())} |")
     lines.append("")
@@ -573,6 +587,9 @@ def generate_pdf_report(
         ("巡检开始时间", format_dt(run.created_at)),
         ("巡检完成时间", format_dt(run.completed_at or datetime.utcnow())),
     ]
+    rancher_version_label, rancher_count_label = _get_rancher_meta(run)
+    if rancher_version_label is not None:
+        meta_rows.insert(5, ("Rancher 版本", rancher_version_label))
     meta_table_data = [
         [Paragraph(label, styles["MetaLabel"]), Paragraph(_wrap_latin(value), styles["MetaValue"])]
         for label, value in meta_rows

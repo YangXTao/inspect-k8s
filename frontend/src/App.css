@@ -1127,6 +1127,12 @@ body.login-lock {
   border-color: #e2e8f0;
 }
 
+.item-tag.rancher {
+  background: #ecfdf3;
+  color: #047857;
+  border-color: #a7f3d0;
+}
+
 @media (max-width: 720px) {
   .inspection-version-hint {
     grid-template-columns: 1fr;
@@ -1252,13 +1258,18 @@ button:disabled {
 }
 
 .link-button {
-  background: none;
-  border: none;
-  color: #2563eb;
-  cursor: pointer;
-  padding: 0;
-  font-size: 14px;
-  font-weight: 600;
+    background: none;
+    border: none;
+    color: #2563eb;
+    cursor: pointer;
+    padding: 0;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.link-button:hover {
+    text-decoration: none;
 }
 
 .link-button.small {
@@ -2208,6 +2219,19 @@ th {
   font-size: 13px;
   background: #fff;
   color: #0f172a;
+}
+
+.agent-inline-form-body .agent-inline-toggle {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #fff;
+  font-size: 13px;
+}
+
+.agent-inline-form-body .agent-inline-toggle input {
+  width: auto;
 }
 
 .agent-inline-form-body .secondary {
@@ -3545,6 +3569,10 @@ th {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.schedule-modal .inspection-item-columns.with-rancher {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .schedule-modal .inspection-item-column {

@@ -5,7 +5,7 @@ import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from pydantic import BaseModel, Field, ConfigDict, computed_field
+from pydantic import BaseModel, Field, ConfigDict, computed_field, AliasChoices
 
 
 def _extract_connection_meta(
@@ -61,7 +61,7 @@ def _extract_connection_meta(
 
 
 class ClusterConfigOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: int
     name: str
@@ -71,6 +71,21 @@ class ClusterConfigOut(BaseModel):
     connection_status: str
     connection_message: Optional[str]
     agent_health_message: Optional[str] = None
+    is_rancher_local: bool = Field(
+        False, serialization_alias="isRancherLocal"
+    )
+    rancher_url: Optional[str] = Field(
+        None, serialization_alias="rancherUrl"
+    )
+    rancher_api_key: Optional[str] = Field(
+        None, serialization_alias="rancherApiKey"
+    )
+    rancher_version: Optional[str] = Field(
+        None, serialization_alias="rancherVersion"
+    )
+    rancher_cluster_count: Optional[int] = Field(
+        None, serialization_alias="rancherClusterCount"
+    )
     last_checked_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
@@ -424,6 +439,19 @@ class InspectionAgentCreate(BaseModel):
     prometheus_url: Optional[str] = Field(
         None, max_length=255, description="Agent Prometheus URL"
     )
+    is_rancher_local: bool = Field(
+        False,
+        validation_alias=AliasChoices("isRancherLocal", "is_rancher_local"),
+    )
+    rancher_url: Optional[str] = Field(
+        None,
+        max_length=255,
+        validation_alias=AliasChoices("rancherUrl", "rancher_url"),
+    )
+    rancher_api_key: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices("rancherApiKey", "rancher_api_key"),
+    )
 
 
 class InspectionAgentUpdate(BaseModel):
@@ -484,6 +512,9 @@ class AgentTaskOut(BaseModel):
     operator: Optional[str]
     total_items: int
     items: List[AgentTaskItemOut]
+    is_rancher_local: Optional[bool] = None
+    rancher_url: Optional[str] = None
+    rancher_api_key: Optional[str] = None
 
 
 class AgentRunResultItemIn(BaseModel):
@@ -502,6 +533,10 @@ class AgentRunResultIn(BaseModel):
     partial: bool = Field(
         False,
         description="是否为增量上报；True 表示仅追加/更新已有结果，不会结束巡检",
+    )
+    rancher_version: Optional[str] = Field(
+        None,
+        description="Rancher 版本",
     )
 
 

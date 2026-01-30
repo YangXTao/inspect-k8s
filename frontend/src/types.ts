@@ -62,6 +62,16 @@ export type ClusterConfig = {
   id: number;
   name: string;
   prometheus_url?: string | null;
+  isRancherLocal?: boolean;
+  is_rancher_local?: boolean;
+  rancherUrl?: string | null;
+  rancher_url?: string | null;
+  rancherApiKey?: string | null;
+  rancher_api_key?: string | null;
+  rancherVersion?: string | null;
+  rancher_version?: string | null;
+  rancherClusterCount?: number | null;
+  rancher_cluster_count?: number | null;
   contexts: string[];
   description?: string | null;
   connection_status: "connected" | "failed" | "warning" | "unknown";

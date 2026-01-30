@@ -7,10 +7,13 @@ import os
 import re
 import secrets
 import shutil
+import shlex
+import subprocess
+import requests
 from dataclasses import dataclass
 import base64
 import binascii
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Any, Generator, Iterable
 from uuid import uuid4
@@ -79,6 +82,210 @@ MAX_CLUSTER_NAME_LENGTH = 150
 DEFAULT_PROMETHEUS_URL = (
     "http://rancher-monitoring-prometheus.cattle-monitoring-system:9090"
 )
+
+
+def _build_rancher_auth_strategies(
+    api_key: str,
+) -> List[tuple[Optional[tuple[str, str]], Dict[str, str]]]:
+    raw = (api_key or "").strip()
+    if not raw:
+        return []
+    strategies: List[tuple[Optional[tuple[str, str]], Dict[str, str]]] = []
+    lower = raw.lower()
+    if lower.startswith("bearer "):
+        strategies.append((None, {"Authorization": raw}))
+        return strategies
+    if ":" in raw:
+        user, password = raw.split(":", 1)
+        strategies.append(((user, password), {}))
+    strategies.append((None, {"Authorization": f"Bearer {raw}"}))
+    return strategies
+
+
+def _build_rancher_cert_command(rancher_url: str) -> str:
+    return (
+        f"curl -k {shlex.quote(rancher_url)} -Iv 2>&1 | "
+        "grep \"expire date:\" | awk -F ': ' '{print $2}'"
+    )
+
+
+def _run_shell_command(command: str, timeout: int = 15) -> Optional[str]:
+    try:
+        completed = subprocess.run(
+            command,
+            shell=True,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except Exception as exc:
+        logger.warning("执行命令失败: %s", exc)
+        return None
+    if completed.returncode != 0:
+        output = (completed.stderr or completed.stdout or "").strip()
+        if output:
+            logger.warning("命令返回非零状态: %s", output)
+        return None
+    output = (completed.stdout or "").strip()
+    if not output:
+        output = (completed.stderr or "").strip()
+    return output or None
+
+
+def _fetch_rancher_version_from_cluster(
+    cluster: models.ClusterConfig,
+) -> Optional[str]:
+    rancher_url = (getattr(cluster, "rancher_url", None) or "").strip()
+    rancher_api_key = (getattr(cluster, "rancher_api_key", None) or "").strip()
+    if not rancher_url or not rancher_api_key:
+        return None
+    try:
+        url = rancher_url.rstrip("/") + "/v3/settings/server-version"
+        last_error: Optional[Exception] = None
+        for auth, headers in _build_rancher_auth_strategies(rancher_api_key):
+            try:
+                resp = requests.get(
+                    url,
+                    auth=auth,
+                    headers=headers,
+                    timeout=10,
+                    verify=False,
+                )
+                if resp.status_code == 401:
+                    last_error = requests.HTTPError(
+                        f"401 Client Error: Unauthorized for url: {url}"
+                    )
+                    continue
+                resp.raise_for_status()
+                payload = resp.json()
+                version = str(payload.get("value") or "").strip()
+                return version or None
+            except Exception as exc:
+                last_error = exc
+                continue
+        if last_error is not None:
+            raise last_error
+        return None
+    except Exception as exc:
+        logger.warning("获取 Rancher 版本失败: %s", exc)
+        return None
+
+
+def _fetch_rancher_cert_expiry(rancher_url: str) -> Optional[str]:
+    if not rancher_url:
+        return None
+    try:
+        command = _build_rancher_cert_command(rancher_url)
+        output = _run_shell_command(command, timeout=15)
+        if not output:
+            return None
+        first_line = output.splitlines()[0].strip()
+        return first_line or None
+    except Exception as exc:
+        logger.warning("获取 Rancher 证书过期时间失败: %s", exc)
+        return None
+
+
+def _is_k8s_cert_expiry_item(name: str) -> bool:
+    if not name:
+        return False
+    trimmed = name.strip()
+    if "证书过期时间" in trimmed:
+        return True
+    return False
+
+
+def _append_rancher_cert_detail(
+    detail: Optional[str], expiry: str
+) -> Optional[str]:
+    if not expiry:
+        return detail
+    line = f"rancher证书 {expiry}"
+    if not detail:
+        return f"组件 过期时间\n{line}"
+    normalized = (
+        str(detail)
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .strip()
+    )
+    if not normalized:
+        return f"组件 过期时间\n{line}"
+    lines = [item.strip() for item in normalized.split("\n") if item.strip()]
+    if any("rancher证书" in item for item in lines):
+        return detail
+    header = lines[0]
+    has_name_column = "证书名称" in header and "过期时间" in header
+    has_two_columns = "组件" in header and (
+        "过期时间" in header or "证书过期时间" in header
+    )
+    if has_name_column:
+        line = f"rancher证书 Rancher证书 {expiry}"
+    elif not has_two_columns:
+        line = f"rancher证书 {expiry}"
+    return f"{detail.rstrip()}\n{line}"
+
+
+def _extract_rancher_cert_expiry(detail: Optional[str]) -> Optional[str]:
+    if not detail:
+        return None
+    lines = [line.strip() for line in str(detail).splitlines() if line.strip()]
+    for line in lines:
+        if "rancher证书" not in line:
+            continue
+        tokens = line.split()
+        if tokens and tokens[0].startswith("rancher证书"):
+            value = " ".join(tokens[1:]).strip()
+            return value or None
+    return None
+
+
+def _parse_rancher_cert_expiry_datetime(value: str) -> Optional[datetime]:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    formats = [
+        "%b %d %H:%M:%S %Y %Z",
+        "%b %d %H:%M:%S %Y",
+        "%Y-%m-%d %H:%M:%S %Z",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d",
+    ]
+    for fmt in formats:
+        try:
+            parsed = datetime.strptime(raw, fmt)
+        except ValueError:
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    return None
+
+
+def _evaluate_rancher_cert_severity(
+    expiry_text: str, now: Optional[datetime] = None
+) -> tuple[Optional[str], Optional[int]]:
+    parsed = _parse_rancher_cert_expiry_datetime(expiry_text)
+    if not parsed:
+        return None, None
+    current = now or datetime.now(timezone.utc)
+    delta = parsed - current
+    days_left = int(delta.total_seconds() // 86400)
+    if delta.total_seconds() <= 0 or days_left <= 30:
+        return "critical", days_left
+    return "warning", days_left
+
+
+def _append_suggestion(base: Optional[str], extra: str) -> Optional[str]:
+    extra_text = extra.strip()
+    if not extra_text:
+        return base
+    if base and extra_text in base:
+        return base
+    if base and base.strip():
+        return f"{base.strip()}；{extra_text}"
+    return extra_text
 inspection_scheduler = InspectionScheduler(
     operator_label="定时巡检任务",
     multi_version_label="多版本",
@@ -1954,6 +2161,8 @@ async def update_cluster(
     db: Session = Depends(get_db),
     name: str | None = Form(None),
     prometheus_url: str | None = Form(None),
+    rancher_url: str | None = Form(None, alias="rancherUrl"),
+    rancher_api_key: str | None = Form(None, alias="rancherApiKey"),
     default_agent_id: str | None = Form(None),
     current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("clusters")),
@@ -1982,6 +2191,24 @@ async def update_cluster(
                 detail="Prometheus 地址需以 http:// 或 https:// 开头。",
             )
         update_kwargs["prometheus_url"] = normalized_prom_url
+
+    if rancher_url is not None or rancher_api_key is not None:
+        if not getattr(cluster, "is_rancher_local", False):
+            raise HTTPException(
+                status_code=400,
+                detail="当前集群不是 Rancher Local，无法设置 Rancher 信息。",
+            )
+        trimmed_rancher_url = (rancher_url or "").strip() or None
+        if trimmed_rancher_url and not trimmed_rancher_url.startswith(("http://", "https://")):
+            raise HTTPException(
+                status_code=400,
+                detail="Rancher 地址需以 http:// 或 https:// 开头。",
+            )
+        trimmed_rancher_key = (rancher_api_key or "").strip() or None
+        if trimmed_rancher_key is None:
+            raise HTTPException(status_code=400, detail="Rancher API 密钥不能为空。")
+        update_kwargs["rancher_url"] = trimmed_rancher_url
+        update_kwargs["rancher_api_key"] = trimmed_rancher_key
 
     default_agent_obj = None
     default_agent_specified = False
@@ -2058,6 +2285,34 @@ def register_agent(
     normalized_prometheus_url = _normalize_prometheus_url(payload.prometheus_url)
     if not normalized_prometheus_url:
         normalized_prometheus_url = DEFAULT_PROMETHEUS_URL
+    normalized_rancher_url = (payload.rancher_url or "").strip() or None
+    normalized_rancher_api_key = (payload.rancher_api_key or "").strip() or None
+    wants_rancher_local = bool(payload.is_rancher_local)
+    rancher_payload_present = bool(
+        wants_rancher_local or normalized_rancher_url or normalized_rancher_api_key
+    )
+    if rancher_payload_present and not wants_rancher_local:
+        raise HTTPException(
+            status_code=400,
+            detail="请先勾选 Rancher Local 集群后再填写 Rancher 信息。",
+        )
+    if wants_rancher_local:
+        if not normalized_rancher_url:
+            raise HTTPException(status_code=400, detail="Rancher 地址不能为空。")
+        if not normalized_rancher_url.startswith(("http://", "https://")):
+            raise HTTPException(
+                status_code=400,
+                detail="Rancher 地址需以 http:// 或 https:// 开头。",
+            )
+        if not normalized_rancher_api_key:
+            raise HTTPException(status_code=400, detail="Rancher API 密钥不能为空。")
+    rancher_update_kwargs: dict[str, Any] = {}
+    if rancher_payload_present:
+        rancher_update_kwargs = {
+            "is_rancher_local": wants_rancher_local,
+            "rancher_url": normalized_rancher_url,
+            "rancher_api_key": normalized_rancher_api_key,
+        }
 
     cluster: Optional[models.ClusterConfig] = None
     if payload.cluster_id is not None:
@@ -2077,6 +2332,8 @@ def register_agent(
                 cluster,
                 prometheus_url=normalized_prometheus_url,
             )
+        if rancher_update_kwargs:
+            cluster = crud.update_cluster(db, cluster, **rancher_update_kwargs)
     else:
         cluster = crud.get_cluster_by_name(db, trimmed_name)
         if cluster:
@@ -2098,6 +2355,9 @@ def register_agent(
                     kubeconfig_path=placeholder_path,
                     contexts_json=None,
                     prometheus_url=normalized_prometheus_url,
+                    is_rancher_local=wants_rancher_local,
+                    rancher_url=normalized_rancher_url,
+                    rancher_api_key=normalized_rancher_api_key,
                     connection_status="pending",
                     connection_message="等待 Agent 注册",
                     last_checked_at=None,
@@ -2126,6 +2386,8 @@ def register_agent(
                     update_kwargs["description"] = normalized_description
                 if normalized_prometheus_url is not None:
                     update_kwargs["prometheus_url"] = normalized_prometheus_url
+                if rancher_update_kwargs:
+                    update_kwargs.update(rancher_update_kwargs)
                 cluster = crud.update_cluster(db, cluster, **update_kwargs)
         else:
             placeholder_path = _build_agent_managed_kubeconfig_ref()
@@ -2135,6 +2397,9 @@ def register_agent(
                 kubeconfig_path=placeholder_path,
                 contexts_json=None,
                 prometheus_url=normalized_prometheus_url,
+                is_rancher_local=wants_rancher_local,
+                rancher_url=normalized_rancher_url,
+                rancher_api_key=normalized_rancher_api_key,
                 connection_status="pending",
                 connection_message="等待 Agent 注册",
                 last_checked_at=None,
@@ -2396,6 +2661,10 @@ def agent_pull_tasks(
     )
     tasks: List[schemas.AgentTaskOut] = []
     for run in runs:
+        cluster = run.cluster or crud.get_cluster(ctx.db, run.cluster_id)
+        is_rancher_local = bool(getattr(cluster, "is_rancher_local", False)) if cluster else False
+        rancher_url = getattr(cluster, "rancher_url", None) if is_rancher_local else None
+        rancher_api_key = getattr(cluster, "rancher_api_key", None) if is_rancher_local else None
         completed_item_ids = {
             result.item_id for result in run.results if result.item_id is not None
         }
@@ -2424,6 +2693,9 @@ def agent_pull_tasks(
                 operator=run.operator,
                 total_items=run.total_items,
                 items=items_out,
+                is_rancher_local=is_rancher_local,
+                rancher_url=rancher_url,
+                rancher_api_key=rancher_api_key,
             )
         )
     return tasks
@@ -2562,12 +2834,56 @@ def agent_submit_results(
         refreshed = crud.get_inspection_run(ctx.db, run.id) or run
         return _serialize_run(ctx.db, refreshed)
     is_partial = bool(payload.partial)
+    cluster = crud.get_cluster(ctx.db, run.cluster_id)
+    is_rancher_local = bool(getattr(cluster, "is_rancher_local", False)) if cluster else False
+    rancher_url = (getattr(cluster, "rancher_url", None) or "").strip() if cluster else ""
+    rancher_version = _sanitize_optional_text(payload.rancher_version)
+    if not rancher_version and (not is_partial) and is_rancher_local and cluster:
+        rancher_version = _fetch_rancher_version_from_cluster(cluster)
+    if rancher_version and cluster and is_rancher_local:
+        crud.update_cluster(
+            ctx.db,
+            cluster,
+            rancher_version=rancher_version,
+            log_audit=False,
+        )
+    item_lookup: dict[int, models.InspectionItem] = {}
+    if is_rancher_local:
+        item_ids = [result.item_id for result in payload.results if result.item_id]
+        if item_ids:
+            item_lookup = {item.id: item for item in crud.get_items_by_ids(ctx.db, item_ids)}
+    rancher_cert_expiry: Optional[str] = None
+    now_utc = datetime.now(timezone.utc)
     for result in payload.results:
         normalized_status = (result.status or "").strip().lower()
         if normalized_status not in {"passed", "warning", "critical", "failed"}:
             normalized_status = "warning"
         detail = _sanitize_optional_text(result.detail)
         suggestion = _sanitize_optional_text(result.suggestion)
+        if is_rancher_local and rancher_url and result.item_id:
+            item = item_lookup.get(result.item_id)
+            if item and _is_k8s_cert_expiry_item(item.name or ""):
+                if rancher_cert_expiry is None:
+                    rancher_cert_expiry = _fetch_rancher_cert_expiry(rancher_url)
+                if not rancher_cert_expiry:
+                    rancher_cert_expiry = _extract_rancher_cert_expiry(detail)
+                if rancher_cert_expiry:
+                    detail = _append_rancher_cert_detail(detail, rancher_cert_expiry)
+                    severity, days_left = _evaluate_rancher_cert_severity(
+                        rancher_cert_expiry, now_utc
+                    )
+                    if severity == "critical":
+                        normalized_status = "critical"
+                        if days_left is not None and days_left < 0:
+                            note = f"Rancher 证书已过期（{rancher_cert_expiry}），请尽快更新/续期。"
+                        elif days_left is not None:
+                            note = f"Rancher 证书将在 {rancher_cert_expiry} 过期（剩余约 {days_left} 天），请尽快更新/续期。"
+                        else:
+                            note = f"Rancher 证书将在 {rancher_cert_expiry} 过期，请尽快更新/续期。"
+                        suggestion = _append_suggestion(suggestion, note)
+                    elif severity == "warning":
+                        if normalized_status == "passed":
+                            normalized_status = "warning"
         crud.add_run_result_by_item_id(
             ctx.db,
             run,
@@ -3568,6 +3884,11 @@ def trigger_inspection(
     if len(items) != len(set(run_in.item_ids)):
         raise HTTPException(
             status_code=400, detail="One or more inspection items do not exist."
+        )
+    items = crud.filter_items_for_cluster(cluster, items)
+    if not items:
+        raise HTTPException(
+            status_code=400, detail="No applicable inspection items for this cluster."
         )
 
     plan_items: List[Dict[str, Any]] = []
