@@ -2,5 +2,5 @@ apiVersion: v2
 name: inspection-center
 description: "Helm chart for the Kubernetes 巡检中心应用"
 type: application
-version: 0.5.2
-appVersion: "0.5.2"
+version: 0.5.3
+appVersion: "0.5.3"
