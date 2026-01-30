@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import shlex
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List, Tuple
+from typing import Callable, Dict, Iterable, List, Tuple, Optional
 
 from ..prometheus import PrometheusClient
 
@@ -76,6 +76,27 @@ def _truncate_output(value: str) -> str:
     if len(value) <= MAX_OUTPUT_LENGTH:
         return value
     return value[: MAX_OUTPUT_LENGTH - 3] + "..."
+
+
+def _extract_structured_output(
+    config: Dict[str, object], stdout: str
+) -> tuple[Optional[str], Optional[str]]:
+    if not config.get("structured_output"):
+        return None, None
+    if not stdout:
+        return None, None
+    normalized = stdout.replace("\r\n", "\n").replace("\r", "\n")
+    lines = normalized.split("\n")
+    marker_index = None
+    for idx, line in enumerate(lines):
+        if line.strip() in {"SUGGESTION:", "SUGGESTION"}:
+            marker_index = idx
+            break
+    if marker_index is None:
+        return None, None
+    detail = "\n".join(lines[:marker_index]).strip()
+    suggestion = "\n".join(lines[marker_index + 1 :]).strip()
+    return (detail or None, suggestion or None)
 
 
 def _execute_command_check(config: Dict[str, object], context: CheckContext) -> Tuple[str, str, str]:
@@ -187,6 +208,9 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
     stdout = result.stdout or ""
     stderr = result.stderr or ""
     exit_code = result.returncode
+    structured_detail, structured_suggestion = _extract_structured_output(
+        config, stdout
+    )
 
     if exit_code in success_codes:
         expected = config.get("expect_substrings") or []
@@ -209,6 +233,10 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
         else:
             detail = "命令执行成功（无输出）"
         suggestion = config.get("suggestion_on_success") or ""
+        if structured_detail is not None:
+            detail = _truncate_output(structured_detail)
+        if structured_suggestion:
+            suggestion = structured_suggestion
         if force_critical:
             return (
                 CHECK_STATUS_CRITICAL,
@@ -229,6 +257,10 @@ def _execute_command_check(config: Dict[str, object], context: CheckContext) -> 
         or config.get("suggestion_on_fail")
         or "Inspect command output for details."
     )
+    if structured_detail is not None:
+        detail = _truncate_output(structured_detail)
+    if structured_suggestion:
+        suggestion = structured_suggestion
     if exit_code in critical_codes:
         return CHECK_STATUS_CRITICAL, detail, config.get("suggestion_on_critical") or suggestion
     if exit_code in warn_codes:
@@ -586,6 +618,22 @@ def check_pods_status(context: CheckContext) -> Tuple[str, str, str]:
     return CHECK_STATUS_WARNING, detail, suggestion
 
 
+def check_pods_count(context: CheckContext) -> Tuple[str, str, str]:
+    ok, payload = _run_kubectl(
+        ["get", "pods", "--all-namespaces", "--no-headers"],
+        context,
+    )
+    if not ok:
+        return (
+            CHECK_STATUS_WARNING,
+            payload,
+            "确认 kubeconfig 具备跨命名空间查询 Pod 权限。",
+        )
+    lines = [line for line in payload.splitlines() if line.strip()]
+    count = len(lines)
+    return CHECK_STATUS_PASSED, f"Pod 总数: {count}", ""
+
+
 # def check_events_recent(context: CheckContext) -> Tuple[str, str, str]:
 #     ok, payload = _run_kubectl(
 #         [
@@ -613,8 +661,8 @@ def check_cluster_cpu_usage(context: CheckContext) -> Tuple[str, str, str]:
         return missing
     prom = context.prom
     expression = (
-        "sum(rate(node_cpu_seconds_total{mode!='idle'}[5m])) "
-        "/ sum(rate(node_cpu_seconds_total[5m])) * 100"
+        "sum(rate(node_cpu_seconds_total{mode!='idle'}[30m])) "
+        "/ sum(rate(node_cpu_seconds_total[30m])) * 100"
     )
     ok, results, message = prom.query(expression)
     if not ok:
@@ -633,7 +681,7 @@ def check_cluster_cpu_usage(context: CheckContext) -> Tuple[str, str, str]:
     elif value >= 75:
         status = CHECK_STATUS_WARNING
         suggestion = "CPU 使用率偏高，关注关键工作负载或扩容。"
-    detail = f"Cluster CPU usage ≈ {_format_percentage(value)}."
+    detail = f"集群 CPU 30分钟内使用率 ≈ {_format_percentage(value)}。"
     return status, detail, suggestion
 
 
@@ -643,8 +691,8 @@ def check_cluster_memory_usage(context: CheckContext) -> Tuple[str, str, str]:
         return missing
     prom = context.prom
     expression = (
-        "(sum(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) "
-        "/ sum(node_memory_MemTotal_bytes)) * 100"
+        "avg_over_time((sum(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) "
+        "/ sum(node_memory_MemTotal_bytes))[30m]) * 100"
     )
     ok, results, message = prom.query(expression)
     if not ok:
@@ -663,7 +711,7 @@ def check_cluster_memory_usage(context: CheckContext) -> Tuple[str, str, str]:
     elif value >= 80:
         status = CHECK_STATUS_WARNING
         suggestion = "内存使用率偏高，请关注关键节点和工作负载。"
-    detail = f"Cluster memory usage ≈ {_format_percentage(value)}."
+    detail = f"集群内存 30分钟内使用率 ≈ {_format_percentage(value)}。"
     return status, detail, suggestion
 
 
@@ -800,6 +848,7 @@ HANDLERS: Dict[str, Callable[[CheckContext], Tuple[str, str, str]]] = {
     "connection_probe": check_connection_probe,
     "nodes_status": check_nodes_status,
     "pods_status": check_pods_status,
+    "pods_count": check_pods_count,
     # "events_recent": check_events_recent,
     "cluster_cpu_usage": check_cluster_cpu_usage,
     "cluster_memory_usage": check_cluster_memory_usage,
@@ -830,13 +879,18 @@ DEFAULT_CHECKS = [
         "check_type": "pods_status",
     },
     {
+        "name": "Pod 总数",
+        "description": "Counts total pods via kubectl.",
+        "check_type": "pods_count",
+    },
+    {
         "name": "Cluster CPU Usage",
-        "description": "Aggregated CPU utilisation via Prometheus metrics.",
+        "description": "Prometheus 统计的 30 分钟内集群 CPU 使用率。",
         "check_type": "cluster_cpu_usage",
     },
     {
         "name": "Cluster Memory Usage",
-        "description": "Overall memory utilisation from Prometheus.",
+        "description": "Prometheus 统计的 30 分钟内集群内存使用率。",
         "check_type": "cluster_memory_usage",
     },
     {

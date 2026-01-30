@@ -1,4 +1,4 @@
-FROM 192.168.10.51/base/zs-inspect-base-image:v0.2
+﻿FROM 192.168.10.51/base/zs-inspect-base-image:v0.2
 WORKDIR /app
 
 
@@ -16,12 +16,18 @@ RUN if command -v apt-get >/dev/null 2>&1; then \
     fi
 
 
-# 安装依赖
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 拷贝源码
+
+# copy bundled fonts (optional)
+COPY fonts/ /opt/inspect-fonts/
+
 COPY . /app
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 ENV PYTHONUNBUFFERED=1
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Iterable, Optional
 
 from sqlalchemy.orm import Session
@@ -14,6 +15,11 @@ from .database import SessionLocal
 from .license import LicenseError, license_manager
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_METRICS_RETENTION_DAYS = int(os.getenv("METRICS_RETENTION_DAYS", "30"))
+DEFAULT_METRICS_CLEANUP_INTERVAL_HOURS = int(
+    os.getenv("METRICS_CLEANUP_INTERVAL_HOURS", "12")
+)
 
 DEFAULT_PROMETHEUS_VERSION = "3.2"
 MULTI_PROMETHEUS_VERSION_LABEL = "multi"
@@ -186,10 +192,17 @@ class InspectionScheduler:
         *,
         operator_label: str = DEFAULT_OPERATOR,
         multi_version_label: str = MULTI_PROMETHEUS_VERSION_LABEL,
+        metrics_retention_days: int = DEFAULT_METRICS_RETENTION_DAYS,
+        metrics_cleanup_interval_hours: int = DEFAULT_METRICS_CLEANUP_INTERVAL_HOURS,
     ) -> None:
         self._interval_seconds = max(5, int(interval_seconds))
         self._operator_label = operator_label
         self._multi_version_label = multi_version_label
+        self._metrics_retention_days = int(metrics_retention_days)
+        self._metrics_cleanup_interval_hours = max(
+            1, int(metrics_cleanup_interval_hours)
+        )
+        self._last_metrics_cleanup_at: Optional[datetime] = None
         self._stop_event = threading.Event()
         self._thread = threading.Thread(
             target=self._run_loop,
@@ -225,6 +238,7 @@ class InspectionScheduler:
             logger.info("Skip inspection schedules due to license: %s", exc)
             return
         with SessionLocal() as db:
+            self._cleanup_metrics(db, now)
             schedules = crud.list_inspection_schedules(db)
             for schedule in schedules:
                 if not schedule.is_enabled:
@@ -252,3 +266,20 @@ class InspectionScheduler:
                     schedule.updated_at = now
                     db.add(schedule)
                     db.commit()
+
+    def _cleanup_metrics(self, db: Session, now: datetime) -> None:
+        if self._metrics_retention_days <= 0:
+            return
+        if self._last_metrics_cleanup_at is not None:
+            elapsed = (now - self._last_metrics_cleanup_at).total_seconds()
+            if elapsed < self._metrics_cleanup_interval_hours * 3600:
+                return
+        cutoff = now - timedelta(days=self._metrics_retention_days)
+        deleted = crud.delete_metric_samples_before(db, cutoff=cutoff)
+        self._last_metrics_cleanup_at = now
+        if deleted:
+            logger.info(
+                "Cleaned %s cluster metric samples before %s",
+                deleted,
+                cutoff.isoformat(),
+            )

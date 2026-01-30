@@ -5,6 +5,7 @@ import base64
 import logging
 import os
 import shutil
+import shlex
 import subprocess
 import sys
 import time
@@ -42,7 +43,9 @@ else:
 DEFAULT_POLL_INTERVAL = 10
 DEFAULT_BATCH_SIZE = 1
 DEFAULT_TIMEOUT = 15
-DEFAULT_NODE_REPORT_INTERVAL = 86400
+DEFAULT_NODE_REPORT_INTERVAL = 60
+DEFAULT_METRICS_REPORT_INTERVAL = 60
+DEFAULT_STATUS_REPORT_INTERVAL = 60
 
 
 def _as_bool(value: Any) -> bool:
@@ -282,6 +285,8 @@ class AgentConfig:
     verify_ssl: bool = True
     request_timeout: int = DEFAULT_TIMEOUT
     node_report_interval: int = DEFAULT_NODE_REPORT_INTERVAL
+    metrics_report_interval: int = DEFAULT_METRICS_REPORT_INTERVAL
+    status_report_interval: int = DEFAULT_STATUS_REPORT_INTERVAL
 
     def load_token(self) -> Optional[str]:
         if self.token:
@@ -444,6 +449,20 @@ def load_config(config_path: Optional[str]) -> AgentConfig:
             ),
             DEFAULT_NODE_REPORT_INTERVAL,
         ),
+        metrics_report_interval=_as_int(
+            os.getenv(
+                'INSPECT_AGENT_METRICS_REPORT_INTERVAL',
+                agent_cfg.get('metrics_report_interval'),
+            ),
+            DEFAULT_METRICS_REPORT_INTERVAL,
+        ),
+        status_report_interval=_as_int(
+            os.getenv(
+                'INSPECT_AGENT_STATUS_REPORT_INTERVAL',
+                agent_cfg.get('status_report_interval'),
+            ),
+            DEFAULT_STATUS_REPORT_INTERVAL,
+        ),
     )
     return config
 class AgentClient:
@@ -508,6 +527,11 @@ class AgentClient:
         *,
         nodes_output: Optional[str] = None,
         nodes_retrieved_at: Optional[str] = None,
+        node_total: Optional[int] = None,
+        node_ready: Optional[int] = None,
+        pod_count: Optional[int] = None,
+        cluster_cpu_usage: Optional[float] = None,
+        cluster_memory_usage: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
         payload: Dict[str, Any] = {
             "reported_at": datetime.now(timezone.utc).isoformat()
@@ -516,6 +540,16 @@ class AgentClient:
             payload["nodes_output"] = nodes_output
         if nodes_retrieved_at:
             payload["nodes_retrieved_at"] = nodes_retrieved_at
+        if node_total is not None:
+            payload["node_total"] = node_total
+        if node_ready is not None:
+            payload["node_ready"] = node_ready
+        if pod_count is not None:
+            payload["pod_count"] = pod_count
+        if cluster_cpu_usage is not None:
+            payload["cluster_cpu_usage"] = cluster_cpu_usage
+        if cluster_memory_usage is not None:
+            payload["cluster_memory_usage"] = cluster_memory_usage
         resp = self.session.post(
             f"{self.config.server_base}/agent/heartbeat",
             json=payload,
@@ -556,8 +590,11 @@ class AgentClient:
         results: Iterable[Dict[str, Any]],
         *,
         partial: bool = False,
+        pod_count: Optional[int] = None,
     ) -> Dict[str, Any]:
-        payload = {"results": list(results), "partial": partial}
+        payload: Dict[str, Any] = {"results": list(results), "partial": partial}
+        if pod_count is not None:
+            payload["pod_count"] = pod_count
         resp = self.session.post(
             f"{self.config.server_base}/agent/runs/{run_id}/results",
             json=payload,
@@ -569,7 +606,8 @@ class AgentClient:
 
     def get_run_status(self, run_id: int) -> Optional[str]:
         resp = self.session.get(
-            f"{self.config.server_base}/inspection-runs/{run_id}",
+            f"{self.config.server_base}/agent/runs/{run_id}/status",
+            headers=self._headers(),
             timeout=self.config.request_timeout,
         )
         resp.raise_for_status()
@@ -587,6 +625,8 @@ class AgentRunner:
         self.prom_client: Optional[PrometheusClient] = None
         self._active_prom_url: Optional[str] = None
         self._last_nodes_report_at: Optional[datetime] = None
+        self._last_metrics_report_at: Optional[datetime] = None
+        self._last_status_report_at: Optional[datetime] = None
         self._last_nodes_report_request: Optional[str] = None
         self._apply_prometheus_url(config.prometheus_url)
 
@@ -636,6 +676,77 @@ class AgentRunner:
         elapsed = (now - self._last_nodes_report_at).total_seconds()
         return elapsed >= interval
 
+    def _should_report_metrics(self, now: datetime) -> bool:
+        interval = max(0, self.config.metrics_report_interval)
+        if interval == 0:
+            return False
+        if not self._last_metrics_report_at:
+            return True
+        elapsed = (now - self._last_metrics_report_at).total_seconds()
+        return elapsed >= interval
+
+    def _should_report_status(self, now: datetime) -> bool:
+        interval = max(0, self.config.status_report_interval)
+        if interval == 0:
+            return False
+        if not self._last_status_report_at:
+            return True
+        elapsed = (now - self._last_status_report_at).total_seconds()
+        return elapsed >= interval
+
+    def _collect_nodes_summary(self) -> Optional[Tuple[int, int]]:
+        kubeconfig_path = self.config.kubeconfig_path
+        if not kubeconfig_path or not kubeconfig_path.exists():
+            LOG.warning("Node summary skipped: kubeconfig missing.")
+            return None
+        kube_binary = os.getenv("KUBECTL_BINARY", "kubectl")
+        if shutil.which(kube_binary) is None:
+            LOG.warning("Node summary skipped: kubectl not found.")
+            return None
+        cmd = [
+            kube_binary,
+            "--kubeconfig",
+            str(kubeconfig_path),
+            "get",
+            "nodes",
+            "--no-headers",
+        ]
+        try:
+            completed = subprocess.run(
+                cmd,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=max(10, int(self.config.request_timeout)),
+            )
+        except subprocess.TimeoutExpired:
+            LOG.warning("Node summary command timed out.")
+            return None
+        except Exception as exc:
+            LOG.warning("Node summary command failed: %s", exc)
+            return None
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "").strip()
+            LOG.warning("Node summary command failed: %s", detail)
+            return None
+        output = (completed.stdout or "").strip()
+        if not output:
+            LOG.warning("Node summary command returned empty output.")
+            return None
+        total = 0
+        ready = 0
+        for line in output.splitlines():
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            status = parts[1].strip().lower()
+            total += 1
+            if status.startswith("ready"):
+                ready += 1
+        if total <= 0:
+            return None
+        return ready, total
+
     def _collect_nodes_output(self) -> Optional[str]:
         kubeconfig_path = self.config.kubeconfig_path
         if not kubeconfig_path or not kubeconfig_path.exists():
@@ -677,6 +788,70 @@ class AgentRunner:
             LOG.warning("kubectl 未返回节点信息。")
             return None
         return output
+
+    def _collect_pod_count(self) -> Optional[int]:
+        kubeconfig_path = self.config.kubeconfig_path
+        kube_binary = os.getenv("KUBECTL_BINARY", "kubectl")
+        if shutil.which(kube_binary) is None:
+            LOG.warning("Pod count skipped: kubectl not found.")
+            return None
+        kubeconfig_arg = ""
+        if kubeconfig_path and kubeconfig_path.exists():
+            kubeconfig_arg = f" --kubeconfig {shlex.quote(str(kubeconfig_path))}"
+        cmd = f"{kube_binary}{kubeconfig_arg} get pod -A --no-headers | wc -l"
+        try:
+            completed = subprocess.run(
+                cmd,
+                shell=True,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=max(10, int(self.config.request_timeout)),
+            )
+        except subprocess.TimeoutExpired:
+            LOG.warning("Pod count command timed out.")
+            return None
+        except Exception as exc:
+            LOG.warning("Pod count command failed: %s", exc)
+            return None
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "").strip()
+            LOG.warning("Pod count command failed: %s", detail)
+            return None
+        output = (completed.stdout or "").strip()
+        if not output:
+            LOG.warning("Pod count command returned empty output.")
+            return None
+        try:
+            return int(output.split()[0])
+        except (ValueError, IndexError):
+            LOG.warning("Pod count parse failed: %s", output)
+            return None
+
+    def _query_prometheus_value(self, expression: str) -> Optional[float]:
+        if not self.prom_client:
+            return None
+        ok, results, message = self.prom_client.query(expression)
+        if not ok:
+            LOG.warning("Prometheus query failed: %s", message)
+            return None
+        if not results:
+            LOG.warning("Prometheus returned empty result for query.")
+            return None
+        value = PrometheusClient.extract_value(results[0])
+        return value
+
+    def _collect_cluster_utilization(self) -> Tuple[Optional[float], Optional[float]]:
+        cpu_query = (
+            "(1 - (avg(irate({__name__=~\"node_cpu_seconds_total|windows_cpu_time_total\",mode=\"idle\"}[1m])))) * 100"
+        )
+        memory_query = (
+            "(1 - sum({__name__=~\"node_memory_MemAvailable_bytes|windows_os_physical_memory_free_bytes\"}) "
+            "/ sum({__name__=~\"node_memory_MemTotal_bytes|windows_cs_physical_memory_bytes\"})) * 100"
+        )
+        cpu_value = self._query_prometheus_value(cpu_query)
+        memory_value = self._query_prometheus_value(memory_query)
+        return cpu_value, memory_value
 
     def _refresh_nodes_on_demand(self, heartbeat_data: Optional[Dict[str, Any]]) -> None:
         if not heartbeat_data:
@@ -744,15 +919,41 @@ class AgentRunner:
         try:
             nodes_output = None
             nodes_retrieved_at = None
+            node_total = None
+            node_ready = None
+            pod_count = None
+            cpu_usage = None
+            memory_usage = None
             now = datetime.now(timezone.utc)
             if self._should_report_nodes(now):
                 self._last_nodes_report_at = now
                 nodes_output = self._collect_nodes_output()
                 if nodes_output:
                     nodes_retrieved_at = now.isoformat()
+            should_report_status = self._should_report_status(now)
+            if should_report_status:
+                self._last_status_report_at = now
+                summary = self._collect_nodes_summary()
+                if summary:
+                    node_ready, node_total = summary
+                pod_count = self._collect_pod_count()
+            if self._should_report_metrics(now):
+                self._last_metrics_report_at = now
+                if (not should_report_status) and self.config.status_report_interval == 0:
+                    summary = self._collect_nodes_summary()
+                    if summary:
+                        node_ready, node_total = summary
+                    if pod_count is None:
+                        pod_count = self._collect_pod_count()
+                cpu_usage, memory_usage = self._collect_cluster_utilization()
             heartbeat_data = self.client.send_heartbeat(
                 nodes_output=nodes_output,
                 nodes_retrieved_at=nodes_retrieved_at,
+                node_total=node_total,
+                node_ready=node_ready,
+                pod_count=pod_count,
+                cluster_cpu_usage=cpu_usage,
+                cluster_memory_usage=memory_usage,
             )
             if isinstance(heartbeat_data, dict):
                 server_prom = (heartbeat_data.get("prometheus_url") or "").strip()
@@ -803,7 +1004,8 @@ class AgentRunner:
                 LOG.info("Run %s aborted before completion.", run_id)
                 continue
             try:
-                self.client.submit_results(run_id, results)
+                pod_count = self._collect_pod_count()
+                self.client.submit_results(run_id, results, pod_count=pod_count)
                 LOG.info("巡检 %s 已回传结果。", run_id)
             except Exception as exc:
                 LOG.error("上报巡检 %s 结果失败：%s", run_id, exc)

@@ -119,6 +119,34 @@ class ClusterNodesRefreshOut(BaseModel):
     requested_at: datetime
 
 
+class OverviewSummaryOut(BaseModel):
+    cluster_total: int
+    cluster_online: int
+    node_ready: Optional[int] = None
+    node_total: Optional[int] = None
+    pod_total: Optional[int] = None
+
+
+class OverviewMetricPointOut(BaseModel):
+    reported_at: datetime
+    cpu_usage: Optional[float] = None
+    memory_usage: Optional[float] = None
+
+
+class OverviewMetricsSeriesOut(BaseModel):
+    cluster_id: int
+    cluster_name: str
+    points: List[OverviewMetricPointOut] = Field(default_factory=list)
+
+
+class OverviewMetricsOut(BaseModel):
+    start: datetime
+    end: datetime
+    interval_seconds: int
+    interval_minutes: int
+    series: List[OverviewMetricsSeriesOut] = Field(default_factory=list)
+
+
 class ClusterUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=150)
     prometheus_url: Optional[str] = Field(
@@ -220,9 +248,11 @@ class InspectionRunOut(BaseModel):
     total_items: int
     processed_items: int
     progress: int
+    pod_count: Optional[int] = None
     created_at: datetime
     completed_at: Optional[datetime]
     prometheus_version: Optional[str] = None
+    prometheus_versions: Optional[List[str]] = None
     executor: str
     agent_status: Optional[str]
     agent_id: Optional[int]
@@ -279,6 +309,7 @@ class InspectionRunListOut(BaseModel):
     total_items: int
     processed_items: int
     progress: int
+    pod_count: Optional[int] = None
     created_at: datetime
     completed_at: Optional[datetime]
     prometheus_version: Optional[str] = None
@@ -415,6 +446,23 @@ class AgentHeartbeatIn(BaseModel):
     )
 
 
+    node_total: Optional[int] = Field(
+        None, ge=0, description="Agent 上报的节点总数"
+    )
+    node_ready: Optional[int] = Field(
+        None, ge=0, description="Agent 上报的 Ready 节点数"
+    )
+    pod_count: Optional[int] = Field(
+        None, ge=0, description="Agent 上报的 Pod 总数"
+    )
+    cluster_cpu_usage: Optional[float] = Field(
+        None, ge=0, description="集群 CPU 使用率（%）"
+    )
+    cluster_memory_usage: Optional[float] = Field(
+        None, ge=0, description="集群内存使用率（%）"
+    )
+
+
 class AgentRegisterOut(BaseModel):
     id: int
     name: str
@@ -447,6 +495,10 @@ class AgentRunResultItemIn(BaseModel):
 
 class AgentRunResultIn(BaseModel):
     results: List[AgentRunResultItemIn] = Field(..., min_length=1)
+    pod_count: Optional[int] = Field(
+        None,
+        description="本次巡检采集的 Pod 总数",
+    )
     partial: bool = Field(
         False,
         description="是否为增量上报；True 表示仅追加/更新已有结果，不会结束巡检",

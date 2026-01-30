@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Iterable
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, Boolean
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, Boolean, Float
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -116,6 +116,7 @@ class InspectionRun(Base):
     report_path = Column(String(255), nullable=True)
     total_items = Column(Integer, nullable=False, default=0)
     processed_items = Column(Integer, nullable=False, default=0)
+    pod_count = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     completed_at = Column(DateTime, nullable=True)
     plan_json = Column(Text, nullable=True)
@@ -285,6 +286,10 @@ class InspectionAgent(Base):
     nodes_output = Column(Text, nullable=True)
     nodes_output_at = Column(DateTime, nullable=True)
     nodes_report_requested_at = Column(DateTime, nullable=True)
+    node_total = Column(Integer, nullable=True)
+    node_ready = Column(Integer, nullable=True)
+    pod_count = Column(Integer, nullable=True)
+    metrics_reported_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
@@ -292,6 +297,27 @@ class InspectionAgent(Base):
 
     cluster = relationship("ClusterConfig", back_populates="agents", foreign_keys=[cluster_id])
     runs = relationship("InspectionRun", back_populates="agent")
+
+
+class ClusterMetricSample(Base):
+    __tablename__ = "cluster_metric_samples"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cluster_id = Column(
+        Integer,
+        ForeignKey("cluster_configs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    agent_id = Column(
+        Integer,
+        ForeignKey("inspection_agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    cpu_usage = Column(Float, nullable=True)
+    memory_usage = Column(Float, nullable=True)
+    reported_at = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class AuthRole(Base):

@@ -126,6 +126,27 @@ def _truncate(text: str, limit: int = 2000) -> str:
     return text[: limit - 3] + "..."
 
 
+def _extract_structured_output(
+    config: Dict[str, object], stdout: str
+) -> tuple[Optional[str], Optional[str]]:
+    if not config.get("structured_output"):
+        return None, None
+    if not stdout:
+        return None, None
+    normalized = stdout.replace("\r\n", "\n").replace("\r", "\n")
+    lines = normalized.split("\n")
+    marker_index = None
+    for idx, line in enumerate(lines):
+        if line.strip() in {"SUGGESTION:", "SUGGESTION"}:
+            marker_index = idx
+            break
+    if marker_index is None:
+        return None, None
+    detail = "\n".join(lines[:marker_index]).strip()
+    suggestion = "\n".join(lines[marker_index + 1 :]).strip()
+    return (detail or None, suggestion or None)
+
+
 def _execute_command_check(
     config: Dict[str, object], context: CheckContext
 ) -> Tuple[str, str, str]:
@@ -203,6 +224,9 @@ def _execute_command_check(
 
     stdout = result.stdout or ""
     stderr = result.stderr or ""
+    structured_detail, structured_suggestion = _extract_structured_output(
+        config, stdout
+    )
     if result.returncode in success_codes:
         expect = config.get("expect_substrings") or []
         if isinstance(expect, str):
@@ -220,6 +244,10 @@ def _execute_command_check(
             or str(config.get("success_message") or "命令执行成功。")
         )
         suggestion = config.get("suggestion_on_success") or ""
+        if structured_detail is not None:
+            detail = _truncate(structured_detail)
+        if structured_suggestion:
+            suggestion = structured_suggestion
         if force_critical:
             return (
                 CHECK_STATUS_CRITICAL,
@@ -245,6 +273,10 @@ def _execute_command_check(
         or config.get("suggestion_on_fail")
         or "检查命令输出。"
     )
+    if structured_detail is not None:
+        detail = _truncate(structured_detail)
+    if structured_suggestion:
+        suggestion = structured_suggestion
     if result.returncode in critical_codes:
         return (
             CHECK_STATUS_CRITICAL,

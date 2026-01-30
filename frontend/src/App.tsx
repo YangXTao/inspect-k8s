@@ -60,6 +60,8 @@ import {
   updateCluster,
   createInspectionSchedule as apiCreateInspectionSchedule,
   updateInspectionSchedule as apiUpdateInspectionSchedule,
+  getOverviewSummary,
+  getOverviewMetrics,
   uploadLicense,
   uploadLicenseText,
   updateInspectionItem as apiUpdateInspectionItem,
@@ -90,6 +92,8 @@ import type {
   AuthUser,
   AuthRole,
   AuditLog,
+  OverviewSummary,
+  OverviewMetrics,
 } from "./types";
 
 type NoticeType = "success" | "warning" | "error" | null;
@@ -617,6 +621,7 @@ const resolveAuditEntityLabel = (entityType?: string | null) => {
   mapping.set("auth_role", "角色");
   mapping.set("inspection_result", "巡检结果");
   mapping.set("audit_log", "审计日志");
+  mapping.set("report", "巡检记录");
   mapping.set("overview", "首页");
   mapping.set("setting", "设置");
   mapping.set("license", "License");
@@ -977,6 +982,1036 @@ const getInspectionResultStatusMeta = (status: InspectionResultStatus) =>
   inspectionResultStatusMeta[status as keyof typeof inspectionResultStatusMeta] ??
   inspectionResultStatusMeta.failed;
 
+const extractPercentageValue = (value?: string | null) => {
+  if (!value) {
+    return null;
+  }
+  const percentMatch = /(\d+(?:\.\d+)?)\s*%/.exec(value);
+  if (percentMatch) {
+    const parsed = Number(percentMatch[1]);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  const labeledMatch =
+    /(?:sample|value|avg|平均|样本|指标)\s*[:：]?\s*([0-9]+(?:\.\d+)?)/i.exec(
+      value
+    );
+  if (labeledMatch) {
+    const parsed = Number(labeledMatch[1]);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  const numberMatch = /([0-9]+(?:\.\d+)?)/.exec(value);
+  if (!numberMatch) {
+    return null;
+  }
+  const parsed = Number(numberMatch[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const normalize = (value: string) =>
+  value.toLowerCase().replace(/[\s._-]+/g, "");
+
+const findResultByKeywords = (
+  results: InspectionResult[],
+  keywords: string[]
+) => {
+  if (!results.length) {
+    return null;
+  }
+  const lowered = keywords.map((keyword) => keyword.toLowerCase());
+  const normalizedKeywords = keywords.map((keyword) => normalize(keyword));
+  return (
+    results.find((result) => {
+      const name = (result.item_name ?? "").toLowerCase();
+      const normalizedName = normalize(name);
+      const detail = (result.detail ?? "").toLowerCase();
+      const normalizedDetail = normalize(detail);
+      const suggestion = (result.suggestion ?? "").toLowerCase();
+      const normalizedSuggestion = normalize(suggestion);
+      return lowered.some((keyword, index) => {
+        if (name.includes(keyword)) {
+          return true;
+        }
+        return normalizedName.includes(normalizedKeywords[index]);
+      }) || lowered.some((keyword, index) => {
+        if (detail.includes(keyword) || suggestion.includes(keyword)) {
+          return true;
+        }
+        return (
+          normalizedDetail.includes(normalizedKeywords[index]) ||
+          normalizedSuggestion.includes(normalizedKeywords[index])
+        );
+      });
+    }) ?? null
+  );
+};
+
+const findResultByNameKeywords = (
+  results: InspectionResult[],
+  keywords: string[]
+) => {
+  if (!results.length) {
+    return null;
+  }
+  const lowered = keywords.map((keyword) => keyword.toLowerCase());
+  const normalizedKeywords = lowered.map((keyword) => normalize(keyword));
+  return (
+    results.find((result) => {
+      const name = (result.item_name ?? "").toLowerCase();
+      const normalizedName = normalize(name);
+      return lowered.some((keyword, index) => {
+        if (name.includes(keyword)) {
+          return true;
+        }
+        return normalizedName.includes(normalizedKeywords[index]);
+      });
+    }) ?? null
+  );
+};
+
+const OVERVIEW_INDICATORS = [
+  {
+    key: "connection",
+    label: "连接状态",
+    keywords: ["connection probe", "连接探测", "连接状态"],
+  },
+  {
+    key: "nodes",
+    label: "节点状态",
+    keywords: ["node health", "nodes status", "节点状态", "节点健康"],
+  },
+  {
+    key: "etcd",
+    label: "etcd 状态",
+    keywords: ["etcd", "etcd status", "etcd 健康", "etcd health"],
+  },
+  {
+    key: "apiserver",
+    label: "apiserver 状态",
+    keywords: ["apiserver", "api server", "api server availability"],
+  },
+  {
+    key: "controller-manager",
+    label: "controller-manager 状态",
+    keywords: [
+      "controller manager",
+      "controller-manager",
+      "controller manager status",
+      "检查controller manager",
+      "检查controller-manager",
+    ],
+  },
+  {
+    key: "scheduler",
+    label: "scheduler 状态",
+    keywords: ["scheduler", "scheduler status", "检查scheduler"],
+  },
+  {
+    key: "cpu",
+    label: "集群 CPU 使用率",
+    keywords: ["cluster cpu usage", "cluster cpu", "集群cpu"],
+  },
+  {
+    key: "memory",
+    label: "集群内存使用率",
+    keywords: ["cluster memory usage", "cluster memory", "集群内存"],
+  },
+  {
+    key: "cert-expiry",
+    label: "证书过期时间",
+    keywords: ["k8s 证书过期时间检查", "证书过期时间", "证书过期"],
+  },
+] as const;
+
+const OVERVIEW_INDICATOR_FALLBACK_RUNS = 3;
+
+interface DashboardOverviewProps {
+  clusters: ClusterConfig[];
+  runs: InspectionRunListItem[];
+  clusterDisplayIds: Record<number, string>;
+  runDisplayIds: Record<number, string>;
+  canViewHistory: boolean;
+  overviewSummary: OverviewSummary | null;
+  overviewMetrics: OverviewMetrics | null;
+  suppressDetailLoading?: boolean;
+}
+
+const DashboardOverviewView = ({
+  clusters,
+  runs,
+  clusterDisplayIds,
+  runDisplayIds,
+  canViewHistory,
+  overviewSummary,
+  overviewMetrics,
+  suppressDetailLoading,
+}: DashboardOverviewProps) => {
+  const chartWrapperRef = useRef<HTMLDivElement | null>(null);
+  const [hoverState, setHoverState] = useState(() => ({
+    cpu: {
+      index: null as number | null,
+      point: null as { x: number; y: number } | null,
+      lineX: null as number | null,
+      lineY: null as number | null,
+      align: "right" as "right" | "left",
+    },
+    memory: {
+      index: null as number | null,
+      point: null as { x: number; y: number } | null,
+      lineX: null as number | null,
+      lineY: null as number | null,
+      align: "right" as "right" | "left",
+    },
+  }));
+  const [runDetails, setRunDetails] = useState<Record<number, InspectionRun>>(
+    {}
+  );
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const latestRuns = useMemo(() => {
+    const map = new Map<number, InspectionRunListItem>();
+    runs.forEach((run) => {
+      const time = new Date(run.completed_at ?? run.created_at).getTime();
+      const existing = map.get(run.cluster_id);
+      if (!existing) {
+        map.set(run.cluster_id, run);
+        return;
+      }
+      const existingTime = new Date(
+        existing.completed_at ?? existing.created_at
+      ).getTime();
+      if (time >= existingTime) {
+        map.set(run.cluster_id, run);
+      }
+    });
+    return Array.from(map.values());
+  }, [runs]);
+
+  const latestRunByCluster = useMemo(() => {
+    const map = new Map<number, InspectionRunListItem>();
+    latestRuns.forEach((run) => map.set(run.cluster_id, run));
+    return map;
+  }, [latestRuns]);
+
+  const recentRunsByCluster = useMemo(() => {
+    const map = new Map<number, InspectionRunListItem[]>();
+    runs.forEach((run) => {
+      const list = map.get(run.cluster_id) ?? [];
+      list.push(run);
+      map.set(run.cluster_id, list);
+    });
+    map.forEach((list, clusterId) => {
+      list.sort((a, b) => {
+        const timeA = new Date(a.completed_at ?? a.created_at).getTime();
+        const timeB = new Date(b.completed_at ?? b.created_at).getTime();
+        return timeB - timeA;
+      });
+      map.set(
+        clusterId,
+        list.slice(0, OVERVIEW_INDICATOR_FALLBACK_RUNS)
+      );
+    });
+    return map;
+  }, [runs]);
+
+  useEffect(() => {
+    const targetIds: number[] = [];
+    recentRunsByCluster.forEach((list) => {
+      list.forEach((run) => {
+        if (!runDetails[run.id]) {
+          targetIds.push(run.id);
+        }
+      });
+    });
+    if (targetIds.length === 0) {
+      return;
+    }
+    let cancelled = false;
+    setDetailLoading(true);
+    void Promise.allSettled(
+      targetIds.map((runId) =>
+        getInspectionRun(runId).then((run) => ({ runId, run }))
+      )
+    )
+      .then((results) => {
+        if (cancelled) {
+          return;
+        }
+        setRunDetails((prev) => {
+          const next = { ...prev };
+          results.forEach((result) => {
+            if (result.status === "fulfilled") {
+              next[result.value.runId] = result.value.run;
+            }
+          });
+          return next;
+        });
+        const hasFailure = results.some((result) => result.status === "rejected");
+        if (!hasFailure) {
+          setDetailError(null);
+        } else {
+          setDetailError("部分巡检详情加载失败，请稍后刷新。");
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          const message =
+            err instanceof Error ? err.message : "加载巡检详情失败";
+          setDetailError(message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setDetailLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [recentRunsByCluster, runDetails]);
+
+  const clusterCountLabel = useMemo(() => {
+    if (!overviewSummary) {
+      return "-";
+    }
+    const total = overviewSummary.cluster_total;
+    const online = overviewSummary.cluster_online;
+    if (typeof total !== "number" || typeof online !== "number") {
+      return "-";
+    }
+    return `${online}/${total}`;
+  }, [overviewSummary]);
+
+  const nodeCountLabel = useMemo(() => {
+    if (!overviewSummary) {
+      return "-";
+    }
+    const total = overviewSummary.node_total;
+    const ready = overviewSummary.node_ready;
+    if (typeof total !== "number" || typeof ready !== "number") {
+      return "-";
+    }
+    const normalizedReady = Math.min(Math.max(ready, 0), total);
+    return `${normalizedReady}/${total}`;
+  }, [overviewSummary]);
+
+  const podCountLabel = useMemo(() => {
+    const total = overviewSummary?.pod_total;
+    return typeof total === "number" ? String(total) : "-";
+  }, [overviewSummary]);
+
+  const chartColors = useMemo(
+    () => [
+      "#2563eb",
+      "#22c55e",
+      "#f97316",
+      "#ec4899",
+      "#8b5cf6",
+      "#0ea5e9",
+      "#10b981",
+      "#eab308",
+    ],
+    []
+  );
+  const [clusterColorMap, setClusterColorMap] = useState<
+    Record<number, string>
+  >({});
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      const raw = window.localStorage.getItem("cluster_chart_colors");
+      if (!raw) {
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        setClusterColorMap(parsed as Record<number, string>);
+      }
+    } catch {
+      // ignore malformed cache
+    }
+  }, []);
+  useEffect(() => {
+    if (!overviewMetrics) {
+      return;
+    }
+    setClusterColorMap((prev) => {
+      const next: Record<number, string> = { ...prev };
+      const existingIds = new Set(clusters.map((cluster) => cluster.id));
+      Object.keys(next).forEach((key) => {
+        const numericKey = Number(key);
+        if (!existingIds.has(numericKey)) {
+          delete next[numericKey];
+        }
+      });
+      const used = new Set(Object.values(next));
+      const assignColor = (clusterId: number) => {
+        if (next[clusterId]) {
+          return;
+        }
+        let color = chartColors.find((item) => !used.has(item));
+        if (!color) {
+          color = chartColors[clusterId % chartColors.length];
+        }
+        used.add(color);
+        next[clusterId] = color;
+      };
+      overviewMetrics.series.forEach((series) => {
+        assignColor(series.cluster_id);
+      });
+      const changed =
+        Object.keys(prev).length !== Object.keys(next).length ||
+        Object.keys(next).some((key) => prev[Number(key)] !== next[Number(key)]);
+      if (changed && typeof window !== "undefined") {
+        try {
+          window.localStorage.setItem(
+            "cluster_chart_colors",
+            JSON.stringify(next)
+          );
+        } catch {
+          // ignore write errors
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [overviewMetrics, clusters, chartColors]);
+
+  const intervalSeconds = useMemo(() => {
+    if (!overviewMetrics) {
+      return 0;
+    }
+    if (
+      typeof overviewMetrics.interval_seconds === "number" &&
+      Number.isFinite(overviewMetrics.interval_seconds) &&
+      overviewMetrics.interval_seconds > 0
+    ) {
+      return overviewMetrics.interval_seconds;
+    }
+    const minutes = overviewMetrics.interval_minutes || 20;
+    return Math.max(1, minutes * 60);
+  }, [overviewMetrics]);
+
+  const timeline = useMemo(() => {
+    if (!overviewMetrics) {
+      return [];
+    }
+    const start = parseDateValue(overviewMetrics.start);
+    const end = parseDateValue(overviewMetrics.end);
+    if (!start || !end || intervalSeconds <= 0) {
+      return [];
+    }
+    const points: Date[] = [];
+    let cursor = new Date(start.getTime());
+    while (cursor <= end) {
+      points.push(new Date(cursor.getTime()));
+      cursor = new Date(cursor.getTime() + intervalSeconds * 1000);
+    }
+    return points;
+  }, [overviewMetrics, intervalSeconds]);
+
+  const formatChartTime = (date: Date) =>
+    date.toLocaleTimeString("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+  const formatTooltipTime = (date: Date) =>
+    date.toLocaleTimeString("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+
+  const buildLineSeries = useCallback(
+    (metric: "cpu" | "memory") => {
+      if (!overviewMetrics || timeline.length === 0) {
+        return [];
+      }
+      const interval = intervalSeconds || 1;
+      const toBucketKey = (value: Date) =>
+        Math.floor(value.getTime() / 1000 / interval) * interval;
+      const timelineKeys = timeline.map((date) => toBucketKey(date));
+      return overviewMetrics.series.map((series, index) => {
+        const valueMap = new Map<number, number>();
+        series.points.forEach((point) => {
+          const parsed = parseDateValue(point.reported_at);
+          if (!parsed) {
+            return;
+          }
+          const key = toBucketKey(parsed);
+          const value =
+            metric === "cpu" ? point.cpu_usage : point.memory_usage;
+          if (typeof value === "number" && Number.isFinite(value)) {
+            valueMap.set(key, value);
+          }
+        });
+        const values = timelineKeys.map((key) => {
+          const value = valueMap.get(key);
+          return typeof value === "number" ? value : null;
+        });
+        const color =
+          clusterColorMap[series.cluster_id] ??
+          chartColors[index % chartColors.length];
+        return {
+          name: series.cluster_name,
+          values,
+          color,
+        };
+      });
+    },
+    [overviewMetrics, timeline, intervalSeconds, chartColors, clusterColorMap]
+  );
+
+  const renderLineChart = (metric: "cpu" | "memory") => {
+    if (!overviewMetrics || timeline.length === 0) {
+      return <div className="placeholder">暂无数据</div>;
+    }
+    const series = buildLineSeries(metric);
+    if (series.length === 0) {
+      return <div className="placeholder">暂无数据</div>;
+    }
+    const currentHover = hoverState[metric];
+    const otherMetric: "cpu" | "memory" = metric === "cpu" ? "memory" : "cpu";
+    const width = 640;
+    const height = 240;
+    const padding = { left: 14, right: 12, top: 12, bottom: 34 };
+    const plotWidth = width - padding.left - padding.right;
+    const plotHeight = height - padding.top - padding.bottom;
+    const maxIndex = Math.max(timeline.length - 1, 1);
+    const hasAnyValue = series.some((entry) =>
+      entry.values.some(
+        (value) => typeof value === "number" && Number.isFinite(value)
+      )
+    );
+    const resolveNearestValueIndex = (
+      values: Array<number | null>,
+      target: number
+    ) => {
+      if (target < 0 || target > maxIndex) {
+        return null;
+      }
+      const current = values[target];
+      if (typeof current === "number" && Number.isFinite(current)) {
+        return target;
+      }
+      for (let offset = 1; offset <= maxIndex; offset += 1) {
+        const left = target - offset;
+        if (left >= 0) {
+          const value = values[left];
+          if (typeof value === "number" && Number.isFinite(value)) {
+            return left;
+          }
+        }
+        const right = target + offset;
+        if (right <= maxIndex) {
+          const value = values[right];
+          if (typeof value === "number" && Number.isFinite(value)) {
+            return right;
+          }
+        }
+      }
+      return null;
+    };
+    const labelIntervalSeconds = 10 * 60;
+    const labelBase =
+      timeline.length > 0
+        ? new Date(
+            Math.floor(
+              timeline[0].getTime() / 1000 / labelIntervalSeconds
+            ) *
+              labelIntervalSeconds *
+              1000
+          )
+        : null;
+    const toX = (index: number) =>
+      padding.left + (index / maxIndex) * plotWidth;
+    const toY = (value: number) =>
+      padding.top + (1 - value / 100) * plotHeight;
+    const buildPath = (values: Array<number | null>) => {
+      let path = "";
+      values.forEach((value, index) => {
+        if (value === null || Number.isNaN(value)) {
+          return;
+        }
+        const x = toX(index);
+        const y = toY(Math.min(Math.max(value, 0), 100));
+        path = path ? `${path} L ${x} ${y}` : `M ${x} ${y}`;
+      });
+      return path;
+    };
+    const handleMouseMove = (event: React.MouseEvent<SVGSVGElement>) => {
+      const svg = event.currentTarget;
+      const rect = svg.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const point = svg.createSVGPoint();
+      point.x = event.clientX;
+      point.y = event.clientY;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) {
+        return;
+      }
+      const svgPoint = point.matrixTransform(ctm.inverse());
+      const xSvg = svgPoint.x;
+      const ySvg = svgPoint.y;
+      if (xSvg < padding.left || xSvg > width - padding.right) {
+        setHoverState((prev) => ({
+          ...prev,
+          [metric]: { ...prev[metric], index: null, point: null, lineX: null, lineY: null },
+        }));
+        return;
+      }
+      if (!hasAnyValue) {
+        setHoverState((prev) => ({
+          ...prev,
+          [metric]: { ...prev[metric], index: null, point: null, lineX: null, lineY: null },
+        }));
+        return;
+      }
+      const rawIndex =
+        ((xSvg - padding.left) / plotWidth) * maxIndex;
+      const clamped = Math.min(Math.max(Math.round(rawIndex), 0), maxIndex);
+      const align = x > rect.width * 0.72 ? "left" : "right";
+      const tooltipX =
+        align === "left"
+          ? Math.max(0, Math.min(rect.width, x - 12))
+          : Math.max(0, Math.min(rect.width, x + 12));
+      const tooltipY = Math.max(0, Math.min(rect.height, y + 12));
+      const lineY = Math.min(
+        Math.max(ySvg, padding.top),
+        height - padding.bottom
+      );
+      const lineX = Math.min(
+        Math.max(xSvg, padding.left),
+        width - padding.right
+      );
+      setHoverState((prev) => ({
+        ...prev,
+        [metric]: {
+          index: clamped,
+          point: { x: tooltipX, y: tooltipY },
+          lineY,
+          lineX,
+          align,
+        },
+        [otherMetric]: { ...prev[otherMetric], index: null, point: null, lineX: null, lineY: null },
+      }));
+    };
+
+    const handleMouseLeave = () => {
+      setHoverState((prev) => ({
+        ...prev,
+        [metric]: { ...prev[metric], index: null, point: null, lineX: null, lineY: null },
+      }));
+    };
+
+    const tooltipLines =
+      currentHover.index === null
+        ? []
+        : series
+            .map((entry) => {
+              const nearestIndex = resolveNearestValueIndex(
+                entry.values,
+                currentHover.index ?? 0
+              );
+              if (nearestIndex === null) {
+                return null;
+              }
+              const value = entry.values[nearestIndex];
+              if (typeof value !== "number" || !Number.isFinite(value)) {
+                return null;
+              }
+              return {
+                name: entry.name,
+                value: `${value.toFixed(2)}%`,
+                color: entry.color,
+              };
+            })
+            .filter(Boolean) as Array<{
+            name: string;
+            value: string;
+            color: string;
+          }>;
+    const highlightPoints =
+      currentHover.index === null
+        ? []
+        : series
+            .map((entry) => {
+              const nearestIndex = resolveNearestValueIndex(
+                entry.values,
+                currentHover.index ?? 0
+              );
+              if (nearestIndex === null) {
+                return null;
+              }
+              const value = entry.values[nearestIndex];
+              if (typeof value !== "number" || !Number.isFinite(value)) {
+                return null;
+              }
+              return {
+                name: entry.name,
+                x: toX(nearestIndex),
+                y: toY(Math.min(Math.max(value, 0), 100)),
+                color: entry.color,
+              };
+            })
+            .filter(Boolean) as Array<{
+            name: string;
+            x: number;
+            y: number;
+            color: string;
+          }>;
+
+    return (
+      <div className="overview-line-chart" ref={chartWrapperRef}>
+        <div className="overview-line-canvas">
+          <svg
+            viewBox={`0 0 ${width} ${height}`}
+            className="overview-line-svg"
+            preserveAspectRatio="none"
+            onMouseMove={handleMouseMove}
+            onMouseLeave={handleMouseLeave}
+          >
+            {[0, 50, 100].map((tick) => {
+              const y = toY(tick);
+              return (
+                <g key={`y-${tick}`}>
+                  <line
+                    x1={padding.left}
+                    x2={width - padding.right}
+                    y1={y}
+                    y2={y}
+                    className="overview-line-grid"
+                  />
+                  <text
+                    x={2}
+                    y={y + 4}
+                    textAnchor="start"
+                    className="overview-line-axis-label"
+                  >
+                    {tick}%
+                  </text>
+                </g>
+              );
+            })}
+            {series.map((entry) => (
+              <path
+                key={entry.name}
+                d={buildPath(entry.values)}
+                className="overview-line-path"
+                stroke={entry.color}
+              />
+            ))}
+            {currentHover.lineX !== null && (
+              <line
+                x1={currentHover.lineX}
+                x2={currentHover.lineX}
+                y1={padding.top}
+                y2={height - padding.bottom}
+                className="overview-line-hover"
+              />
+            )}
+            {currentHover.lineY !== null && (
+              <line
+                x1={padding.left}
+                x2={width - padding.right}
+                y1={currentHover.lineY}
+                y2={currentHover.lineY}
+                className="overview-line-hover"
+              />
+            )}
+            {highlightPoints.map((point) => (
+              <circle
+                key={`highlight-${point.name}`}
+                cx={point.x}
+                cy={point.y}
+                r={4}
+                fill="#ffffff"
+                stroke={point.color}
+                strokeWidth={2}
+              />
+            ))}
+            {timeline.map((time, index) => {
+              if (!labelBase) {
+                return null;
+              }
+              const diffSeconds = Math.round(
+                (time.getTime() - labelBase.getTime()) / 1000
+              );
+              if (diffSeconds < 0 || diffSeconds % labelIntervalSeconds !== 0) {
+                return null;
+              }
+              const x = toX(index);
+              return (
+                <g key={`x-${index}`}>
+                  <line
+                    x1={x}
+                    x2={x}
+                    y1={padding.top}
+                    y2={height - padding.bottom}
+                    className="overview-line-grid overview-line-grid-x"
+                  />
+                  <text
+                    x={x}
+                    y={height - 10}
+                    textAnchor="middle"
+                    className="overview-line-axis-label"
+                  >
+                    {formatChartTime(time)}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+          {currentHover.index !== null && currentHover.point && (
+            <div
+              className={`overview-line-tooltip ${
+                currentHover.align === "left"
+                  ? "overview-line-tooltip-left"
+                  : "overview-line-tooltip-right"
+              }`}
+              style={{
+                left: currentHover.point.x,
+                top: currentHover.point.y,
+              }}
+            >
+              <div className="overview-line-tooltip-time">
+                {formatTooltipTime(timeline[currentHover.index])}
+              </div>
+              {tooltipLines.map((line) => (
+                <div key={line.name} className="overview-line-tooltip-row">
+                  <span
+                    className="overview-line-legend-dot"
+                    style={{ background: line.color }}
+                  />
+                  <span className="overview-line-tooltip-text">
+                    {line.name}：{line.value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="overview-line-legend">
+          {series.map((entry) => (
+            <div key={entry.name} className="overview-line-legend-item">
+              <span
+                className="overview-line-legend-dot"
+                style={{ background: entry.color }}
+              />
+              <span>{entry.name}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const indicatorCards = useMemo(() => {
+    return clusters.map((cluster) => {
+      const latestRun = latestRunByCluster.get(cluster.id) ?? null;
+      const findIndicatorResult = (
+        indicator: (typeof OVERVIEW_INDICATORS)[number]
+      ) => {
+        const candidates = recentRunsByCluster.get(cluster.id) ?? [];
+        for (const run of candidates) {
+          if (run.status !== "finished") {
+            continue;
+          }
+          const detail = runDetails[run.id];
+          if (!detail) {
+            continue;
+          }
+          const result = findResultByNameKeywords(
+            detail.results,
+            [...indicator.keywords]
+          );
+          if (result) {
+            return result;
+          }
+        }
+        return null;
+      };
+      const indicators = OVERVIEW_INDICATORS.map((indicator) => {
+        if (indicator.key === "connection") {
+          const connectionStatus = cluster.connection_status;
+          if (connectionStatus === "connected") {
+            return {
+              key: indicator.key,
+              label: indicator.label,
+              status: null,
+              statusLabel: "正常",
+              statusClass: "success",
+              statusIcon: "✓",
+            };
+          }
+          return {
+            key: indicator.key,
+            label: indicator.label,
+            status: null,
+            statusLabel: "异常",
+            statusClass: "danger",
+            statusIcon: "✕",
+          };
+        }
+        const result = findIndicatorResult(indicator);
+        const status = result?.status ?? null;
+        const isCertIndicator = indicator.key === "cert-expiry";
+        const isCriticalCert = status === "critical" || status === "failed";
+        const isPassed = status === "passed";
+        return {
+          key: indicator.key,
+          label: indicator.label,
+          status,
+          statusLabel: status
+            ? isCertIndicator
+              ? isCriticalCert
+                ? "异常"
+                : "正常"
+              : isPassed
+                ? "正常"
+                : "异常"
+            : "-",
+          statusClass: status
+            ? isCertIndicator
+              ? isCriticalCert
+                ? "danger"
+                : "success"
+              : isPassed
+                ? "success"
+                : "danger"
+            : "muted",
+          statusIcon: status
+            ? isCertIndicator
+              ? isCriticalCert
+                ? "✕"
+                : "✓"
+              : isPassed
+                ? "✓"
+                : "✕"
+            : "·",
+        };
+      });
+      const clusterSlug = getClusterDisplayId(
+        clusterDisplayIds,
+        cluster.id,
+        cluster
+      );
+      const runSlug =
+        latestRun && (runDisplayIds[latestRun.id] ?? `#${latestRun.id}`);
+      const reportPath =
+        latestRun && runSlug
+          ? `/clusters/${clusterSlug}/runs/${runSlug}`
+          : null;
+      return {
+        cluster,
+        latestRun,
+        indicators,
+        reportPath: canViewHistory ? reportPath : null,
+      };
+    });
+  }, [
+    clusters,
+    latestRunByCluster,
+    recentRunsByCluster,
+    runDetails,
+    clusterDisplayIds,
+    runDisplayIds,
+    canViewHistory,
+  ]);
+
+  return (
+    <div className="overview-dashboard">
+      <section className="overview-metrics">
+        <div className="overview-metric-card">
+          <div className="overview-metric-title">集群在线/总数</div>
+          <div className="overview-metric-value">{clusterCountLabel}</div>
+        </div>
+        <div className="overview-metric-card">
+          <div className="overview-metric-title">节点就绪/总数</div>
+          <div className="overview-metric-value">{nodeCountLabel}</div>
+        </div>
+        <div className="overview-metric-card">
+          <div className="overview-metric-title">POD总数</div>
+          <div className="overview-metric-value">{podCountLabel}</div>
+        </div>
+      </section>
+
+      {detailError && (
+        <div className="feedback warning overview-feedback">{detailError}</div>
+      )}
+      {detailLoading && false && (
+        <div className="feedback info overview-feedback">正在加载巡检详情...</div>
+      )}
+
+      <section className="overview-charts">
+        <div className="overview-chart-card">
+          <div className="overview-chart-title">集群 CPU 使用率</div>
+          {renderLineChart("cpu")}
+        </div>
+        <div className="overview-chart-card">
+          <div className="overview-chart-title">集群内存使用率</div>
+          {renderLineChart("memory")}
+        </div>
+      </section>
+
+      <section className="overview-indicators">
+        {indicatorCards.length === 0 ? (
+          <div className="placeholder">暂无集群巡检结果</div>
+        ) : (
+          <div className="overview-indicator-grid">
+            {indicatorCards.map((card) => (
+              <div key={card.cluster.id} className="overview-indicator-card">
+                <div className="overview-indicator-head">
+                  <div className="overview-indicator-title">
+                    {card.cluster.name}
+                  </div>
+                  <div className="overview-indicator-meta">
+                    最新巡检：
+                    {card.latestRun?.completed_at
+                      ? formatDate(card.latestRun.completed_at)
+                      : card.latestRun?.created_at
+                        ? formatDate(card.latestRun.created_at)
+                        : "暂无"}
+                  </div>
+                </div>
+                <ul className="overview-indicator-list">
+                  {card.indicators.map((item) => (
+                    <li key={item.key} className="overview-indicator-item">
+                      <span
+                        className={`overview-indicator-status ${item.statusClass}`}
+                      >
+                        {item.statusIcon}
+                      </span>
+                      <span className="overview-indicator-label">
+                        {item.label}
+                      </span>
+                      <span className="overview-indicator-value">
+                        {item.statusLabel}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {card.reportPath && (
+                  <Link
+                    to={card.reportPath}
+                    className="link-button"
+                    state={{ fromOverviewDetail: true }}
+                  >
+                    查看巡检详情
+                  </Link>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+};
+
 const assignClusterDisplayIds = (
   clusters: ClusterConfig[],
   current: Record<number, string>
@@ -1086,11 +2121,13 @@ const logWithTimestamp = (
 
 const TopNavigation = ({
   onOpenSettings,
+  showClusters,
   showAudit,
   showSchedule,
   showHistory,
 }: {
   onOpenSettings: () => void;
+  showClusters: boolean;
   showAudit: boolean;
   showSchedule: boolean;
   showHistory: boolean;
@@ -1124,9 +2161,29 @@ const TopNavigation = ({
             />
           </svg>
         </span>
-        <span className="top-navigation-title">Kubernetes 巡检中心</span>
+        <span className="top-navigation-title">首页概览</span>
       </Link>
       <nav className="top-navigation-links">
+        {showClusters && (
+          <NavLink
+            to="/clusters"
+            className={({ isActive }) =>
+              `top-navigation-link${isActive ? " active" : ""}`
+            }
+          >
+            <span className="top-navigation-link-inner">
+              <span className="top-navigation-link-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path
+                    d="M5.5 4.75h13a1.75 1.75 0 0 1 1.75 1.75v2.25A1.75 1.75 0 0 1 18.5 10.5h-13A1.75 1.75 0 0 1 3.75 8.75V6.5A1.75 1.75 0 0 1 5.5 4.75Zm0 9h13A1.75 1.75 0 0 1 20.25 15.5v2.25A1.75 1.75 0 0 1 18.5 19.5h-13A1.75 1.75 0 0 1 3.75 17.75V15.5A1.75 1.75 0 0 1 5.5 13.75Zm0-7.5a.25.25 0 0 0-.25.25v2.25c0 .14.11.25.25.25h13a.25.25 0 0 0 .25-.25V6.5a.25.25 0 0 0-.25-.25h-13Zm0 9a.25.25 0 0 0-.25.25v2.25c0 .14.11.25.25.25h13a.25.25 0 0 0 .25-.25V15.5a.25.25 0 0 0-.25-.25h-13Z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </span>
+              <span>集群列表</span>
+            </span>
+          </NavLink>
+        )}
         {showSchedule && (
           <NavLink
             to="/schedule"
@@ -1262,6 +2319,9 @@ interface AgentQuickCreateProps {
   onClearCommand: () => void;
 }
 
+const DEFAULT_AGENT_PROM_URL =
+  "http://rancher-monitoring-prometheus.cattle-monitoring-system:9090";
+
 const AgentQuickCreate = ({
   clusters,
   agents,
@@ -1346,11 +2406,13 @@ const AgentQuickCreate = ({
     }
     setFormError(null);
     try {
+      const resolvedPrometheusUrl =
+        trimmedPrometheusUrl || DEFAULT_AGENT_PROM_URL;
       await onCreate({
         name: normalizedName,
         backend_url: trimmedBackendUrl,
         description: description.trim() || undefined,
-        prometheus_url: trimmedPrometheusUrl || undefined,
+        prometheus_url: resolvedPrometheusUrl || undefined,
       });
       setName("");
       setBackendUrl("");
@@ -1787,14 +2849,9 @@ const OverviewView = ({
               alt="logo"
               className="branding-logo"
             />
-          ) : (
-            <div className="branding-fallback">
-              {appConfig.branding.logoText}
-            </div>
-          )}
+          ) : null}
           <div>
             <h1>Kubernetes 巡检中心</h1>
-            <p>通过 Agent 托管集群连接，Server 统一管理巡检项和结果。</p>
           </div>
         </div>
         <div className="header-actions">
@@ -7451,6 +8508,7 @@ interface UserSettingsPanelProps {
   submitting: boolean;
   notice: string | null;
   error: string | null;
+  license: LicenseCapabilities;
   canCreate: boolean;
   canUpdate: boolean;
   canDelete: boolean;
@@ -7480,6 +8538,7 @@ const UserSettingsPanel = ({
   submitting,
   notice,
   error,
+  license,
   canCreate,
   canUpdate,
   canDelete,
@@ -7495,6 +8554,9 @@ const UserSettingsPanel = ({
   const [formPassword, setFormPassword] = useState("");
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [localError, setLocalError] = useState<string | null>(null);
+  const readOnly = !license.valid;
+  const readOnlyMessage =
+    license.reason ?? "当前 License 未生效或未安装。";
 
   const sortedUsers = useMemo(
     () => users.slice().sort((a, b) => a.id - b.id),
@@ -7557,6 +8619,10 @@ const UserSettingsPanel = ({
     const trimmedUsername = formUsername.trim();
     const trimmedPassword = formPassword.trim();
     const editingAdmin = isAdminUser(editingUser);
+    if (readOnly) {
+      setLocalError(readOnlyMessage);
+      return;
+    }
     if (!trimmedUsername) {
       setLocalError("用户名不能为空");
       return;
@@ -7630,7 +8696,7 @@ const UserSettingsPanel = ({
               type="button"
               className="primary"
               onClick={openCreate}
-              disabled={loading || submitting}
+              disabled={loading || submitting || readOnly}
             >
               创建用户
             </button>
@@ -7639,6 +8705,9 @@ const UserSettingsPanel = ({
       </div>
       {notice && <div className="feedback success">{notice}</div>}
       {error && <div className="feedback error">{error}</div>}
+      {readOnly && (
+        <div className="feedback warning">{readOnlyMessage}</div>
+      )}
       <div className="user-role-summary">
         <div className="user-role-summary-title">系统角色</div>
         <div className="user-role-summary-list">
@@ -7697,7 +8766,7 @@ const UserSettingsPanel = ({
                           type="button"
                           className="link-button"
                           onClick={() => openEdit(user)}
-                          disabled={submitting}
+                          disabled={submitting || readOnly}
                         >
                           编辑
                         </button>
@@ -7707,7 +8776,7 @@ const UserSettingsPanel = ({
                           type="button"
                           className="link-button danger"
                           onClick={() => onDelete(user)}
-                          disabled={submitting || isAdminUser(user)}
+                          disabled={submitting || readOnly || isAdminUser(user)}
                         >
                           删除
                         </button>
@@ -7739,7 +8808,7 @@ const UserSettingsPanel = ({
                   value={formUsername}
                   onChange={(event) => setFormUsername(event.target.value)}
                   placeholder="例如：admin2"
-                  disabled={submitting || Boolean(editingUser)}
+                  disabled={submitting || readOnly || Boolean(editingUser)}
                 />
               </label>
               <label>
@@ -7749,7 +8818,7 @@ const UserSettingsPanel = ({
                   value={formDisplayName}
                   onChange={(event) => setFormDisplayName(event.target.value)}
                   placeholder="例如：运维管理员"
-                  disabled={submitting}
+                  disabled={submitting || readOnly}
                 />
               </label>
               <label>
@@ -7759,7 +8828,7 @@ const UserSettingsPanel = ({
                   value={formPassword}
                   onChange={(event) => setFormPassword(event.target.value)}
                   placeholder={editingUser ? "留空则不修改" : "至少 6 位"}
-                  disabled={submitting}
+                  disabled={submitting || readOnly}
                 />
               </label>
               <div className="user-role-block">
@@ -7787,6 +8856,7 @@ const UserSettingsPanel = ({
                         onChange={() => toggleRole(role.name)}
                         disabled={
                           submitting ||
+                          readOnly ||
                           (editingUser !== null && isAdminUser(editingUser))
                         }
                       />
@@ -7817,7 +8887,7 @@ const UserSettingsPanel = ({
                 <button
                   type="submit"
                   className="primary"
-                  disabled={submitting}
+                  disabled={submitting || readOnly}
                 >
                   {submitting ? "创建中..." : "创建"}
                 </button>
@@ -8076,6 +9146,9 @@ const RunDetailView = ({
   const [run, setRun] = useState<InspectionRun | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const showOverviewEntryLoading = Boolean(
+    (location.state as { fromOverviewDetail?: boolean } | null)?.fromOverviewDetail
+  );
   const [statusFilter, setStatusFilter] = useState<
     InspectionResultStatus | "all"
   >("all");
@@ -8298,6 +9371,31 @@ const RunDetailView = ({
     return filteredResults.slice(start, start + resultPageSize);
   }, [filteredResults, resultPage, resultPageSize]);
 
+  const totalItems =
+    run?.total_items ?? summaryRun?.total_items ?? items.length ?? 0;
+  const processedItems =
+    run?.processed_items ?? summaryRun?.processed_items ?? 0;
+  const progressValue =
+    run?.progress ?? summaryRun?.progress ??
+    (totalItems > 0 ? Math.round((processedItems / totalItems) * 100) : 0);
+  const prometheusVersionLabel = useMemo(() => {
+    const versions =
+      summaryRun?.prometheus_versions?.filter(
+        (value) => value && value.trim()
+      ) ?? [];
+    if (versions.length > 0) {
+      return versions.join("、");
+    }
+    return normalizePrometheusVersion(
+      summaryRun?.prometheus_version,
+      prometheusVersionOptions
+    );
+  }, [
+    summaryRun?.prometheus_version,
+    summaryRun?.prometheus_versions,
+    prometheusVersionOptions,
+  ]);
+
   if (resolvedRunId === null) {
     return (
       <div className="detail-empty">
@@ -8312,14 +9410,6 @@ const RunDetailView = ({
       </div>
     );
   }
-
-  const totalItems =
-    run?.total_items ?? summaryRun?.total_items ?? items.length ?? 0;
-  const processedItems =
-    run?.processed_items ?? summaryRun?.processed_items ?? 0;
-  const progressValue =
-    run?.progress ?? summaryRun?.progress ??
-    (totalItems > 0 ? Math.round((processedItems / totalItems) * 100) : 0);
   const statusLabel =
     summaryRun?.status_label ?? summaryRun?.status ?? "未知状态";
   const statusValue = summaryRun?.status ?? "queued";
@@ -8444,6 +9534,87 @@ const RunDetailView = ({
     const detail = (result.detail ?? "").trim();
     return detail || "未提供详情";
   };
+  const parseCertificateDetail = (detailText: string) => {
+    if (!detailText || detailText === "-") {
+      return null;
+    }
+    const lines = detailText
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length < 2) {
+      return null;
+    }
+    const headerLine = lines[0];
+    const hasNameColumn =
+      headerLine.includes("证书名称") && headerLine.includes("过期时间");
+    const hasTwoColumns =
+      headerLine.includes("组件") &&
+      (headerLine.includes("过期时间") || headerLine.includes("证书过期时间"));
+    if (!hasNameColumn && !hasTwoColumns) {
+      return null;
+    }
+    const rows: Array<string[]> = [];
+    for (const line of lines.slice(1)) {
+      const tokens = line.split(/\s+/).filter(Boolean);
+      if (tokens.length < 3) {
+        continue;
+      }
+      if (hasTwoColumns && !hasNameColumn) {
+        rows.push([tokens[0], tokens.slice(1).join(" ")]);
+        continue;
+      }
+      let dateTokens: string[] = [];
+      const lastToken = tokens[tokens.length - 1] ?? "";
+      if (tokens.length >= 5 && (lastToken === "GMT" || lastToken === "UTC")) {
+        dateTokens = tokens.slice(-5);
+      } else if (/\d{4}-\d{2}-\d{2}/.test(lastToken)) {
+        dateTokens = tokens.slice(-1);
+      } else {
+        dateTokens = tokens.slice(-3);
+      }
+      const nameTokens = tokens.slice(1, tokens.length - dateTokens.length);
+      if (!nameTokens.length) {
+        continue;
+      }
+      rows.push([tokens[0], nameTokens.join(" "), dateTokens.join(" ")]);
+    }
+    if (!rows.length) {
+      return null;
+    }
+    return {
+      headers: hasNameColumn ? ["组件", "证书名称", "过期时间"] : ["组件", "过期时间"],
+      rows,
+    };
+  };
+  const renderResultDetail = (detailText: string) => {
+    const parsed = parseCertificateDetail(detailText);
+    if (!parsed) {
+      return detailText;
+    }
+    return (
+      <table className="detail-cert-table">
+        <thead>
+          <tr>
+            {parsed.headers.map((header) => (
+              <th key={header}>{header}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {parsed.rows.map((row, index) => (
+            <tr key={`${row[0]}-${index}`}>
+              {row.map((cell, cellIndex) => (
+                <td key={`${row[0]}-${index}-${cellIndex}`}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  };
 
   const formatResultSuggestion = (result: InspectionResult) => {
     if (result.status === "passed") {
@@ -8550,7 +9721,9 @@ const RunDetailView = ({
       </div>
 
       {error && <div className="feedback error">{error}</div>}
-      {loading && <div className="feedback info">正在加载巡检详情...</div>}
+      {loading && showOverviewEntryLoading && (
+        <div className="feedback info">正在加载巡检详情...</div>
+      )}
 
       <section className="card run-detail-card">
         <div className="run-detail-grid">
@@ -8568,10 +9741,7 @@ const RunDetailView = ({
           </div>
           <div>
             <strong>Prometheus 版本：</strong>
-            {normalizePrometheusVersion(
-              summaryRun?.prometheus_version,
-              prometheusVersionOptions
-            )}
+            {prometheusVersionLabel}
           </div>
           <div>
             <strong>开始时间：</strong>
@@ -8665,6 +9835,7 @@ const RunDetailView = ({
                   const meta = getInspectionResultStatusMeta(result.status);
                   const detailText = formatResultDetail(result);
                   const suggestionText = formatResultSuggestion(result);
+                  const detailContent = renderResultDetail(detailText);
                   return (
                     <tr key={result.id}>
                       <td>{result.item_name}</td>
@@ -8679,7 +9850,7 @@ const RunDetailView = ({
                             detailText === "-" ? " empty" : ""
                           }`}
                         >
-                          {detailText}
+                          {detailContent}
                         </div>
                       </td>
                       <td>
@@ -9485,6 +10656,12 @@ const App = () => {
   const [runs, setRuns] = useState<InspectionRunListItem[]>([]);
   const [items, setItems] = useState<InspectionItem[]>([]);
   const [schedules, setSchedules] = useState<InspectionSchedule[]>([]);
+  const [overviewSummary, setOverviewSummary] = useState<OverviewSummary | null>(
+    null
+  );
+  const [overviewMetrics, setOverviewMetrics] = useState<OverviewMetrics | null>(
+    null
+  );
   const isAuthenticated = authUser !== null;
   const permissionSet = useMemo(
     () => new Set(authUser?.permissions ?? []),
@@ -9996,6 +11173,21 @@ const App = () => {
 
 const location = useLocation();
 const navigate = useNavigate();
+const previousPathRef = useRef(location.pathname);
+const [suppressOverviewDetailLoading, setSuppressOverviewDetailLoading] =
+  useState(false);
+useEffect(() => {
+  const previousPath = previousPathRef.current;
+  if (location.pathname === "/" && previousPath !== "/") {
+    setSuppressOverviewDetailLoading(true);
+  } else if (location.pathname !== "/") {
+    setSuppressOverviewDetailLoading(false);
+  }
+  previousPathRef.current = location.pathname;
+}, [location.pathname]);
+const effectiveSuppressDetailLoading =
+  suppressOverviewDetailLoading ||
+  (location.pathname === "/" && previousPathRef.current !== "/");
 const currentNoticeScope = useMemo(
   () => resolveNoticeScope(location.pathname),
   [location.pathname]
@@ -10068,6 +11260,9 @@ const loginRedirectState = useMemo(
     } else if (pathname.startsWith("/schedule")) {
       description = "查询定时巡检列表";
       entityType = "inspection_schedule";
+    } else if (pathname === "/clusters") {
+      description = "查询集群列表";
+      entityType = "cluster_config";
     } else if (pathname.startsWith("/setting")) {
       const segments = pathname.split("/").filter(Boolean);
       const tab = (segments[1] ?? "overview").toLowerCase();
@@ -10364,6 +11559,7 @@ const loginRedirectState = useMemo(
       setClusters([]);
       setClusterDisplayIds({});
       setClusterError(null);
+      setOverviewSummary(null);
       return null;
     }
     try {
@@ -10384,6 +11580,45 @@ const loginRedirectState = useMemo(
         err instanceof Error ? err.message : "获取集群信息失败";
       logWithTimestamp("error", "获取集群信息失败: %s", message);
       setClusterError(message);
+      return null;
+    }
+  }, [canViewClusterAgents]);
+
+  const refreshOverviewSummary = useCallback(async () => {
+    if (!canViewClusterAgents) {
+      setOverviewSummary(null);
+      return null;
+    }
+    try {
+      const data = await getOverviewSummary();
+      setOverviewSummary(data);
+      return data;
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "获取首页汇总失败";
+      logWithTimestamp("error", "获取首页汇总失败: %s", message);
+      setOverviewSummary(null);
+      return null;
+    }
+  }, [canViewClusterAgents]);
+
+  const refreshOverviewMetrics = useCallback(async () => {
+    if (!canViewClusterAgents) {
+      setOverviewMetrics(null);
+      return null;
+    }
+    try {
+      const data = await getOverviewMetrics({
+        minutes: 60,
+        interval_seconds: 60,
+      });
+      setOverviewMetrics(data);
+      return data;
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "获取首页趋势失败";
+      logWithTimestamp("error", "获取首页趋势失败: %s", message);
+      setOverviewMetrics(null);
       return null;
     }
   }, [canViewClusterAgents]);
@@ -10470,11 +11705,12 @@ const loginRedirectState = useMemo(
       const filtered = data.filter(
         (run) => run.operator !== CONNECTION_TEST_OPERATOR
       );
-      setRuns((previous) =>
-        areRunListsEqual(previous, filtered) ? previous ?? filtered : filtered
-      );
-      logWithTimestamp("info", "巡检历史获取成功,数量: %d", filtered.length);
-      return filtered;
+        setRuns((previous) =>
+          areRunListsEqual(previous, filtered) ? previous ?? filtered : filtered
+        );
+        void refreshOverviewSummary();
+        logWithTimestamp("info", "巡检历史获取成功,数量: %d", filtered.length);
+        return filtered;
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "获取巡检历史失败";
@@ -10482,7 +11718,13 @@ const loginRedirectState = useMemo(
       showClusterNotice(currentNoticeScope, message, "error");
       return null;
     }
-  }, [currentNoticeScope, showClusterNotice, canViewHistory, hasPermission]);
+  }, [
+    currentNoticeScope,
+    showClusterNotice,
+    canViewHistory,
+    hasPermission,
+    refreshOverviewSummary,
+  ]);
 
   const handleCreateAgent = useCallback(
     async (payload: {
@@ -10819,6 +12061,13 @@ const loginRedirectState = useMemo(
         setUsersError("无权限创建用户");
         return;
       }
+      if (!licenseCapabilities.valid) {
+        setUsersError(
+          licenseCapabilities.reason ?? "当前 License 未生效或未安装。"
+        );
+        setUsersNotice(null);
+        return;
+      }
       setUsersSubmitting(true);
       setUsersError(null);
       setUsersNotice(null);
@@ -10834,7 +12083,7 @@ const loginRedirectState = useMemo(
         setUsersSubmitting(false);
       }
     },
-    [canCreateUsers, refreshUsers]
+    [canCreateUsers, refreshUsers, licenseCapabilities]
   );
 
   const handleUpdateUser = useCallback(
@@ -10849,6 +12098,13 @@ const loginRedirectState = useMemo(
     ) => {
       if (!canUpdateUsers) {
         setUsersError("无权限修改用户");
+        return;
+      }
+      if (!licenseCapabilities.valid) {
+        setUsersError(
+          licenseCapabilities.reason ?? "当前 License 未生效或未安装。"
+        );
+        setUsersNotice(null);
         return;
       }
       setUsersSubmitting(true);
@@ -10866,13 +12122,20 @@ const loginRedirectState = useMemo(
         setUsersSubmitting(false);
       }
     },
-    [canUpdateUsers, refreshUsers]
+    [canUpdateUsers, refreshUsers, licenseCapabilities]
   );
 
   const handleDeleteUser = useCallback(
     (user: AuthUser) => {
       if (!canDeleteUsers) {
         setUsersError("无权限删除用户");
+        return;
+      }
+      if (!licenseCapabilities.valid) {
+        setUsersError(
+          licenseCapabilities.reason ?? "当前 License 未生效或未安装。"
+        );
+        setUsersNotice(null);
         return;
       }
       setConfirmState({
@@ -10900,7 +12163,7 @@ const loginRedirectState = useMemo(
         },
       });
     },
-    [canDeleteUsers, refreshUsers]
+    [canDeleteUsers, refreshUsers, licenseCapabilities]
   );
 
   const pendingClusterIds = useMemo(
@@ -10961,20 +12224,24 @@ const loginRedirectState = useMemo(
       return;
     }
     void refreshClusters();
-      void refreshRuns();
-      void refreshItems();
-      void refreshSchedules();
-      void refreshRoles();
-      void refreshUsers();
-    }, [
-      isAuthenticated,
-      refreshClusters,
-      refreshRuns,
-      refreshItems,
-      refreshSchedules,
-      refreshRoles,
-      refreshUsers,
-    ]);
+    void refreshRuns();
+    void refreshOverviewSummary();
+    void refreshOverviewMetrics();
+    void refreshItems();
+    void refreshSchedules();
+    void refreshRoles();
+    void refreshUsers();
+  }, [
+    isAuthenticated,
+    refreshClusters,
+    refreshRuns,
+    refreshOverviewSummary,
+    refreshOverviewMetrics,
+    refreshItems,
+    refreshSchedules,
+    refreshRoles,
+    refreshUsers,
+  ]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !isAuthenticated) {
@@ -10982,11 +12249,18 @@ const loginRedirectState = useMemo(
     }
     const timer = window.setInterval(() => {
       void refreshClusters();
+      void refreshOverviewSummary();
+      void refreshOverviewMetrics();
     }, CLUSTER_HEARTBEAT_REFRESH_INTERVAL);
     return () => {
       window.clearInterval(timer);
     };
-  }, [isAuthenticated, refreshClusters]);
+  }, [
+    isAuthenticated,
+    refreshClusters,
+    refreshOverviewSummary,
+    refreshOverviewMetrics,
+  ]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !isAuthenticated) {
@@ -11414,23 +12688,34 @@ const hasManualKubeconfig = useMemo(
             label: "同时删除关联巡检记录及报告文件",
           },
         ],
-        onConfirm: async (optionsMap) => {
-          try {
-            const deleteFiles = Boolean(optionsMap?.deleteLocalFiles);
-            for (const cluster of targets) {
-              logWithTimestamp("info", "删除集群: %s", cluster.id);
-              await apiDeleteCluster(cluster.id, { deleteFiles });
-            }
-            const targetIds = targets.map((cluster) => cluster.id);
-            const targetNames = new Set(targets.map((cluster) => cluster.name.trim()));
-            setClusters((prev) =>
-              prev.filter((cluster) => !targetIds.includes(cluster.id))
-            );
-            setClusterDisplayIds((prev) => {
-              let changed = false;
-              const next = { ...prev };
-              targetIds.forEach((clusterId) => {
-                if (clusterId in next) {
+          onConfirm: async (optionsMap) => {
+            try {
+              const deleteFiles = Boolean(optionsMap?.deleteLocalFiles);
+              for (const cluster of targets) {
+                logWithTimestamp("info", "删除集群: %s", cluster.id);
+                await apiDeleteCluster(cluster.id, { deleteFiles });
+              }
+              const targetIds = targets.map((cluster) => cluster.id);
+              const targetNames = new Set(targets.map((cluster) => cluster.name.trim()));
+              setClusters((prev) =>
+                prev.filter((cluster) => !targetIds.includes(cluster.id))
+              );
+              setOverviewMetrics((prev) => {
+                if (!prev) {
+                  return prev;
+                }
+                const nextSeries = prev.series.filter(
+                  (series) => !targetIds.includes(series.cluster_id)
+                );
+                return nextSeries.length === prev.series.length
+                  ? prev
+                  : { ...prev, series: nextSeries };
+              });
+              setClusterDisplayIds((prev) => {
+                let changed = false;
+                const next = { ...prev };
+                targetIds.forEach((clusterId) => {
+                  if (clusterId in next) {
                   delete next[clusterId];
                   changed = true;
                 }
@@ -11452,16 +12737,18 @@ const hasManualKubeconfig = useMemo(
                   return false;
                 }
                 return true;
-              })
-            );
-            await refreshClusters();
-            await refreshRuns();
-            await refreshAgents();
-            showClusterNotice("overview", `已删除 ${targets.length} 个集群`, "success");
-          } catch (err) {
-            const message =
-              err instanceof Error ? err.message : "删除集群失败";
-            logWithTimestamp("error", "批量删除集群失败: %s", message);
+                })
+              );
+              await refreshClusters();
+              await refreshRuns();
+              await refreshAgents();
+              await refreshOverviewSummary();
+              await refreshOverviewMetrics();
+              showClusterNotice("overview", `已删除 ${targets.length} 个集群`, "success");
+            } catch (err) {
+              const message =
+                err instanceof Error ? err.message : "删除集群失败";
+              logWithTimestamp("error", "批量删除集群失败: %s", message);
             showClusterNotice("overview", message, "error");
             throw err instanceof Error ? err : new Error(message);
           }
@@ -11473,7 +12760,10 @@ const hasManualKubeconfig = useMemo(
       clusters,
       refreshAgents,
       refreshClusters,
+      refreshOverviewMetrics,
+      refreshOverviewSummary,
       refreshRuns,
+      setOverviewMetrics,
       setAgents,
       setClusterDisplayIds,
       setClusters,
@@ -11515,6 +12805,17 @@ const hasManualKubeconfig = useMemo(
               await apiDeleteCluster(cluster.id, { deleteFiles });
               const clusterName = cluster.name.trim();
               setClusters((prev) => prev.filter((item) => item.id !== cluster.id));
+              setOverviewMetrics((prev) => {
+                if (!prev) {
+                  return prev;
+                }
+                const nextSeries = prev.series.filter(
+                  (series) => series.cluster_id !== cluster.id
+                );
+                return nextSeries.length === prev.series.length
+                  ? prev
+                  : { ...prev, series: nextSeries };
+              });
               setClusterDisplayIds((prev) => {
                 if (!(cluster.id in prev)) {
                   return prev;
@@ -11543,6 +12844,8 @@ const hasManualKubeconfig = useMemo(
               await refreshClusters();
               await refreshRuns();
               await refreshAgents();
+              await refreshOverviewSummary();
+              await refreshOverviewMetrics();
               const successScope = location.pathname.includes("/clusters/")
                 ? "overview"
                 : currentNoticeScope;
@@ -11564,10 +12867,13 @@ const hasManualKubeconfig = useMemo(
     [
       refreshAgents,
       refreshClusters,
+      refreshOverviewMetrics,
+      refreshOverviewSummary,
       refreshRuns,
       location.pathname,
       navigate,
       currentNoticeScope,
+      setOverviewMetrics,
       setAgents,
       setClusterDisplayIds,
       setClusters,
@@ -12452,16 +13758,15 @@ const hasManualKubeconfig = useMemo(
       isEnabled: boolean;
     }) => {
       if (payload.id ? !canUpdateSchedule : !canCreateSchedule) {
-        setScheduleError("当前账号无定时巡检管理权限。");
+        const message = "当前账号无定时巡检管理权限。";
         setScheduleNotice(null);
-        return;
+        throw new Error(message);
       }
       if (!licenseCapabilities.canRunInspections) {
-        setScheduleError(
-          licenseCapabilities.reason ?? "当前 License 不支持定时巡检。"
-        );
+        const message =
+          licenseCapabilities.reason ?? "当前 License 不支持定时巡检。";
         setScheduleNotice(null);
-        return;
+        throw new Error(message);
       }
       const trimmedName = payload.name?.trim() ?? "";
       setScheduleSubmitting(true);
@@ -12494,7 +13799,6 @@ const hasManualKubeconfig = useMemo(
         const message =
           err instanceof Error ? err.message : "保存定时巡检失败";
         logWithTimestamp("error", "保存定时巡检失败: %s", message);
-        setScheduleError(message);
         throw err instanceof Error ? err : new Error(message);
       } finally {
         setScheduleSubmitting(false);
@@ -12723,6 +14027,7 @@ const hasManualKubeconfig = useMemo(
               submitting={usersSubmitting}
               notice={usersNotice}
               error={usersError}
+              license={licenseCapabilities}
               canCreate={canCreateUsers}
               canUpdate={canUpdateUsers}
               canDelete={canDeleteUsers}
@@ -12970,7 +14275,7 @@ const hasManualKubeconfig = useMemo(
     setClusterEditError(null);
   };
 
-  const overviewRouteElement = (
+  const clusterListRouteElement = (
     <OverviewView
       clusters={clusters}
       clusterUploading={clusterUploading}
@@ -13003,6 +14308,19 @@ const hasManualKubeconfig = useMemo(
       generatedAgentCommand={generatedAgentCommand}
       onCreateAgent={handleCreateAgent}
       onClearAgentCommand={handleClearAgentCommand}
+    />
+  );
+
+  const overviewRouteElement = (
+    <DashboardOverviewView
+      clusters={clusters}
+      runs={runs}
+      clusterDisplayIds={clusterDisplayIds}
+      runDisplayIds={runDisplayIds}
+      canViewHistory={canViewHistory}
+      overviewSummary={overviewSummary}
+      overviewMetrics={overviewMetrics}
+      suppressDetailLoading={effectiveSuppressDetailLoading}
     />
   );
 
@@ -13047,11 +14365,12 @@ const hasManualKubeconfig = useMemo(
   return (
     <>
       <Helmet>
-        <title>K8s Inspection Center</title>
+        <title>Kubernetes 巡检中心</title>
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
       </Helmet>
       <TopNavigation
         onOpenSettings={handleOpenSettings}
+        showClusters={canViewClusterAgents}
         showAudit={canViewAudit}
         showSchedule={canViewSchedule}
         showHistory={canViewHistory}
@@ -13068,6 +14387,16 @@ const hasManualKubeconfig = useMemo(
       <main className="app-shell">
         <Routes location={routesLocation}>
           <Route path="/" element={overviewRouteElement} />
+          <Route
+            path="/clusters"
+            element={
+              canViewClusterAgents ? (
+                clusterListRouteElement
+              ) : (
+                <NoPermissionPanel title="无权限访问集群列表" />
+              )
+            }
+          />
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/setting/*" element={overviewRouteElement} />
           <Route

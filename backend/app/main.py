@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import math
 import logging
 import os
 import re
@@ -75,6 +76,9 @@ AGENT_HEARTBEAT_TIMEOUT_MINUTES = 1
 AGENT_HEARTBEAT_TIMEOUT = timedelta(minutes=AGENT_HEARTBEAT_TIMEOUT_MINUTES)
 CONNECTION_TEST_OPERATOR = "__system_connection_test__"
 MAX_CLUSTER_NAME_LENGTH = 150
+DEFAULT_PROMETHEUS_URL = (
+    "http://rancher-monitoring-prometheus.cattle-monitoring-system:9090"
+)
 inspection_scheduler = InspectionScheduler(
     operator_label="定时巡检任务",
     multi_version_label="多版本",
@@ -261,7 +265,7 @@ def _attach_run_report(db: Session, run: models.InspectionRun) -> models.Inspect
     audit_override = crud.get_run_audit_override(run)
     crud.log_action(
         db,
-        action="update",
+        action="create",
         entity_type="inspection_run",
         entity_id=run.id,
         description=f"生成巡检报告：{run_label}",
@@ -351,6 +355,7 @@ def _trigger_auto_connection_test(
         cluster,
         connection_status="warning",
         connection_message=message,
+        log_audit=False,
     )
 
 
@@ -617,6 +622,9 @@ def _build_system_agent_install_script() -> str:
         "      batch_size: 1",
         "      verify_ssl: ${VERIFY_SSL}",
         "      request_timeout: 15",
+        "      node_report_interval: 60",
+        "      metrics_report_interval: 60",
+        "      status_report_interval: 60",
         "    cluster:",
         "      name: ${CLUSTER_NAME}",
         "    prometheus:",
@@ -719,6 +727,9 @@ def _build_system_agent_install_script() -> str:
         "      batch_size: 1",
         "      verify_ssl: ${VERIFY_SSL}",
         "      request_timeout: 15",
+        "      node_report_interval: 60",
+        "      metrics_report_interval: 60",
+        "      status_report_interval: 60",
         "    cluster:",
         "      name: ${CLUSTER_NAME}",
         "    prometheus:",
@@ -897,38 +908,6 @@ def _require_any_permission(
 def _seed_defaults(db: Session) -> None:
     if _DEFAULT_INSPECTIONS_SENTINEL.exists():
         return
-
-    has_any = db.query(models.InspectionItem.id).limit(1).first()
-    if has_any:
-        try:
-            _DEFAULT_INSPECTIONS_SENTINEL.parent.mkdir(parents=True, exist_ok=True)
-            _DEFAULT_INSPECTIONS_SENTINEL.write_text(
-                datetime.utcnow().isoformat(), encoding="utf-8"
-            )
-        except Exception:
-            logger.debug("无法写入默认巡检项标记文件，继续运行。", exc_info=True)
-        return
-
-    existing_names = {
-        name for (name,) in db.query(models.InspectionItem.name).all()
-    }
-    new_items = []
-    for payload in DEFAULT_CHECKS:
-        if payload["name"] in existing_names:
-            continue
-        data = payload.copy()
-        config = data.pop("config", None)
-        item = models.InspectionItem(**data)
-        if config is not None:
-            item.set_config(config if isinstance(config, dict) else None)
-        new_items.append(item)
-
-    if not new_items:
-        return
-    for item in new_items:
-        db.add(item)
-    db.commit()
-
     try:
         _DEFAULT_INSPECTIONS_SENTINEL.parent.mkdir(parents=True, exist_ok=True)
         _DEFAULT_INSPECTIONS_SENTINEL.write_text(
@@ -1149,7 +1128,12 @@ def _sync_cluster_prometheus_to_agents(
     )
     for agent in agents:
         if agent.prometheus_url != prom_url:
-            crud.update_inspection_agent(db, agent, prometheus_url=prom_url)
+            crud.update_inspection_agent(
+                db,
+                agent,
+                prometheus_url=prom_url,
+                log_audit=False,
+            )
 
 
 def _remove_file_safely(path: str | Path | None) -> None:
@@ -1199,6 +1183,30 @@ def _normalize_nodes_output(value: str | None) -> str | None:
     if len(normalized) > 20000:
         normalized = normalized[:20000]
     return normalized
+
+
+def _normalize_count(value: Optional[int]) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0:
+        return None
+    return parsed
+
+
+def _normalize_percentage(value: Optional[float]) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0:
+        return None
+    return parsed
 
 
 def _sanitize_optional_text(value: str | None) -> str | None:
@@ -1754,13 +1762,21 @@ def _present_cluster(
     ):
         agent = cluster.default_agent
         last_seen = agent.last_seen_at if agent and agent.is_enabled else None
-        if last_seen:
+        if agent and agent.is_enabled:
             deadline = datetime.utcnow() - AGENT_HEARTBEAT_TIMEOUT
-            if last_seen < deadline:
+            if last_seen and last_seen >= deadline:
+                result.connection_status = "connected"
+            elif last_seen:
                 result.connection_status = "failed"
                 health_message = (
                     f"Agent 超过 {AGENT_HEARTBEAT_TIMEOUT_MINUTES} 分钟未上报健康状态。"
                 )
+            else:
+                result.connection_status = "warning"
+                health_message = "尚未收到 Agent 心跳。"
+        else:
+            result.connection_status = "warning"
+            health_message = "未绑定可用 Agent。"
     if health_message:
         result.agent_health_message = health_message
     if (
@@ -2040,6 +2056,8 @@ def register_agent(
 
     normalized_description = (payload.description or "").strip() or None
     normalized_prometheus_url = _normalize_prometheus_url(payload.prometheus_url)
+    if not normalized_prometheus_url:
+        normalized_prometheus_url = DEFAULT_PROMETHEUS_URL
 
     cluster: Optional[models.ClusterConfig] = None
     if payload.cluster_id is not None:
@@ -2192,7 +2210,9 @@ def agent_bootstrap(
             )
         agent_prom_url = _normalize_prometheus_url(agent.prometheus_url)
         incoming_prom_url = _normalize_prometheus_url(payload.prometheus_url)
-        effective_prom_url = agent_prom_url or incoming_prom_url
+        effective_prom_url = (
+            agent_prom_url or incoming_prom_url or DEFAULT_PROMETHEUS_URL
+        )
 
         contexts_json: Optional[str] = None
         if cluster_payload.kubeconfig_b64:
@@ -2229,7 +2249,18 @@ def agent_bootstrap(
 
         now = datetime.utcnow()
         connection_status = "connected"
-        connection_message = "Agent 已完成注册，Server 端已托管 kubeconfig。"
+        existing_message = cluster.connection_message if cluster else None
+        existing_version, existing_nodes = schemas._extract_connection_meta(
+            existing_message
+        )
+        has_connection_meta = (
+            existing_version is not None or existing_nodes is not None
+        )
+        connection_message = (
+            existing_message
+            if has_connection_meta
+            else "Agent 已完成注册，Server 端已托管 kubeconfig。"
+        )
 
         agent_description = (agent.description or "").strip() or None
 
@@ -2260,7 +2291,12 @@ def agent_bootstrap(
                 update_kwargs["contexts_json"] = contexts_json
             if agent_description is not None:
                 update_kwargs["description"] = agent_description
-            cluster = crud.update_cluster(db, cluster, **update_kwargs)
+            cluster = crud.update_cluster(
+                db,
+                cluster,
+                log_audit=False,
+                **update_kwargs,
+            )
 
         cluster_prom_url = _normalize_prometheus_url(cluster.prometheus_url)
         final_prom_url = cluster_prom_url or effective_prom_url
@@ -2269,6 +2305,7 @@ def agent_bootstrap(
                 db,
                 cluster,
                 prometheus_url=final_prom_url,
+                log_audit=False,
             )
 
         agent = crud.update_inspection_agent(
@@ -2277,8 +2314,19 @@ def agent_bootstrap(
             cluster=cluster,
             is_enabled=True,
             prometheus_url=final_prom_url or agent.prometheus_url,
+            log_audit=False,
         )
         if cluster_was_pending and cluster is not None:
+            try:
+                _trigger_auto_connection_test(
+                    db,
+                    cluster,
+                    agent,
+                    message="已自动触发连接测试，等待结果更新。",
+                )
+            except Exception:
+                logger.warning("自动触发连接测试失败。", exc_info=True)
+        elif cluster is not None and not has_connection_meta:
             try:
                 _trigger_auto_connection_test(
                     db,
@@ -2305,13 +2353,34 @@ def agent_heartbeat(
 ):
     nodes_output = _normalize_nodes_output(payload.nodes_output)
     nodes_retrieved_at = payload.nodes_retrieved_at
+    node_total = _normalize_count(payload.node_total)
+    node_ready = _normalize_count(payload.node_ready)
+    if node_total is not None and node_ready is not None and node_ready > node_total:
+        node_ready = node_total
+    pod_count = _normalize_count(payload.pod_count)
+    cpu_usage = _normalize_percentage(payload.cluster_cpu_usage)
+    memory_usage = _normalize_percentage(payload.cluster_memory_usage)
+    reported_at = payload.reported_at or datetime.utcnow()
     updated = crud.record_agent_heartbeat(
         ctx.db,
         ctx.agent,
-        seen_at=payload.reported_at or datetime.utcnow(),
+        seen_at=reported_at,
         nodes_output=nodes_output,
         nodes_output_at=nodes_retrieved_at,
+        node_total=node_total,
+        node_ready=node_ready,
+        pod_count=pod_count,
     )
+    cluster_id = updated.cluster_id
+    if cluster_id and (cpu_usage is not None or memory_usage is not None):
+        crud.create_cluster_metric_sample(
+            ctx.db,
+            cluster_id=cluster_id,
+            agent_id=updated.id,
+            cpu_usage=cpu_usage,
+            memory_usage=memory_usage,
+            reported_at=reported_at,
+        )
     refreshed = crud.get_inspection_agent(ctx.db, updated.id) or updated
     return _serialize_agent(refreshed)
 
@@ -2385,7 +2454,20 @@ def agent_claim_run(
     updated = crud.get_inspection_run(ctx.db, run_id)
     if not updated:
         raise HTTPException(status_code=404, detail="巡检任务不存在。")
-    return _serialize_run(updated)
+    return _serialize_run(ctx.db, updated)
+
+
+@agent_router.get("/runs/{run_id}/status")
+def agent_get_run_status(
+    run_id: int,
+    ctx: AgentRequestContext = Depends(_agent_request_dependency),
+):
+    run = crud.get_inspection_run(ctx.db, run_id)
+    if not run or run.executor != "agent":
+        raise HTTPException(status_code=404, detail="巡检任务不存在或非 Agent 类型。")
+    if run.agent_id != ctx.agent.id:
+        raise HTTPException(status_code=403, detail="巡检任务不属于当前 Agent。")
+    return {"status": run.status}
 
 
 
@@ -2436,6 +2518,7 @@ def _apply_connection_test_result(
         .order_by(models.AuditLog.created_at.desc())
         .first()
     )
+    is_system_test = (run.operator or "").strip() == CONNECTION_TEST_OPERATOR
     crud.update_cluster(
         db,
         cluster,
@@ -2444,22 +2527,23 @@ def _apply_connection_test_result(
         last_checked_at=datetime.utcnow(),
         log_audit=False,
     )
-    crud.log_action(
-        db,
-        action="update",
-        entity_type="cluster_config",
-        entity_id=cluster.id,
-        description=(
-            f"测试连接成功：{display_id}"
-            if is_success
-            else f"测试连接失败：{display_id}"
-        ),
-        user_id=actor_entry.user_id if actor_entry else None,
-        username=actor_entry.username if actor_entry else None,
-        ip_address=actor_entry.ip_address if actor_entry else None,
-        user_agent=actor_entry.user_agent if actor_entry else None,
-        status="success" if is_success else "failed",
-    )
+    if not (is_system_test and actor_entry is None):
+        crud.log_action(
+            db,
+            action="update",
+            entity_type="cluster_config",
+            entity_id=cluster.id,
+            description=(
+                f"测试连接成功：{display_id}"
+                if is_success
+                else f"测试连接失败：{display_id}"
+            ),
+            user_id=actor_entry.user_id if actor_entry else None,
+            username=actor_entry.username if actor_entry else None,
+            ip_address=actor_entry.ip_address if actor_entry else None,
+            user_agent=actor_entry.user_agent if actor_entry else None,
+            status="success" if is_success else "failed",
+        )
 
 
 @agent_router.post("/runs/{run_id}/results", response_model=schemas.InspectionRunOut)
@@ -2476,7 +2560,7 @@ def agent_submit_results(
     crud.record_agent_heartbeat(ctx.db, ctx.agent)
     if run.status in {"paused", "cancelled"}:
         refreshed = crud.get_inspection_run(ctx.db, run.id) or run
-        return _serialize_run(refreshed)
+        return _serialize_run(ctx.db, refreshed)
     is_partial = bool(payload.partial)
     for result in payload.results:
         normalized_status = (result.status or "").strip().lower()
@@ -2495,6 +2579,15 @@ def agent_submit_results(
         )
     run = crud.get_inspection_run(ctx.db, run.id) or run
     processed_total = crud.count_run_results(ctx.db, run)
+    if not is_partial:
+        pod_count_raw = payload.pod_count
+        if pod_count_raw is not None:
+            try:
+                pod_count_value = int(pod_count_raw)
+            except (TypeError, ValueError):
+                pod_count_value = None
+            if pod_count_value is not None and pod_count_value >= 0:
+                run.pod_count = pod_count_value
 
     def _clamp_processed(value: int, total: int) -> int:
         if total > 0:
@@ -2509,7 +2602,7 @@ def agent_submit_results(
             processed_items=_clamp_processed(processed_total, display_total),
         )
         refreshed = crud.get_inspection_run(ctx.db, run.id) or run
-        return _serialize_run(refreshed)
+        return _serialize_run(ctx.db, refreshed)
 
     if run.total_items == 0 and processed_total > 0:
         run.total_items = processed_total
@@ -2542,7 +2635,7 @@ def agent_submit_results(
     if run.operator == CONNECTION_TEST_OPERATOR:
         _apply_connection_test_result(ctx.db, run, payload.results)
         refreshed = crud.get_inspection_run(ctx.db, run.id) or run
-        return _serialize_run(refreshed)
+        return _serialize_run(ctx.db, refreshed)
 
     try:
         run = _attach_run_report(ctx.db, run)
@@ -2552,7 +2645,7 @@ def agent_submit_results(
         ctx.db.add(run)
         ctx.db.commit()
         ctx.db.refresh(run)
-    return _serialize_run(run)
+    return _serialize_run(ctx.db, run)
 
 app.include_router(agent_router)
 
@@ -3197,11 +3290,36 @@ def _serialize_result(result: models.InspectionResult) -> schemas.InspectionResu
     )
 
 
-def _serialize_run(run: models.InspectionRun) -> schemas.InspectionRunOut:
+def _resolve_prometheus_versions(
+    db: Session, run: models.InspectionRun
+) -> Optional[List[str]]:
+    plan = _parse_run_plan(run)
+    if not plan:
+        return None
+    item_ids = [
+        int(entry.get("id"))
+        for entry in plan
+        if isinstance(entry, dict) and entry.get("id") is not None
+    ]
+    if not item_ids:
+        return None
+    items = crud.get_items_by_ids(db, item_ids)
+    versions = {
+        _normalize_prometheus_version(item.prometheus_version)
+        for item in items
+        if (item.check_type or "").strip() == "promql"
+    }
+    if not versions:
+        return None
+    return sorted(versions)
+
+
+def _serialize_run(db: Session, run: models.InspectionRun) -> schemas.InspectionRunOut:
     cluster = run.cluster
     if cluster is None:
         raise HTTPException(status_code=500, detail="Cluster information missing.")
     total_items, processed_items, progress = _calculate_run_progress(run)
+    prometheus_versions = _resolve_prometheus_versions(db, run)
     return schemas.InspectionRunOut(
         id=run.id,
         operator=run.operator,
@@ -3213,9 +3331,11 @@ def _serialize_run(run: models.InspectionRun) -> schemas.InspectionRunOut:
         total_items=total_items,
         processed_items=processed_items,
         progress=progress,
+        pod_count=run.pod_count,
         created_at=run.created_at,
         completed_at=run.completed_at,
         prometheus_version=run.prometheus_version,
+        prometheus_versions=prometheus_versions,
         executor=run.executor,
         agent_status=run.agent_status,
         agent_id=run.agent_id,
@@ -3239,12 +3359,193 @@ def _serialize_run_list(run: models.InspectionRun) -> schemas.InspectionRunListO
         total_items=total_items,
         processed_items=processed_items,
         progress=progress,
+        pod_count=run.pod_count,
         created_at=run.created_at,
         completed_at=run.completed_at,
         prometheus_version=run.prometheus_version,
         executor=run.executor,
         agent_status=run.agent_status,
         agent_id=run.agent_id,
+    )
+
+
+def _resolve_latest_runs_by_cluster(
+    db: Session, cluster_ids: List[int]
+) -> dict[int, models.InspectionRun]:
+    if not cluster_ids:
+        return {}
+    runs = (
+        db.query(models.InspectionRun)
+        .filter(models.InspectionRun.cluster_id.in_(cluster_ids))
+        .order_by(
+            func.coalesce(
+                models.InspectionRun.completed_at,
+                models.InspectionRun.created_at,
+            ).desc(),
+            models.InspectionRun.id.desc(),
+        )
+        .all()
+    )
+    latest: dict[int, models.InspectionRun] = {}
+    for run in runs:
+        if run.cluster_id not in latest:
+            latest[run.cluster_id] = run
+    return latest
+
+
+def _floor_time_to_interval_seconds(moment: datetime, interval_seconds: int) -> datetime:
+    seconds = max(1, int(interval_seconds))
+    epoch_seconds = int(moment.timestamp())
+    bucket_seconds = (epoch_seconds // seconds) * seconds
+    return datetime.utcfromtimestamp(bucket_seconds)
+
+
+@app.get("/overview/summary", response_model=schemas.OverviewSummaryOut)
+def get_overview_summary(
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "clusterAgent.read", "集群查看")
+    clusters = crud.list_clusters(db)
+    cluster_total = len(clusters)
+    cluster_online = 0
+    node_ready_total = 0
+    node_total_total = 0
+    pod_total = 0
+    matched_nodes = False
+    matched_pods = False
+    deadline = datetime.utcnow() - AGENT_HEARTBEAT_TIMEOUT
+    for cluster in clusters:
+        if cluster.execution_mode != "agent":
+            continue
+        agent = _resolve_active_agent(db, cluster)
+        if not agent or not agent.is_enabled:
+            continue
+        last_seen = agent.last_seen_at
+        if last_seen and last_seen >= deadline:
+            cluster_online += 1
+            if agent.node_total is not None and agent.node_ready is not None:
+                node_total_total += agent.node_total
+                node_ready_total += agent.node_ready
+                matched_nodes = True
+            if agent.pod_count is not None and agent.pod_count >= 0:
+                pod_total += agent.pod_count
+                matched_pods = True
+    return schemas.OverviewSummaryOut(
+        cluster_total=cluster_total,
+        cluster_online=cluster_online,
+        node_ready=node_ready_total if matched_nodes else None,
+        node_total=node_total_total if matched_nodes else None,
+        pod_total=pod_total if matched_pods else None,
+    )
+
+
+@app.get("/overview/metrics", response_model=schemas.OverviewMetricsOut)
+def get_overview_metrics(
+    minutes: int = Query(180, ge=20, le=24 * 60, description="时间窗口（分钟）"),
+    interval: int = Query(20, ge=5, le=120, description="采样间隔（分钟）"),
+    interval_seconds: Optional[int] = Query(
+        None, ge=5, le=3600, description="采样间隔（秒）"
+    ),
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "clusterAgent.read", "集群查看")
+    now = datetime.utcnow()
+    start = now - timedelta(minutes=minutes)
+    resolved_interval_seconds = (
+        max(1, int(interval_seconds))
+        if interval_seconds is not None
+        else max(1, int(interval)) * 60
+    )
+    interval_minutes = max(1, int(math.ceil(resolved_interval_seconds / 60)))
+    start_bucket = _floor_time_to_interval_seconds(start, resolved_interval_seconds)
+    end_bucket = _floor_time_to_interval_seconds(now, resolved_interval_seconds)
+
+    clusters = crud.list_clusters(db)
+    cluster_map = {cluster.id: cluster.name for cluster in clusters}
+    if not cluster_map:
+        return schemas.OverviewMetricsOut(
+            start=start_bucket,
+            end=end_bucket,
+            interval_seconds=resolved_interval_seconds,
+            interval_minutes=interval_minutes,
+            series=[],
+        )
+
+    samples = (
+        db.query(models.ClusterMetricSample)
+        .filter(
+            models.ClusterMetricSample.cluster_id.in_(list(cluster_map.keys())),
+            models.ClusterMetricSample.reported_at >= start_bucket,
+            models.ClusterMetricSample.reported_at <= now,
+        )
+        .order_by(
+            models.ClusterMetricSample.cluster_id.asc(),
+            models.ClusterMetricSample.reported_at.asc(),
+        )
+        .all()
+    )
+
+    buckets: dict[int, dict[datetime, dict[str, float]]] = {}
+    counts: dict[int, dict[datetime, dict[str, int]]] = {}
+
+    for sample in samples:
+        cluster_id = sample.cluster_id
+        bucket_time = _floor_time_to_interval_seconds(
+            sample.reported_at, resolved_interval_seconds
+        )
+        bucket_map = buckets.setdefault(cluster_id, {})
+        count_map = counts.setdefault(cluster_id, {})
+        bucket = bucket_map.setdefault(bucket_time, {"cpu_sum": 0.0, "mem_sum": 0.0})
+        count = count_map.setdefault(bucket_time, {"cpu_count": 0, "mem_count": 0})
+        if sample.cpu_usage is not None:
+            bucket["cpu_sum"] += float(sample.cpu_usage)
+            count["cpu_count"] += 1
+        if sample.memory_usage is not None:
+            bucket["mem_sum"] += float(sample.memory_usage)
+            count["mem_count"] += 1
+
+    series: list[schemas.OverviewMetricsSeriesOut] = []
+    for cluster in clusters:
+        bucket_map = buckets.get(cluster.id, {})
+        count_map = counts.get(cluster.id, {})
+        points: list[schemas.OverviewMetricPointOut] = []
+        for bucket_time in sorted(bucket_map.keys()):
+            sums = bucket_map[bucket_time]
+            cnt = count_map.get(bucket_time, {})
+            cpu_value = (
+                sums["cpu_sum"] / cnt["cpu_count"]
+                if cnt.get("cpu_count")
+                else None
+            )
+            mem_value = (
+                sums["mem_sum"] / cnt["mem_count"]
+                if cnt.get("mem_count")
+                else None
+            )
+            if cpu_value is None and mem_value is None:
+                continue
+            points.append(
+                schemas.OverviewMetricPointOut(
+                    reported_at=bucket_time,
+                    cpu_usage=cpu_value,
+                    memory_usage=mem_value,
+                )
+            )
+        series.append(
+            schemas.OverviewMetricsSeriesOut(
+                cluster_id=cluster.id,
+                cluster_name=cluster.name,
+                points=points,
+            )
+        )
+    return schemas.OverviewMetricsOut(
+        start=start_bucket,
+        end=end_bucket,
+        interval_seconds=resolved_interval_seconds,
+        interval_minutes=interval_minutes,
+        series=series,
     )
 
 
@@ -3302,12 +3603,14 @@ def trigger_inspection(
         executor=executor,
         agent_status=agent_status,
         agent_id=agent_id,
+        created_by_user_id=current_user.id,
+        created_by_username=current_user.username,
     )
 
     run = crud.get_inspection_run(db, run.id)
     if not run:
         raise HTTPException(status_code=500, detail="无法加载巡检任务。")
-    return _serialize_run(run)
+    return _serialize_run(db, run)
 
 
 @app.get("/inspection-runs", response_model=List[schemas.InspectionRunListOut])
@@ -3354,7 +3657,7 @@ def get_inspection_run(
         entity_id=run.id,
         description=f"查看巡检记录：{run_label}",
     )
-    return _serialize_run(run)
+    return _serialize_run(db, run)
 
 
 @app.post(
@@ -3372,14 +3675,14 @@ def pause_inspection_run(
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
     if run.status == "paused":
-        return _serialize_run(run)
+        return _serialize_run(db, run)
     if run.status != "running":
         raise HTTPException(status_code=400, detail="仅可暂停进行中的巡检。")
     crud.pause_inspection_run(db, run)
     refreshed = crud.get_inspection_run(db, run_id)
     if not refreshed:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
-    return _serialize_run(refreshed)
+    return _serialize_run(db, refreshed)
 
 
 @app.post(
@@ -3397,14 +3700,14 @@ def resume_inspection_run(
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
     if run.status == "running":
-        return _serialize_run(run)
+        return _serialize_run(db, run)
     if run.status != "paused":
         raise HTTPException(status_code=400, detail="仅可继续已暂停的巡检。")
     crud.resume_inspection_run(db, run)
     refreshed = crud.get_inspection_run(db, run_id)
     if not refreshed:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
-    return _serialize_run(refreshed)
+    return _serialize_run(db, refreshed)
 
 
 @app.post(
@@ -3427,7 +3730,7 @@ def cancel_inspection_run(
     refreshed = crud.get_inspection_run(db, run_id)
     if not refreshed:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
-    return _serialize_run(refreshed)
+    return _serialize_run(db, refreshed)
 
 
 @app.delete("/inspection-runs/{run_id}", status_code=204)

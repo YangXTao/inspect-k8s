@@ -78,6 +78,34 @@ export type ClusterConfig = {
   default_agent_description?: string | null;
 };
 
+export type OverviewSummary = {
+  cluster_total: number;
+  cluster_online: number;
+  node_ready?: number | null;
+  node_total?: number | null;
+  pod_total?: number | null;
+};
+
+export type OverviewMetricPoint = {
+  reported_at: string;
+  cpu_usage?: number | null;
+  memory_usage?: number | null;
+};
+
+export type OverviewMetricsSeries = {
+  cluster_id: number;
+  cluster_name: string;
+  points: OverviewMetricPoint[];
+};
+
+export type OverviewMetrics = {
+  start: string;
+  end: string;
+  interval_seconds?: number;
+  interval_minutes: number;
+  series: OverviewMetricsSeries[];
+};
+
 export type InspectionAgentStatus =
   | "queued"
   | "running"
@@ -116,9 +144,11 @@ export type InspectionRun = {
   total_items: number;
   processed_items: number;
   progress: number;
+  pod_count?: number | null;
   created_at: string;
   completed_at?: string;
   prometheus_version?: string | null;
+  prometheus_versions?: string[] | null;
   executor: ExecutionMode;
   agent_status?: InspectionAgentStatus | null;
   agent_status_label?: string | null;
@@ -139,6 +169,7 @@ export type InspectionRunListItem = {
   total_items: number;
   processed_items: number;
   progress: number;
+  pod_count?: number | null;
   created_at: string;
   completed_at?: string;
   prometheus_version?: string | null;

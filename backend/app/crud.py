@@ -107,9 +107,17 @@ def _resolve_run_audit_override(
     username = (getattr(run, "created_by_username", None) or "").strip()
     if not username:
         return {}
+    operator = (getattr(run, "operator", None) or "").strip()
+    if operator.endswith(SCHEDULED_AUDIT_SUFFIX):
+        if username.endswith(SCHEDULED_AUDIT_SUFFIX):
+            audit_username = username
+        else:
+            audit_username = f"{username}{SCHEDULED_AUDIT_SUFFIX}"
+    else:
+        audit_username = username
     return {
         "user_id": getattr(run, "created_by_user_id", None),
-        "username": f"{username}{SCHEDULED_AUDIT_SUFFIX}",
+        "username": audit_username,
     }
 
 
@@ -676,6 +684,7 @@ def update_inspection_agent(
     is_enabled: Optional[bool] = None,
     cluster: Any = UNSET,
     prometheus_url: Any = UNSET,
+    log_audit: bool = True,
 ) -> models.InspectionAgent:
     if name is not None:
         agent.name = name
@@ -691,13 +700,14 @@ def update_inspection_agent(
     db.add(agent)
     db.commit()
     db.refresh(agent)
-    log_action(
-        db,
-        action="update",
-        entity_type="inspection_agent",
-        entity_id=agent.id,
-        description=f"更新巡检 Agent '{agent.name}'",
-    )
+    if log_audit:
+        log_action(
+            db,
+            action="update",
+            entity_type="inspection_agent",
+            entity_id=agent.id,
+            description=f"更新巡检 Agent '{agent.name}'",
+        )
     return agent
 
 
@@ -727,17 +737,66 @@ def record_agent_heartbeat(
     seen_at: Optional[datetime] = None,
     nodes_output: Optional[str] = None,
     nodes_output_at: Optional[datetime] = None,
+    node_total: Optional[int] = None,
+    node_ready: Optional[int] = None,
+    pod_count: Optional[int] = None,
 ) -> models.InspectionAgent:
     agent.last_seen_at = seen_at or datetime.utcnow()
     if nodes_output is not None:
         agent.nodes_output = nodes_output
         agent.nodes_output_at = nodes_output_at or agent.last_seen_at
         agent.nodes_report_requested_at = None
+    if node_total is not None:
+        agent.node_total = node_total
+    if node_ready is not None:
+        agent.node_ready = node_ready
+    if pod_count is not None:
+        agent.pod_count = pod_count
+    if any(value is not None for value in (node_total, node_ready, pod_count)):
+        agent.metrics_reported_at = agent.last_seen_at
     agent.updated_at = datetime.utcnow()
     db.add(agent)
     db.commit()
     db.refresh(agent)
     return agent
+
+
+def create_cluster_metric_sample(
+    db: Session,
+    *,
+    cluster_id: int,
+    agent_id: Optional[int],
+    cpu_usage: Optional[float],
+    memory_usage: Optional[float],
+    reported_at: datetime,
+) -> models.ClusterMetricSample:
+    sample = models.ClusterMetricSample(
+        cluster_id=cluster_id,
+        agent_id=agent_id,
+        cpu_usage=cpu_usage,
+        memory_usage=memory_usage,
+        reported_at=reported_at,
+    )
+    db.add(sample)
+    db.commit()
+    db.refresh(sample)
+    return sample
+
+
+def delete_metric_samples_before(
+    db: Session,
+    *,
+    cutoff: datetime,
+) -> int:
+    if not cutoff:
+        return 0
+    deleted = (
+        db.query(models.ClusterMetricSample)
+        .filter(models.ClusterMetricSample.reported_at < cutoff)
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return int(deleted or 0)
 
 
 def request_agent_nodes_report(
