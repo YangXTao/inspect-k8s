@@ -13,7 +13,7 @@ import requests
 from dataclasses import dataclass
 import base64
 import binascii
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Any, Generator, Iterable
 from uuid import uuid4
@@ -225,6 +225,67 @@ def _append_rancher_cert_detail(
     elif not has_two_columns:
         line = f"rancher证书 {expiry}"
     return f"{detail.rstrip()}\n{line}"
+
+
+def _extract_rancher_cert_expiry(detail: Optional[str]) -> Optional[str]:
+    if not detail:
+        return None
+    lines = [line.strip() for line in str(detail).splitlines() if line.strip()]
+    for line in lines:
+        if "rancher证书" not in line:
+            continue
+        tokens = line.split()
+        if tokens and tokens[0].startswith("rancher证书"):
+            value = " ".join(tokens[1:]).strip()
+            return value or None
+    return None
+
+
+def _parse_rancher_cert_expiry_datetime(value: str) -> Optional[datetime]:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    formats = [
+        "%b %d %H:%M:%S %Y %Z",
+        "%b %d %H:%M:%S %Y",
+        "%Y-%m-%d %H:%M:%S %Z",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d",
+    ]
+    for fmt in formats:
+        try:
+            parsed = datetime.strptime(raw, fmt)
+        except ValueError:
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    return None
+
+
+def _evaluate_rancher_cert_severity(
+    expiry_text: str, now: Optional[datetime] = None
+) -> tuple[Optional[str], Optional[int]]:
+    parsed = _parse_rancher_cert_expiry_datetime(expiry_text)
+    if not parsed:
+        return None, None
+    current = now or datetime.now(timezone.utc)
+    delta = parsed - current
+    days_left = int(delta.total_seconds() // 86400)
+    if delta.total_seconds() <= 0 or days_left <= 30000:
+        return "critical", days_left
+    return "warning", days_left
+
+
+def _append_suggestion(base: Optional[str], extra: str) -> Optional[str]:
+    extra_text = extra.strip()
+    if not extra_text:
+        return base
+    if base and extra_text in base:
+        return base
+    if base and base.strip():
+        return f"{base.strip()}；{extra_text}"
+    return extra_text
 inspection_scheduler = InspectionScheduler(
     operator_label="定时巡检任务",
     multi_version_label="多版本",
@@ -2787,19 +2848,37 @@ def agent_submit_results(
         if item_ids:
             item_lookup = {item.id: item for item in crud.get_items_by_ids(ctx.db, item_ids)}
     rancher_cert_expiry: Optional[str] = None
+    now_utc = datetime.now(timezone.utc)
     for result in payload.results:
         normalized_status = (result.status or "").strip().lower()
         if normalized_status not in {"passed", "warning", "critical", "failed"}:
             normalized_status = "warning"
         detail = _sanitize_optional_text(result.detail)
+        suggestion = _sanitize_optional_text(result.suggestion)
         if is_rancher_local and rancher_url and result.item_id:
             item = item_lookup.get(result.item_id)
             if item and _is_k8s_cert_expiry_item(item.name or ""):
                 if rancher_cert_expiry is None:
                     rancher_cert_expiry = _fetch_rancher_cert_expiry(rancher_url)
+                if not rancher_cert_expiry:
+                    rancher_cert_expiry = _extract_rancher_cert_expiry(detail)
                 if rancher_cert_expiry:
                     detail = _append_rancher_cert_detail(detail, rancher_cert_expiry)
-        suggestion = _sanitize_optional_text(result.suggestion)
+                    severity, days_left = _evaluate_rancher_cert_severity(
+                        rancher_cert_expiry, now_utc
+                    )
+                    if severity == "critical":
+                        normalized_status = "critical"
+                        if days_left is not None and days_left < 0:
+                            note = f"Rancher 证书已过期（{rancher_cert_expiry}），请尽快更新/续期。"
+                        elif days_left is not None:
+                            note = f"Rancher 证书将在 {rancher_cert_expiry} 过期（剩余约 {days_left} 天），请尽快更新/续期。"
+                        else:
+                            note = f"Rancher 证书将在 {rancher_cert_expiry} 过期，请尽快更新/续期。"
+                        suggestion = _append_suggestion(suggestion, note)
+                    elif severity == "warning":
+                        if normalized_status == "passed":
+                            normalized_status = "warning"
         crud.add_run_result_by_item_id(
             ctx.db,
             run,
