@@ -9,6 +9,7 @@ import secrets
 import shutil
 import socket
 import ssl
+import warnings
 from dataclasses import dataclass
 import base64
 import binascii
@@ -19,6 +20,7 @@ from uuid import uuid4
 import yaml
 from urllib.parse import urlparse
 import requests
+from urllib3.exceptions import InsecureRequestWarning
 from fastapi import (
     APIRouter,
     Depends,
@@ -85,14 +87,18 @@ DEFAULT_PROMETHEUS_URL = (
 )
 
 
-def _split_rancher_api_key(api_key: str) -> tuple[str, str]:
+def _build_rancher_auth(
+    api_key: str,
+) -> tuple[Optional[tuple[str, str]], Dict[str, str]]:
     raw = (api_key or "").strip()
     if not raw:
-        return "", ""
+        return None, {}
+    if raw.lower().startswith("bearer "):
+        return None, {"Authorization": raw}
     if ":" in raw:
         user, password = raw.split(":", 1)
-        return user, password
-    return raw, ""
+        return (user, password), {}
+    return (raw, ""), {}
 
 
 def _fetch_rancher_version_from_cluster(
@@ -103,9 +109,16 @@ def _fetch_rancher_version_from_cluster(
     if not rancher_url or not rancher_api_key:
         return None
     url = rancher_url.rstrip("/") + "/v3/settings/server-version"
-    user, password = _split_rancher_api_key(rancher_api_key)
     try:
-        resp = requests.get(url, auth=(user, password), timeout=10, verify=False)
+        auth, headers = _build_rancher_auth(rancher_api_key)
+        warnings.filterwarnings("ignore", category=InsecureRequestWarning)
+        resp = requests.get(
+            url,
+            auth=auth,
+            headers=headers,
+            timeout=10,
+            verify=False,
+        )
         resp.raise_for_status()
         payload = resp.json()
         version = str(payload.get("value") or "").strip()

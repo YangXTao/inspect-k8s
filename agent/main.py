@@ -8,6 +8,7 @@ import shutil
 import shlex
 import socket
 import ssl
+import warnings
 import subprocess
 import sys
 import time
@@ -16,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from urllib.parse import urlparse
+from urllib3.exceptions import InsecureRequestWarning
 
 import requests
 from requests import exceptions as req_exc
@@ -105,23 +107,34 @@ def _extract_rancher_task_meta(task: Dict[str, Any]) -> tuple[bool, str, str]:
     return is_rancher_local, rancher_url, rancher_api_key
 
 
-def _split_rancher_api_key(api_key: str) -> tuple[str, str]:
-    if not api_key:
-        return "", ""
-    raw = api_key.strip()
+def _build_rancher_auth(
+    api_key: str,
+) -> tuple[Optional[tuple[str, str]], Dict[str, str]]:
+    raw = (api_key or "").strip()
+    if not raw:
+        return None, {}
+    if raw.lower().startswith("bearer "):
+        return None, {"Authorization": raw}
     if ":" in raw:
         user, password = raw.split(":", 1)
-        return user, password
-    return raw, ""
+        return (user, password), {}
+    return (raw, ""), {}
 
 
 def _fetch_rancher_version(rancher_url: str, rancher_api_key: str) -> Optional[str]:
     if not rancher_url or not rancher_api_key:
         return None
     url = rancher_url.rstrip("/") + "/v3/settings/server-version"
-    user, password = _split_rancher_api_key(rancher_api_key)
     try:
-        resp = requests.get(url, auth=(user, password), timeout=10, verify=False)
+        auth, headers = _build_rancher_auth(rancher_api_key)
+        warnings.filterwarnings("ignore", category=InsecureRequestWarning)
+        resp = requests.get(
+            url,
+            auth=auth,
+            headers=headers,
+            timeout=10,
+            verify=False,
+        )
         resp.raise_for_status()
         payload = resp.json()
         version = str(payload.get("value") or "").strip()

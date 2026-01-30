@@ -401,6 +401,9 @@ const resolveClusterRancherUrl = (cluster?: ClusterConfig | null) =>
 const resolveClusterRancherApiKey = (cluster?: ClusterConfig | null) =>
   cluster?.rancherApiKey ?? cluster?.rancher_api_key ?? "";
 
+const resolveClusterRancherVersion = (cluster?: ClusterConfig | null) =>
+  cluster?.rancherVersion ?? cluster?.rancher_version ?? "";
+
 const HISTORY_STATUS_OPTIONS: {
   value: InspectionRunStatus | "all";
   label: string;
@@ -9508,6 +9511,10 @@ const RunDetailView = ({
     summaryRun?.prometheus_versions,
     prometheusVersionOptions,
   ]);
+  const clusterIsRancherLocal = resolveClusterRancherLocal(cluster);
+  const rancherVersionLabel = clusterIsRancherLocal
+    ? (resolveClusterRancherVersion(cluster).trim() || "未知")
+    : null;
 
   if (resolvedRunId === null) {
     return (
@@ -9856,6 +9863,12 @@ const RunDetailView = ({
             <strong>Prometheus 版本：</strong>
             {prometheusVersionLabel}
           </div>
+          {rancherVersionLabel && (
+            <div>
+              <strong>Rancher 版本：</strong>
+              {rancherVersionLabel}
+            </div>
+          )}
           <div>
             <strong>开始时间：</strong>
             {summaryRun?.created_at ? formatDate(summaryRun.created_at) : "-"}
