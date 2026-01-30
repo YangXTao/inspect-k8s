@@ -1954,6 +1954,8 @@ async def update_cluster(
     db: Session = Depends(get_db),
     name: str | None = Form(None),
     prometheus_url: str | None = Form(None),
+    rancher_url: str | None = Form(None, alias="rancherUrl"),
+    rancher_api_key: str | None = Form(None, alias="rancherApiKey"),
     default_agent_id: str | None = Form(None),
     current_user: models.AuthUser = Depends(get_current_user),
     _license_guard: None = Depends(require_license_dependency("clusters")),
@@ -1982,6 +1984,24 @@ async def update_cluster(
                 detail="Prometheus 地址需以 http:// 或 https:// 开头。",
             )
         update_kwargs["prometheus_url"] = normalized_prom_url
+
+    if rancher_url is not None or rancher_api_key is not None:
+        if not getattr(cluster, "is_rancher_local", False):
+            raise HTTPException(
+                status_code=400,
+                detail="当前集群不是 Rancher Local，无法设置 Rancher 信息。",
+            )
+        trimmed_rancher_url = (rancher_url or "").strip() or None
+        if trimmed_rancher_url and not trimmed_rancher_url.startswith(("http://", "https://")):
+            raise HTTPException(
+                status_code=400,
+                detail="Rancher 地址需以 http:// 或 https:// 开头。",
+            )
+        trimmed_rancher_key = (rancher_api_key or "").strip() or None
+        if trimmed_rancher_key is None:
+            raise HTTPException(status_code=400, detail="Rancher API 密钥不能为空。")
+        update_kwargs["rancher_url"] = trimmed_rancher_url
+        update_kwargs["rancher_api_key"] = trimmed_rancher_key
 
     default_agent_obj = None
     default_agent_specified = False
@@ -2058,6 +2078,34 @@ def register_agent(
     normalized_prometheus_url = _normalize_prometheus_url(payload.prometheus_url)
     if not normalized_prometheus_url:
         normalized_prometheus_url = DEFAULT_PROMETHEUS_URL
+    normalized_rancher_url = (payload.rancher_url or "").strip() or None
+    normalized_rancher_api_key = (payload.rancher_api_key or "").strip() or None
+    wants_rancher_local = bool(payload.is_rancher_local)
+    rancher_payload_present = bool(
+        wants_rancher_local or normalized_rancher_url or normalized_rancher_api_key
+    )
+    if rancher_payload_present and not wants_rancher_local:
+        raise HTTPException(
+            status_code=400,
+            detail="请先勾选 Rancher Local 集群后再填写 Rancher 信息。",
+        )
+    if wants_rancher_local:
+        if not normalized_rancher_url:
+            raise HTTPException(status_code=400, detail="Rancher 地址不能为空。")
+        if not normalized_rancher_url.startswith(("http://", "https://")):
+            raise HTTPException(
+                status_code=400,
+                detail="Rancher 地址需以 http:// 或 https:// 开头。",
+            )
+        if not normalized_rancher_api_key:
+            raise HTTPException(status_code=400, detail="Rancher API 密钥不能为空。")
+    rancher_update_kwargs: dict[str, Any] = {}
+    if rancher_payload_present:
+        rancher_update_kwargs = {
+            "is_rancher_local": wants_rancher_local,
+            "rancher_url": normalized_rancher_url,
+            "rancher_api_key": normalized_rancher_api_key,
+        }
 
     cluster: Optional[models.ClusterConfig] = None
     if payload.cluster_id is not None:
@@ -2077,6 +2125,8 @@ def register_agent(
                 cluster,
                 prometheus_url=normalized_prometheus_url,
             )
+        if rancher_update_kwargs:
+            cluster = crud.update_cluster(db, cluster, **rancher_update_kwargs)
     else:
         cluster = crud.get_cluster_by_name(db, trimmed_name)
         if cluster:
@@ -2098,6 +2148,9 @@ def register_agent(
                     kubeconfig_path=placeholder_path,
                     contexts_json=None,
                     prometheus_url=normalized_prometheus_url,
+                    is_rancher_local=wants_rancher_local,
+                    rancher_url=normalized_rancher_url,
+                    rancher_api_key=normalized_rancher_api_key,
                     connection_status="pending",
                     connection_message="等待 Agent 注册",
                     last_checked_at=None,
@@ -2126,6 +2179,8 @@ def register_agent(
                     update_kwargs["description"] = normalized_description
                 if normalized_prometheus_url is not None:
                     update_kwargs["prometheus_url"] = normalized_prometheus_url
+                if rancher_update_kwargs:
+                    update_kwargs.update(rancher_update_kwargs)
                 cluster = crud.update_cluster(db, cluster, **update_kwargs)
         else:
             placeholder_path = _build_agent_managed_kubeconfig_ref()
@@ -2135,6 +2190,9 @@ def register_agent(
                 kubeconfig_path=placeholder_path,
                 contexts_json=None,
                 prometheus_url=normalized_prometheus_url,
+                is_rancher_local=wants_rancher_local,
+                rancher_url=normalized_rancher_url,
+                rancher_api_key=normalized_rancher_api_key,
                 connection_status="pending",
                 connection_message="等待 Agent 注册",
                 last_checked_at=None,
@@ -3568,6 +3626,11 @@ def trigger_inspection(
     if len(items) != len(set(run_in.item_ids)):
         raise HTTPException(
             status_code=400, detail="One or more inspection items do not exist."
+        )
+    items = crud.filter_items_for_cluster(cluster, items)
+    if not items:
+        raise HTTPException(
+            status_code=400, detail="No applicable inspection items for this cluster."
         )
 
     plan_items: List[Dict[str, Any]] = []

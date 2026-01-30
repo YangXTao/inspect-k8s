@@ -227,6 +227,42 @@ def _ensure_cluster_schema() -> None:
             f"ALTER TABLE cluster_configs ADD COLUMN execution_mode {column_type} NOT NULL DEFAULT 'agent'"
         )
 
+    if "is_rancher_local" not in existing_columns:
+        if dialect == "sqlite":
+            statements.append(
+                "ALTER TABLE cluster_configs "
+                "ADD COLUMN is_rancher_local INTEGER NOT NULL DEFAULT 0"
+            )
+        else:
+            statements.append(
+                "ALTER TABLE cluster_configs "
+                "ADD COLUMN is_rancher_local TINYINT(1) NOT NULL DEFAULT 0"
+            )
+
+    if "rancher_url" not in existing_columns:
+        column_type = "TEXT" if dialect == "sqlite" else "VARCHAR(255)"
+        statements.append(
+            f"ALTER TABLE cluster_configs ADD COLUMN rancher_url {column_type} NULL"
+        )
+
+    if "rancher_api_key" not in existing_columns:
+        column_type = "TEXT"
+        statements.append(
+            f"ALTER TABLE cluster_configs ADD COLUMN rancher_api_key {column_type} NULL"
+        )
+
+    if "rancher_version" not in existing_columns:
+        column_type = "TEXT" if dialect == "sqlite" else "VARCHAR(50)"
+        statements.append(
+            f"ALTER TABLE cluster_configs ADD COLUMN rancher_version {column_type} NULL"
+        )
+
+    if "rancher_cluster_count" not in existing_columns:
+        column_type = "INTEGER" if dialect == "sqlite" else "INT"
+        statements.append(
+            f"ALTER TABLE cluster_configs ADD COLUMN rancher_cluster_count {column_type} NULL"
+        )
+
     if "default_agent_id" not in existing_columns:
         column_type = "INTEGER" if dialect == "sqlite" else "INT"
         statements.append(

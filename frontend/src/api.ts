@@ -591,6 +591,9 @@ export function createAgent(payload: {
   cluster_id?: number | null;
   description?: string;
   prometheus_url?: string | null;
+  isRancherLocal?: boolean;
+  rancherUrl?: string | null;
+  rancherApiKey?: string | null;
 }): Promise<AgentRegisterResponse> {
   return request<AgentRegisterResponse>("/agents", {
     method: "POST",

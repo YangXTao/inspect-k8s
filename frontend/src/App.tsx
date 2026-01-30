@@ -387,6 +387,20 @@ const isLicenseRelatedMessage = (value?: string | null) => {
 const isPromqlType = (value?: string | null) =>
   (value ?? "").trim() === "promql";
 
+const isRancherLocalType = (value?: string | null) =>
+  (value ?? "").trim() === "rancher_local";
+
+const resolveClusterRancherLocal = (cluster?: ClusterConfig | null) =>
+  Boolean(
+    cluster && (cluster.isRancherLocal ?? cluster.is_rancher_local)
+  );
+
+const resolveClusterRancherUrl = (cluster?: ClusterConfig | null) =>
+  cluster?.rancherUrl ?? cluster?.rancher_url ?? "";
+
+const resolveClusterRancherApiKey = (cluster?: ClusterConfig | null) =>
+  cluster?.rancherApiKey ?? cluster?.rancher_api_key ?? "";
+
 const HISTORY_STATUS_OPTIONS: {
   value: InspectionRunStatus | "all";
   label: string;
@@ -2315,6 +2329,9 @@ interface AgentQuickCreateProps {
     backend_url: string;
     description?: string;
     prometheus_url?: string | null;
+    isRancherLocal?: boolean;
+    rancherUrl?: string | null;
+    rancherApiKey?: string | null;
   }) => Promise<void>;
   onClearCommand: () => void;
 }
@@ -2338,16 +2355,23 @@ const AgentQuickCreate = ({
   const [backendUrl, setBackendUrl] = useState("");
   const [description, setDescription] = useState("");
   const [prometheusUrl, setPrometheusUrl] = useState("");
+  const [isRancherLocal, setIsRancherLocal] = useState(false);
+  const [rancherUrl, setRancherUrl] = useState("");
+  const [rancherApiKey, setRancherApiKey] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
   const trimmedName = name.trim();
   const trimmedBackendUrl = backendUrl.trim();
   const trimmedPrometheusUrl = prometheusUrl.trim();
+  const trimmedRancherUrl = rancherUrl.trim();
+  const trimmedRancherApiKey = rancherApiKey.trim();
   const invalidBackendUrl =
     trimmedBackendUrl.length > 0 && !/^https?:\/\//i.test(trimmedBackendUrl);
   const invalidPrometheusUrl =
     trimmedPrometheusUrl.length > 0 &&
     !/^https?:\/\//i.test(trimmedPrometheusUrl);
+  const invalidRancherUrl =
+    trimmedRancherUrl.length > 0 && !/^https?:\/\//i.test(trimmedRancherUrl);
   const duplicateAgent = useMemo(
     () =>
       trimmedName.length > 0 &&
@@ -2396,6 +2420,20 @@ const AgentQuickCreate = ({
       setFormError("Prometheus 地址需以 http:// 或 https:// 开头");
       return;
     }
+    if (isRancherLocal) {
+      if (!trimmedRancherUrl) {
+        setFormError("Rancher 地址不能为空");
+        return;
+      }
+      if (invalidRancherUrl) {
+        setFormError("Rancher 地址需以 http:// 或 https:// 开头");
+        return;
+      }
+      if (!trimmedRancherApiKey) {
+        setFormError("Rancher API 密钥不能为空");
+        return;
+      }
+    }
     if (duplicateAgent) {
       setFormError("Agent 名称已存在，请更换其他名称");
       return;
@@ -2413,11 +2451,21 @@ const AgentQuickCreate = ({
         backend_url: trimmedBackendUrl,
         description: description.trim() || undefined,
         prometheus_url: resolvedPrometheusUrl || undefined,
+        ...(isRancherLocal
+          ? {
+              isRancherLocal: true,
+              rancherUrl: trimmedRancherUrl,
+              rancherApiKey: trimmedRancherApiKey,
+            }
+          : {}),
       });
       setName("");
       setBackendUrl("");
       setDescription("");
       setPrometheusUrl("");
+      setIsRancherLocal(false);
+      setRancherUrl("");
+      setRancherApiKey("");
     } catch (err) {
       const message = err instanceof Error ? err.message : "创建 Agent 失败";
       setFormError(message);
@@ -2464,6 +2512,33 @@ const AgentQuickCreate = ({
           placeholder="Prometheus 地址（可选）"
           disabled={submitting || !canCreateAgents}
         />
+        <label className="agent-inline-toggle">
+          <input
+            type="checkbox"
+            checked={isRancherLocal}
+            onChange={(event) => setIsRancherLocal(event.target.checked)}
+            disabled={submitting || !canCreateAgents}
+          />
+          <span>Rancher Local 集群</span>
+        </label>
+        {isRancherLocal && (
+          <>
+            <input
+              type="text"
+              value={rancherUrl}
+              onChange={(event) => setRancherUrl(event.target.value)}
+              placeholder="Rancher 地址（必填）"
+              disabled={submitting || !canCreateAgents}
+            />
+            <input
+              type="password"
+              value={rancherApiKey}
+              onChange={(event) => setRancherApiKey(event.target.value)}
+              placeholder="Rancher API 密钥（必填）"
+              disabled={submitting || !canCreateAgents}
+            />
+          </>
+        )}
         <button
           type="submit"
           className="secondary"
@@ -2526,6 +2601,9 @@ interface OverviewProps {
     backend_url: string;
     description?: string;
     prometheus_url?: string | null;
+    isRancherLocal?: boolean;
+    rancherUrl?: string | null;
+    rancherApiKey?: string | null;
   }) => Promise<void>;
   onClearAgentCommand: () => void;
 }
@@ -4364,6 +4442,7 @@ const ClusterDetailView = ({
     prometheusVersion,
     prometheusVersionOptions
   );
+  const clusterIsRancherLocal = resolveClusterRancherLocal(cluster);
   const matchesInspectionKeyword = useCallback(
     (item: InspectionItem) => {
       if (!inspectionKeyword) {
@@ -4389,18 +4468,33 @@ const ClusterDetailView = ({
       ),
     [items, matchesInspectionKeyword, selectedPrometheusVersion]
   );
+  const filteredRancherItems = useMemo(() => {
+    if (!clusterIsRancherLocal) {
+      return [];
+    }
+    return items.filter(
+      (item) =>
+        isRancherLocalType(item.check_type) &&
+        matchesInspectionKeyword(item)
+    );
+  }, [clusterIsRancherLocal, items, matchesInspectionKeyword]);
   const filteredCommonItems = useMemo(
     () =>
       items.filter(
         (item) =>
           !isPromqlType(item.check_type) &&
+          !isRancherLocalType(item.check_type) &&
           matchesInspectionKeyword(item)
       ),
     [items, matchesInspectionKeyword]
   );
   const filteredInspectionItems = useMemo(
-    () => [...filteredPromqlItems, ...filteredCommonItems],
-    [filteredPromqlItems, filteredCommonItems]
+    () => [
+      ...filteredPromqlItems,
+      ...filteredCommonItems,
+      ...filteredRancherItems,
+    ],
+    [filteredPromqlItems, filteredCommonItems, filteredRancherItems]
   );
 
   const totalInspectionPages = useMemo(
@@ -4432,23 +4526,43 @@ const ClusterDetailView = ({
     () => pagedInspectionItems.filter((item) => isPromqlType(item.check_type)),
     [pagedInspectionItems]
   );
+  const pagedRancherItems = useMemo(
+    () =>
+      pagedInspectionItems.filter((item) =>
+        isRancherLocalType(item.check_type)
+      ),
+    [pagedInspectionItems]
+  );
   const pagedCommonItems = useMemo(
     () =>
-      pagedInspectionItems.filter((item) => !isPromqlType(item.check_type)),
+      pagedInspectionItems.filter(
+        (item) =>
+          !isPromqlType(item.check_type) &&
+          !isRancherLocalType(item.check_type)
+      ),
     [pagedInspectionItems]
   );
   const versionHint = useMemo(() => {
-    if (filteredPromqlItems.length === 0 && filteredCommonItems.length > 0) {
-      return `当前 Prometheus 版本 ${selectedPrometheusVersion} 暂无 PromQL 巡检项，以下为通用巡检项。`;
+    const nonPromqlCount =
+      filteredCommonItems.length + filteredRancherItems.length;
+    if (filteredPromqlItems.length === 0 && nonPromqlCount > 0) {
+      return clusterIsRancherLocal && filteredRancherItems.length > 0
+        ? `当前 Prometheus 版本 ${selectedPrometheusVersion} 暂无 PromQL 巡检项，以下为通用 / Rancher 巡检项。`
+        : `当前 Prometheus 版本 ${selectedPrometheusVersion} 暂无 PromQL 巡检项，以下为通用巡检项。`;
     }
     return "Prometheus 版本仅影响 PromQL 巡检项，命令行/其他类型始终可用。";
   }, [
+    clusterIsRancherLocal,
     filteredCommonItems.length,
     filteredPromqlItems.length,
+    filteredRancherItems.length,
     selectedPrometheusVersion,
   ]);
   const promqlCountLabel = `PromQL 巡检项（${selectedPrometheusVersion}）${filteredPromqlItems.length} 条`;
   const commonCountLabel = `通用巡检项 ${filteredCommonItems.length} 条`;
+  const rancherCountLabel = clusterIsRancherLocal
+    ? `Rancher 巡检项 ${filteredRancherItems.length} 条`
+    : null;
 
   const statusMeta = useMemo(() => {
     if (!cluster) {
@@ -4858,6 +4972,7 @@ const ClusterDetailView = ({
             <span className="inspection-version-hint-text">{versionHint}</span>
             <span className="inspection-version-counts">
               {promqlCountLabel} · {commonCountLabel}
+              {rancherCountLabel ? ` · ${rancherCountLabel}` : ""}
             </span>
           </div>
           {items.length === 0 ? (
@@ -4930,6 +5045,39 @@ const ClusterDetailView = ({
                             <div className="item-title-row">
                               <div className="item-name">{item.name}</div>
                               <span className="item-tag neutral">通用</span>
+                            </div>
+                            <div className="item-desc">
+                              {item.description || "未提供描述"}
+                            </div>
+                          </div>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {clusterIsRancherLocal && pagedRancherItems.length > 0 && (
+                <div className="inspection-item-group">
+                  <div className="inspection-item-group-title">
+                    <span className="inspection-group-title-text">Rancher 巡检项</span>
+                    <span className="group-count">
+                      {filteredRancherItems.length} 条
+                    </span>
+                  </div>
+                  <ul className="item-list">
+                    {pagedRancherItems.map((item) => (
+                      <li key={item.id}>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.includes(item.id)}
+                            onChange={() => handleToggleItem(item.id)}
+                            disabled={!canRunInspections}
+                          />
+                          <div>
+                            <div className="item-title-row">
+                              <div className="item-name">{item.name}</div>
+                              <span className="item-tag rancher">Rancher</span>
                             </div>
                             <div className="item-desc">
                               {item.description || "未提供描述"}
@@ -5743,7 +5891,7 @@ const InspectionSettingsPanel = ({
   const [formName, setFormName] = useState("");
   const [formDescription, setFormDescription] = useState("");
   const [formTypeMode, setFormTypeMode] = useState<
-    "command" | "promql" | "other"
+    "command" | "promql" | "rancher" | "other"
   >("other");
   const [prometheusVersion, setPrometheusVersion] = useState(
     DEFAULT_PROMETHEUS_VERSION
@@ -5850,6 +5998,15 @@ const InspectionSettingsPanel = ({
       setPromqlThreshold(
         threshold === null || threshold === undefined ? "" : String(threshold)
       );
+    } else if (rawType === "rancher_local") {
+      setFormTypeMode("rancher");
+      setCustomCheckType("rancher_local");
+      setCommandText("");
+      setPromqlExpression("");
+      setPromqlComparison(">=");
+      setPromqlSeverity("warning");
+      setPromqlThreshold("");
+      setPromqlDescribe("");
     } else {
       setFormTypeMode("other");
       setCustomCheckType(rawType || "custom");
@@ -5898,6 +6055,8 @@ const InspectionSettingsPanel = ({
         ? "command"
         : formTypeMode === "promql"
           ? "promql"
+          : formTypeMode === "rancher"
+            ? "rancher_local"
           : customCheckType.trim() || "custom";
     const resolvedPrometheusVersion =
       resolvedCheckType === "promql"
@@ -6465,13 +6624,18 @@ const InspectionSettingsPanel = ({
                   value={formTypeMode}
                   onChange={(event) =>
                     setFormTypeMode(
-                      event.target.value as "command" | "promql" | "other"
+                      event.target.value as
+                        | "command"
+                        | "promql"
+                        | "rancher"
+                        | "other"
                     )
                   }
                   disabled={submitting}
                 >
                   <option value="command">命令行</option>
                   <option value="promql">PromQL</option>
+                  <option value="rancher">Rancher Local</option>
                   <option value="other">其他</option>
                 </select>
               </label>
@@ -6912,6 +7076,13 @@ const ScheduleSettingsPanel = ({
     () => selectedClusterIds.filter((id) => availableClusterIdSet.has(id)),
     [availableClusterIdSet, selectedClusterIds]
   );
+  const hasRancherLocalCluster = useMemo(
+    () =>
+      selectedClusterIds.some(
+        (id) => resolveClusterRancherLocal(scheduleClusterMap.get(id))
+      ),
+    [selectedClusterIds, scheduleClusterMap]
+  );
   const scheduleItemMap = useMemo(() => {
     const map = new Map<number, InspectionItem>();
     items.forEach((item) => map.set(item.id, item));
@@ -6966,6 +7137,17 @@ const ScheduleSettingsPanel = ({
       prev.filter((id) => scheduleItemMap.has(id))
     );
   }, [scheduleItemMap]);
+  useEffect(() => {
+    if (hasRancherLocalCluster) {
+      return;
+    }
+    setSelectedItemIds((prev) =>
+      prev.filter((id) => {
+        const item = scheduleItemMap.get(id);
+        return item ? !isRancherLocalType(item.check_type) : false;
+      })
+    );
+  }, [hasRancherLocalCluster, scheduleItemMap]);
 
   useEffect(() => {
     if (
@@ -7126,6 +7308,9 @@ const ScheduleSettingsPanel = ({
       if (!keywordMatch) {
         return false;
       }
+      if (!hasRancherLocalCluster && isRancherLocalType(item.check_type)) {
+        return false;
+      }
       if (!isPromqlType(item.check_type)) {
         return true;
       }
@@ -7144,6 +7329,7 @@ const ScheduleSettingsPanel = ({
     itemVersionFilter,
     items,
     prometheusVersionOptions,
+    hasRancherLocalCluster,
   ]);
 
   const filteredItemIdSet = useMemo(
@@ -7186,8 +7372,22 @@ const ScheduleSettingsPanel = ({
     () => filteredItems.filter((item) => isPromqlType(item.check_type)),
     [filteredItems]
   );
+  const filteredRancherItems = useMemo(
+    () =>
+      hasRancherLocalCluster
+        ? filteredItems.filter((item) =>
+            isRancherLocalType(item.check_type)
+          )
+        : [],
+    [filteredItems, hasRancherLocalCluster]
+  );
   const filteredCommonItems = useMemo(
-    () => filteredItems.filter((item) => !isPromqlType(item.check_type)),
+    () =>
+      filteredItems.filter(
+        (item) =>
+          !isPromqlType(item.check_type) &&
+          !isRancherLocalType(item.check_type)
+      ),
     [filteredItems]
   );
 
@@ -7911,7 +8111,11 @@ const ScheduleSettingsPanel = ({
                 ) : filteredItems.length === 0 ? (
                   <div className="placeholder">未找到匹配的巡检项</div>
                 ) : (
-                  <div className="inspection-item-columns">
+                  <div
+                    className={`inspection-item-columns${
+                      hasRancherLocalCluster ? " with-rancher" : ""
+                    }`}
+                  >
                     <div className="inspection-item-column">
                       <details className="schedule-dropdown">
                         <summary>
@@ -8000,6 +8204,51 @@ const ScheduleSettingsPanel = ({
                         </div>
                       </details>
                     </div>
+                    {hasRancherLocalCluster && (
+                      <div className="inspection-item-column">
+                        <details className="schedule-dropdown">
+                          <summary>
+                            <span>Rancher 巡检项</span>
+                            <span className="schedule-dropdown-summary">
+                              {filteredRancherItems.length} 条
+                            </span>
+                          </summary>
+                          <div className="schedule-dropdown-body">
+                            {filteredRancherItems.length === 0 ? (
+                              <div className="placeholder">
+                                暂无 Rancher 巡检项
+                              </div>
+                            ) : (
+                              <ul className="item-list scrollable">
+                                {filteredRancherItems.map((item) => (
+                                  <li key={item.id}>
+                                    <label>
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedItemIds.includes(item.id)}
+                                        onChange={() => toggleItem(item.id)}
+                                        disabled={submitting || readOnly}
+                                      />
+                                      <div>
+                                        <div className="item-title-row">
+                                          <div className="item-name">{item.name}</div>
+                                          <span className="item-tag rancher">
+                                            Rancher
+                                          </span>
+                                        </div>
+                                        <div className="item-desc">
+                                          {item.description || "未提供描述"}
+                                        </div>
+                                      </div>
+                                    </label>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        </details>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -9945,6 +10194,8 @@ interface ClusterEditModalProps {
     name: string;
     prometheusUrl: string;
     file: File | null;
+    rancherUrl?: string;
+    rancherApiKey?: string;
   }) => Promise<void>;
 }
 
@@ -9959,6 +10210,12 @@ const ClusterEditModal = ({
   const [prometheusUrl, setPrometheusUrl] = useState(
     cluster.prometheus_url ?? ""
   );
+  const [rancherUrl, setRancherUrl] = useState(
+    resolveClusterRancherUrl(cluster)
+  );
+  const [rancherApiKey, setRancherApiKey] = useState(
+    resolveClusterRancherApiKey(cluster)
+  );
   const [kubeconfigModalOpen, setKubeconfigModalOpen] = useState(false);
   const [kubeconfigText, setKubeconfigText] = useState("");
   const [kubeconfigFile, setKubeconfigFile] = useState<File | null>(null);
@@ -9972,6 +10229,8 @@ const ClusterEditModal = ({
   useEffect(() => {
     setName(cluster.name);
     setPrometheusUrl(cluster.prometheus_url ?? "");
+    setRancherUrl(resolveClusterRancherUrl(cluster));
+    setRancherApiKey(resolveClusterRancherApiKey(cluster));
     setKubeconfigModalOpen(false);
     setKubeconfigText("");
     setKubeconfigFile(null);
@@ -9982,7 +10241,10 @@ const ClusterEditModal = ({
 
   const nameInputId = `cluster-edit-name-${cluster.id}`;
   const promInputId = `cluster-edit-prom-${cluster.id}`;
+  const rancherUrlInputId = `cluster-edit-rancher-url-${cluster.id}`;
+  const rancherKeyInputId = `cluster-edit-rancher-key-${cluster.id}`;
   const modalFileInputId = `cluster-edit-file-${cluster.id}`;
+  const clusterIsRancherLocal = resolveClusterRancherLocal(cluster);
 
   const hasManualKubeconfig = useMemo(
     () => kubeconfigEdited && kubeconfigText.trim().length > 0,
@@ -10089,7 +10351,17 @@ const ClusterEditModal = ({
     const fileForSubmit = enableServerKubeconfigEdit
       ? resolveFileToUpload()
       : null;
-    await onSubmit({ name, prometheusUrl, file: fileForSubmit });
+    await onSubmit({
+      name,
+      prometheusUrl,
+      file: fileForSubmit,
+      ...(clusterIsRancherLocal
+        ? {
+            rancherUrl,
+            rancherApiKey,
+          }
+        : {}),
+    });
   };
 
   return (
@@ -10120,6 +10392,30 @@ const ClusterEditModal = ({
             disabled={submitting}
           />
         </div>
+        {clusterIsRancherLocal && (
+          <>
+            <div className="modal-field">
+              <label htmlFor={rancherUrlInputId}>Rancher 地址</label>
+              <input
+                id={rancherUrlInputId}
+                type="text"
+                value={rancherUrl}
+                onChange={(event) => setRancherUrl(event.target.value)}
+                disabled={submitting}
+              />
+            </div>
+            <div className="modal-field">
+              <label htmlFor={rancherKeyInputId}>Rancher API 密钥</label>
+              <input
+                id={rancherKeyInputId}
+                type="password"
+                value={rancherApiKey}
+                onChange={(event) => setRancherApiKey(event.target.value)}
+                disabled={submitting}
+              />
+            </div>
+          </>
+        )}
         {enableServerKubeconfigEdit ? (
           <div className="modal-field">
             <span className="modal-field-label">重新上传 kubeconfig(可选)</span>
@@ -11732,6 +12028,9 @@ const loginRedirectState = useMemo(
       backend_url: string;
       description?: string;
       prometheus_url?: string | null;
+      isRancherLocal?: boolean;
+      rancherUrl?: string | null;
+      rancherApiKey?: string | null;
     }) => {
       if (!canCreateClusterAgents) {
         setAgentError("当前账户没有创建 Agent 集群的权限。");
@@ -11756,6 +12055,10 @@ const loginRedirectState = useMemo(
       const normalizedBackendUrl = normalizeBackendUrl(backend_url);
       const normalizedPrometheusUrl =
         requestPayload.prometheus_url?.trim() || undefined;
+      const normalizedRancherUrl =
+        requestPayload.rancherUrl?.trim() || undefined;
+      const normalizedRancherApiKey =
+        requestPayload.rancherApiKey?.trim() || undefined;
       setAgentSubmitting(true);
       setAgentNotice(null);
       setAgentError(null);
@@ -11765,6 +12068,12 @@ const loginRedirectState = useMemo(
           ...requestPayload,
           name: normalizedName,
           prometheus_url: normalizedPrometheusUrl,
+          ...(requestPayload.isRancherLocal
+            ? {
+                rancherUrl: normalizedRancherUrl,
+                rancherApiKey: normalizedRancherApiKey,
+              }
+            : {}),
         });
         setGeneratedAgentCommand(
           buildAgentRegisterCommand({
@@ -14208,10 +14517,14 @@ const hasManualKubeconfig = useMemo(
       name,
       prometheusUrl,
       file,
+      rancherUrl,
+      rancherApiKey,
     }: {
       name: string;
       prometheusUrl: string;
       file: File | null;
+      rancherUrl?: string;
+      rancherApiKey?: string;
     }) => {
       if (!clusterEditState) {
         return;
@@ -14232,10 +14545,31 @@ const hasManualKubeconfig = useMemo(
         setClusterEditError("集群名称不能为空");
         return;
       }
+      const trimmedRancherUrl = rancherUrl?.trim() ?? "";
+      const trimmedRancherApiKey = rancherApiKey?.trim() ?? "";
+      const editIsRancherLocal = resolveClusterRancherLocal(clusterEditState);
+      if (editIsRancherLocal) {
+        if (!trimmedRancherUrl) {
+          setClusterEditError("Rancher 地址不能为空");
+          return;
+        }
+        if (!/^https?:\/\//i.test(trimmedRancherUrl)) {
+          setClusterEditError("Rancher 地址需以 http:// 或 https:// 开头");
+          return;
+        }
+        if (!trimmedRancherApiKey) {
+          setClusterEditError("Rancher API 密钥不能为空");
+          return;
+        }
+      }
 
       const formData = new FormData();
       formData.append("name", trimmedName);
       formData.append("prometheus_url", prometheusUrl.trim());
+      if (editIsRancherLocal) {
+        formData.append("rancherUrl", trimmedRancherUrl);
+        formData.append("rancherApiKey", trimmedRancherApiKey);
+      }
       if (file) {
         formData.append("file", file);
       }
