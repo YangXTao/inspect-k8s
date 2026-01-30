@@ -3,9 +3,9 @@ entries:
   inspection-center:
   - apiVersion: v2
     appVersion: 0.5.2
-    created: "2026-01-27T03:57:37.339665999Z"
+    created: "2026-01-30T01:52:43.235625532Z"
     description: Helm chart for the Kubernetes 巡检中心应用
-    digest: c7e33565b13cbe5de201122c7c560110e221540536ebd8d3f003cfb74051329c
+    digest: 127174be5edc8d56b863f2f2cdd881e5aa4b6a36e3495b09c02a4a205eef8921
     name: inspection-center
     type: application
     urls:
@@ -13,7 +13,7 @@ entries:
     version: 0.5.2
   - apiVersion: v2
     appVersion: 0.5.1
-    created: "2026-01-23T08:24:21.123279787Z"
+    created: "2026-01-30T01:52:43.234934814Z"
     description: Helm chart for the Kubernetes 巡检中心应用
     digest: ca4ef9eac79b23529fad5d849364b0a5ff748de257cd8e777fafde25f7f23f76
     name: inspection-center
@@ -23,7 +23,7 @@ entries:
     version: 0.5.1
   - apiVersion: v2
     appVersion: 0.4.1
-    created: "2026-01-27T03:57:37.339056466Z"
+    created: "2026-01-30T01:52:43.231332962Z"
     description: Helm chart for the Kubernetes 巡检中心应用
     digest: 668448eb5b0cad0ffa28b07349bade6f34e59f5e3cbad7dfc5eba8175bf81eff
     name: inspection-center
@@ -33,7 +33,7 @@ entries:
     version: 0.4.1
   - apiVersion: v2
     appVersion: 0.3.4
-    created: "2026-01-27T03:57:37.33841599Z"
+    created: "2026-01-30T01:52:43.230700878Z"
     description: Helm chart for the Kubernetes 巡检中心应用
     digest: 484c3316e8609509661abc29c94cac12541a7d7d4284e23fac7d4dc15fc2a8f9
     name: inspection-center
@@ -43,7 +43,7 @@ entries:
     version: 0.3.4
   - apiVersion: v2
     appVersion: 0.3.3
-    created: "2026-01-27T03:57:37.337885861Z"
+    created: "2026-01-30T01:52:43.230103514Z"
     description: Helm chart for the Kubernetes 巡检中心应用
     digest: bfcdf6b228ace262a5f64ed5166fffe833a14f4781539c67b03bd5513616e9e3
     name: inspection-center
@@ -53,7 +53,7 @@ entries:
     version: 0.3.3
   - apiVersion: v2
     appVersion: 0.3.2
-    created: "2026-01-27T03:57:37.337289433Z"
+    created: "2026-01-30T01:52:43.229539394Z"
     description: Helm chart for the Kubernetes 巡检中心应用
     digest: 07e81b099bc613df60b82a0c374c450516099806f7ff316c26fb33a4e30bc601
     name: inspection-center
@@ -63,7 +63,7 @@ entries:
     version: 0.3.2
   - apiVersion: v2
     appVersion: 0.3.1
-    created: "2026-01-27T03:57:37.336666048Z"
+    created: "2026-01-30T01:52:43.229008801Z"
     description: Helm chart for the Kubernetes 巡检中心应用
     digest: eba220a06d1d295185707b590eef621a673d1926a74e61bee68976b5e9ebaad7
     name: inspection-center
@@ -73,7 +73,7 @@ entries:
     version: 0.3.1
   - apiVersion: v2
     appVersion: 0.1.4
-    created: "2026-01-27T03:57:37.336132274Z"
+    created: "2026-01-30T01:52:43.228452719Z"
     description: Helm chart for the Kubernetes 巡检中心应用（后端 + 前端）
     digest: 3a0583126f8ce0712f8809659b42d71667a3c9c9772e49649a6f130db5cc7bf4
     name: inspection-center
@@ -81,4 +81,4 @@ entries:
     urls:
     - https://yangxtao.github.io/inspect-k8s/inspection-center-0.1.4.tgz
     version: 0.1.4
-generated: "2026-01-27T03:57:37.335363659Z"
+generated: "2026-01-30T01:52:43.227617019Z"
