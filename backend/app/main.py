@@ -272,7 +272,7 @@ def _evaluate_rancher_cert_severity(
     current = now or datetime.now(timezone.utc)
     delta = parsed - current
     days_left = int(delta.total_seconds() // 86400)
-    if delta.total_seconds() <= 0 or days_left <= 30000:
+    if delta.total_seconds() <= 0 or days_left <= 30:
         return "critical", days_left
     return "warning", days_left
 
@@ -2841,7 +2841,12 @@ def agent_submit_results(
     if not rancher_version and (not is_partial) and is_rancher_local and cluster:
         rancher_version = _fetch_rancher_version_from_cluster(cluster)
     if rancher_version and cluster and is_rancher_local:
-        crud.update_cluster(ctx.db, cluster, rancher_version=rancher_version)
+        crud.update_cluster(
+            ctx.db,
+            cluster,
+            rancher_version=rancher_version,
+            log_audit=False,
+        )
     item_lookup: dict[int, models.InspectionItem] = {}
     if is_rancher_local:
         item_ids = [result.item_id for result in payload.results if result.item_id]
