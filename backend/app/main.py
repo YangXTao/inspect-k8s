@@ -7,9 +7,9 @@ import os
 import re
 import secrets
 import shutil
-import socket
-import ssl
-import warnings
+import shlex
+import subprocess
+import requests
 from dataclasses import dataclass
 import base64
 import binascii
@@ -18,9 +18,6 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Any, Generator, Iterable
 from uuid import uuid4
 import yaml
-from urllib.parse import urlparse
-import requests
-from urllib3.exceptions import InsecureRequestWarning
 from fastapi import (
     APIRouter,
     Depends,
@@ -105,6 +102,37 @@ def _build_rancher_auth_strategies(
     return strategies
 
 
+def _build_rancher_cert_command(rancher_url: str) -> str:
+    return (
+        f"curl -k {shlex.quote(rancher_url)} -Iv 2>&1 | "
+        "grep \"expire date:\" | awk -F ': ' '{print $2}'"
+    )
+
+
+def _run_shell_command(command: str, timeout: int = 15) -> Optional[str]:
+    try:
+        completed = subprocess.run(
+            command,
+            shell=True,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except Exception as exc:
+        logger.warning("执行命令失败: %s", exc)
+        return None
+    if completed.returncode != 0:
+        output = (completed.stderr or completed.stdout or "").strip()
+        if output:
+            logger.warning("命令返回非零状态: %s", output)
+        return None
+    output = (completed.stdout or "").strip()
+    if not output:
+        output = (completed.stderr or "").strip()
+    return output or None
+
+
 def _fetch_rancher_version_from_cluster(
     cluster: models.ClusterConfig,
 ) -> Optional[str]:
@@ -112,9 +140,8 @@ def _fetch_rancher_version_from_cluster(
     rancher_api_key = (getattr(cluster, "rancher_api_key", None) or "").strip()
     if not rancher_url or not rancher_api_key:
         return None
-    url = rancher_url.rstrip("/") + "/v3/settings/server-version"
     try:
-        warnings.filterwarnings("ignore", category=InsecureRequestWarning)
+        url = rancher_url.rstrip("/") + "/v3/settings/server-version"
         last_error: Optional[Exception] = None
         for auth, headers in _build_rancher_auth_strategies(rancher_api_key):
             try:
@@ -148,22 +175,13 @@ def _fetch_rancher_version_from_cluster(
 def _fetch_rancher_cert_expiry(rancher_url: str) -> Optional[str]:
     if not rancher_url:
         return None
-    parsed = urlparse(rancher_url)
-    if not parsed.hostname:
-        return None
-    scheme = (parsed.scheme or "https").lower()
-    if scheme != "https":
-        return None
-    port = parsed.port or 443
     try:
-        context = ssl.create_default_context()
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
-        with socket.create_connection((parsed.hostname, port), timeout=10) as sock:
-            with context.wrap_socket(sock, server_hostname=parsed.hostname) as ssock:
-                cert = ssock.getpeercert()
-        not_after = cert.get("notAfter") if cert else None
-        return not_after.strip() if isinstance(not_after, str) and not_after.strip() else None
+        command = _build_rancher_cert_command(rancher_url)
+        output = _run_shell_command(command, timeout=15)
+        if not output:
+            return None
+        first_line = output.splitlines()[0].strip()
+        return first_line or None
     except Exception as exc:
         logger.warning("获取 Rancher 证书过期时间失败: %s", exc)
         return None

@@ -6,8 +6,6 @@ import logging
 import os
 import shutil
 import shlex
-import socket
-import ssl
 import warnings
 import subprocess
 import sys
@@ -16,7 +14,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
-from urllib.parse import urlparse
 from urllib3.exceptions import InsecureRequestWarning
 
 import requests
@@ -121,17 +118,47 @@ def _build_rancher_auth_strategies(
     if ":" in raw:
         user, password = raw.split(":", 1)
         strategies.append(((user, password), {}))
-    # 兜底：尝试 Bearer token（Rancher 也接受 Bearer）
     strategies.append((None, {"Authorization": f"Bearer {raw}"}))
     return strategies
+
+
+def _build_rancher_cert_command(rancher_url: str) -> str:
+    return (
+        f"curl -k {shlex.quote(rancher_url)} -Iv 2>&1 | "
+        "grep \"expire date:\" | awk -F ': ' '{print $2}'"
+    )
+
+
+def _run_shell_command(command: str, timeout: int = 15) -> Optional[str]:
+    try:
+        completed = subprocess.run(
+            command,
+            shell=True,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except Exception as exc:
+        LOG.warning("执行命令失败: %s", exc)
+        return None
+    if completed.returncode != 0:
+        output = (completed.stderr or completed.stdout or "").strip()
+        if output:
+            LOG.warning("命令返回非零状态: %s", output)
+        return None
+    output = (completed.stdout or "").strip()
+    if not output:
+        output = (completed.stderr or "").strip()
+    return output or None
 
 
 def _fetch_rancher_version(rancher_url: str, rancher_api_key: str) -> Optional[str]:
     if not rancher_url or not rancher_api_key:
         return None
-    url = rancher_url.rstrip("/") + "/v3/settings/server-version"
     try:
         warnings.filterwarnings("ignore", category=InsecureRequestWarning)
+        url = rancher_url.rstrip("/") + "/v3/settings/server-version"
         last_error: Optional[Exception] = None
         for auth, headers in _build_rancher_auth_strategies(rancher_api_key):
             try:
@@ -165,22 +192,13 @@ def _fetch_rancher_version(rancher_url: str, rancher_api_key: str) -> Optional[s
 def _fetch_rancher_cert_expiry(rancher_url: str) -> Optional[str]:
     if not rancher_url:
         return None
-    parsed = urlparse(rancher_url)
-    if not parsed.hostname:
-        return None
-    scheme = (parsed.scheme or "https").lower()
-    if scheme != "https":
-        return None
-    port = parsed.port or 443
     try:
-        context = ssl.create_default_context()
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
-        with socket.create_connection((parsed.hostname, port), timeout=10) as sock:
-            with context.wrap_socket(sock, server_hostname=parsed.hostname) as ssock:
-                cert = ssock.getpeercert()
-        not_after = cert.get("notAfter") if cert else None
-        return not_after.strip() if isinstance(not_after, str) and not_after.strip() else None
+        command = _build_rancher_cert_command(rancher_url)
+        output = _run_shell_command(command, timeout=15)
+        if not output:
+            return None
+        first_line = output.splitlines()[0].strip()
+        return first_line or None
     except Exception as exc:
         LOG.warning("获取 Rancher 证书过期时间失败: %s", exc)
         return None
