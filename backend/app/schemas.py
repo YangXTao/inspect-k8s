@@ -512,6 +512,9 @@ class AgentTaskOut(BaseModel):
     operator: Optional[str]
     total_items: int
     items: List[AgentTaskItemOut]
+    is_rancher_local: Optional[bool] = None
+    rancher_url: Optional[str] = None
+    rancher_api_key: Optional[str] = None
 
 
 class AgentRunResultItemIn(BaseModel):
@@ -530,6 +533,10 @@ class AgentRunResultIn(BaseModel):
     partial: bool = Field(
         False,
         description="是否为增量上报；True 表示仅追加/更新已有结果，不会结束巡检",
+    )
+    rancher_version: Optional[str] = Field(
+        None,
+        description="Rancher 版本",
     )
 
 

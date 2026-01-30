@@ -2454,6 +2454,10 @@ def agent_pull_tasks(
     )
     tasks: List[schemas.AgentTaskOut] = []
     for run in runs:
+        cluster = run.cluster or crud.get_cluster(ctx.db, run.cluster_id)
+        is_rancher_local = bool(getattr(cluster, "is_rancher_local", False)) if cluster else False
+        rancher_url = getattr(cluster, "rancher_url", None) if is_rancher_local else None
+        rancher_api_key = getattr(cluster, "rancher_api_key", None) if is_rancher_local else None
         completed_item_ids = {
             result.item_id for result in run.results if result.item_id is not None
         }
@@ -2482,6 +2486,9 @@ def agent_pull_tasks(
                 operator=run.operator,
                 total_items=run.total_items,
                 items=items_out,
+                is_rancher_local=is_rancher_local,
+                rancher_url=rancher_url,
+                rancher_api_key=rancher_api_key,
             )
         )
     return tasks
@@ -2620,6 +2627,11 @@ def agent_submit_results(
         refreshed = crud.get_inspection_run(ctx.db, run.id) or run
         return _serialize_run(ctx.db, refreshed)
     is_partial = bool(payload.partial)
+    rancher_version = _sanitize_optional_text(payload.rancher_version)
+    if rancher_version:
+        cluster = crud.get_cluster(ctx.db, run.cluster_id)
+        if cluster and getattr(cluster, "is_rancher_local", False):
+            crud.update_cluster(ctx.db, cluster, rancher_version=rancher_version)
     for result in payload.results:
         normalized_status = (result.status or "").strip().lower()
         if normalized_status not in {"passed", "warning", "critical", "failed"}:

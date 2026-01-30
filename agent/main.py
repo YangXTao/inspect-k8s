@@ -6,6 +6,8 @@ import logging
 import os
 import shutil
 import shlex
+import socket
+import ssl
 import subprocess
 import sys
 import time
@@ -13,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from urllib.parse import urlparse
 
 import requests
 from requests import exceptions as req_exc
@@ -86,6 +89,111 @@ def _format_request_error(exc: Exception, base_url: str) -> str:
         snippet = f" 响应片段：{body[:200]}" if body else ""
         return f"Server 返回 HTTP {status}{snippet}"
     return str(exc)
+
+
+def _extract_rancher_task_meta(task: Dict[str, Any]) -> tuple[bool, str, str]:
+    raw_flag = task.get("is_rancher_local")
+    if raw_flag is None:
+        raw_flag = task.get("isRancherLocal")
+    is_rancher_local = _as_bool(raw_flag)
+    rancher_url = str(task.get("rancher_url") or task.get("rancherUrl") or "").strip()
+    rancher_api_key = str(
+        task.get("rancher_api_key") or task.get("rancherApiKey") or ""
+    ).strip()
+    if not is_rancher_local:
+        return False, "", ""
+    return is_rancher_local, rancher_url, rancher_api_key
+
+
+def _split_rancher_api_key(api_key: str) -> tuple[str, str]:
+    if not api_key:
+        return "", ""
+    raw = api_key.strip()
+    if ":" in raw:
+        user, password = raw.split(":", 1)
+        return user, password
+    return raw, ""
+
+
+def _fetch_rancher_version(rancher_url: str, rancher_api_key: str) -> Optional[str]:
+    if not rancher_url or not rancher_api_key:
+        return None
+    url = rancher_url.rstrip("/") + "/v3/settings/server-version"
+    user, password = _split_rancher_api_key(rancher_api_key)
+    try:
+        resp = requests.get(url, auth=(user, password), timeout=10, verify=False)
+        resp.raise_for_status()
+        payload = resp.json()
+        version = str(payload.get("value") or "").strip()
+        return version or None
+    except Exception as exc:
+        LOG.warning("获取 Rancher 版本失败: %s", exc)
+        return None
+
+
+def _fetch_rancher_cert_expiry(rancher_url: str) -> Optional[str]:
+    if not rancher_url:
+        return None
+    parsed = urlparse(rancher_url)
+    if not parsed.hostname:
+        return None
+    scheme = (parsed.scheme or "https").lower()
+    if scheme != "https":
+        return None
+    port = parsed.port or 443
+    try:
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        with socket.create_connection((parsed.hostname, port), timeout=10) as sock:
+            with context.wrap_socket(sock, server_hostname=parsed.hostname) as ssock:
+                cert = ssock.getpeercert()
+        not_after = cert.get("notAfter") if cert else None
+        return not_after.strip() if isinstance(not_after, str) and not_after.strip() else None
+    except Exception as exc:
+        LOG.warning("获取 Rancher 证书过期时间失败: %s", exc)
+        return None
+
+
+def _is_k8s_cert_expiry_item(name: str) -> bool:
+    if not name:
+        return False
+    trimmed = name.strip()
+    lowered = trimmed.lower()
+    if trimmed == "K8s 证书过期时间检查":
+        return True
+    if "证书过期时间" in trimmed and ("k8s" in lowered or "kubernetes" in lowered):
+        return True
+    return False
+
+
+def _append_rancher_cert_detail(detail: Optional[str], expiry: str) -> Optional[str]:
+    if not expiry:
+        return detail
+    line = f"rancher证书 {expiry}"
+    if not detail:
+        return f"组件 过期时间\n{line}"
+    normalized = (
+        str(detail)
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .strip()
+    )
+    if not normalized:
+        return f"组件 过期时间\n{line}"
+    lines = [item.strip() for item in normalized.split("\n") if item.strip()]
+    if any("rancher证书" in item for item in lines):
+        return detail
+    header = lines[0]
+    has_name_column = "证书名称" in header and "过期时间" in header
+    has_two_columns = "组件" in header and (
+        "过期时间" in header or "证书过期时间" in header
+    )
+    if has_name_column:
+        line = f"rancher证书 Rancher证书 {expiry}"
+    elif not has_two_columns:
+        line = f"rancher证书 {expiry}"
+    return f"{detail.rstrip()}\n{line}"
 
 
 def _read_kubeconfig_bytes(path: Path, *, strict: bool) -> Optional[bytes]:
@@ -591,10 +699,13 @@ class AgentClient:
         *,
         partial: bool = False,
         pod_count: Optional[int] = None,
+        rancher_version: Optional[str] = None,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"results": list(results), "partial": partial}
         if pod_count is not None:
             payload["pod_count"] = pod_count
+        if rancher_version:
+            payload["rancher_version"] = rancher_version
         resp = self.session.post(
             f"{self.config.server_base}/agent/runs/{run_id}/results",
             json=payload,
@@ -999,13 +1110,19 @@ class AgentRunner:
             except Exception as exc:
                 LOG.warning("领取巡检 %s 失败：%s", run_id, exc)
                 continue
-            results = self._execute_items(run_id, task)
-            if results is None:
+            results_bundle = self._execute_items(run_id, task)
+            if results_bundle is None:
                 LOG.info("Run %s aborted before completion.", run_id)
                 continue
+            results, rancher_version = results_bundle
             try:
                 pod_count = self._collect_pod_count()
-                self.client.submit_results(run_id, results, pod_count=pod_count)
+                self.client.submit_results(
+                    run_id,
+                    results,
+                    pod_count=pod_count,
+                    rancher_version=rancher_version,
+                )
                 LOG.info("巡检 %s 已回传结果。", run_id)
             except Exception as exc:
                 LOG.error("上报巡检 %s 结果失败：%s", run_id, exc)
@@ -1013,10 +1130,19 @@ class AgentRunner:
 
     def _execute_items(
         self, run_id: int, task: Dict[str, Any]
-    ) -> Optional[List[Dict[str, Any]]]:
+    ) -> Optional[tuple[List[Dict[str, Any]], Optional[str]]]:
         items = task.get("items") or []
         results: List[Dict[str, Any]] = []
         cluster_id = task.get("cluster_id")
+        is_rancher_local, rancher_url, rancher_api_key = _extract_rancher_task_meta(
+            task
+        )
+        rancher_version = (
+            _fetch_rancher_version(rancher_url, rancher_api_key)
+            if is_rancher_local
+            else None
+        )
+        rancher_cert_expiry: Optional[str] = None
         context = CheckContext(
             kubeconfig_path=str(self.config.kubeconfig_path)
             if self.config.kubeconfig_path
@@ -1040,6 +1166,15 @@ class AgentRunner:
                 status, detail, suggestion = dispatch_checks(
                     check_type or "custom", context, config
                 )
+                if (
+                    is_rancher_local
+                    and rancher_url
+                    and _is_k8s_cert_expiry_item(str(name))
+                ):
+                    if rancher_cert_expiry is None:
+                        rancher_cert_expiry = _fetch_rancher_cert_expiry(rancher_url)
+                    if rancher_cert_expiry:
+                        detail = _append_rancher_cert_detail(detail, rancher_cert_expiry)
             except Exception as exc:  # pragma: no cover - 防御
                 LOG.exception("巡检项 %s 执行异常: %s", name, exc)
                 status = "failed"
@@ -1060,7 +1195,7 @@ class AgentRunner:
                 }
             )
             self._upload_partial_result(run_id, results[-1])
-        return results
+        return results, rancher_version
 
     def _upload_partial_result(self, run_id: int, result: Dict[str, Any]) -> None:
         try:

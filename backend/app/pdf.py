@@ -263,7 +263,6 @@ def generate_markdown_report(
     rancher_version_label, rancher_count_label = _get_rancher_meta(run)
     if rancher_version_label is not None:
         lines.append(f"| Rancher 版本 | {rancher_version_label} |")
-        lines.append(f"| 纳管集群数 | {rancher_count_label or '未知'} |")
     lines.append(f"| 巡检开始时间 | {_format_dt(run.created_at)} |")
     lines.append(f"| 巡检完成时间 | {_format_dt(run.completed_at or datetime.utcnow())} |")
     lines.append("")
@@ -591,7 +590,6 @@ def generate_pdf_report(
     rancher_version_label, rancher_count_label = _get_rancher_meta(run)
     if rancher_version_label is not None:
         meta_rows.insert(5, ("Rancher 版本", rancher_version_label))
-        meta_rows.insert(6, ("纳管集群数", rancher_count_label or "未知"))
     meta_table_data = [
         [Paragraph(label, styles["MetaLabel"]), Paragraph(_wrap_latin(value), styles["MetaValue"])]
         for label, value in meta_rows
