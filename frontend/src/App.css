@@ -1258,13 +1258,18 @@ button:disabled {
 }
 
 .link-button {
-  background: none;
-  border: none;
-  color: #2563eb;
-  cursor: pointer;
-  padding: 0;
-  font-size: 14px;
-  font-weight: 600;
+    background: none;
+    border: none;
+    color: #2563eb;
+    cursor: pointer;
+    padding: 0;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.link-button:hover {
+    text-decoration: none;
 }
 
 .link-button.small {

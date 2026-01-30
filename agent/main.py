@@ -107,18 +107,23 @@ def _extract_rancher_task_meta(task: Dict[str, Any]) -> tuple[bool, str, str]:
     return is_rancher_local, rancher_url, rancher_api_key
 
 
-def _build_rancher_auth(
+def _build_rancher_auth_strategies(
     api_key: str,
-) -> tuple[Optional[tuple[str, str]], Dict[str, str]]:
+) -> List[tuple[Optional[tuple[str, str]], Dict[str, str]]]:
     raw = (api_key or "").strip()
     if not raw:
-        return None, {}
-    if raw.lower().startswith("bearer "):
-        return None, {"Authorization": raw}
+        return []
+    strategies: List[tuple[Optional[tuple[str, str]], Dict[str, str]]] = []
+    lower = raw.lower()
+    if lower.startswith("bearer "):
+        strategies.append((None, {"Authorization": raw}))
+        return strategies
     if ":" in raw:
         user, password = raw.split(":", 1)
-        return (user, password), {}
-    return (raw, ""), {}
+        strategies.append(((user, password), {}))
+    # 兜底：尝试 Bearer token（Rancher 也接受 Bearer）
+    strategies.append((None, {"Authorization": f"Bearer {raw}"}))
+    return strategies
 
 
 def _fetch_rancher_version(rancher_url: str, rancher_api_key: str) -> Optional[str]:
@@ -126,19 +131,32 @@ def _fetch_rancher_version(rancher_url: str, rancher_api_key: str) -> Optional[s
         return None
     url = rancher_url.rstrip("/") + "/v3/settings/server-version"
     try:
-        auth, headers = _build_rancher_auth(rancher_api_key)
         warnings.filterwarnings("ignore", category=InsecureRequestWarning)
-        resp = requests.get(
-            url,
-            auth=auth,
-            headers=headers,
-            timeout=10,
-            verify=False,
-        )
-        resp.raise_for_status()
-        payload = resp.json()
-        version = str(payload.get("value") or "").strip()
-        return version or None
+        last_error: Optional[Exception] = None
+        for auth, headers in _build_rancher_auth_strategies(rancher_api_key):
+            try:
+                resp = requests.get(
+                    url,
+                    auth=auth,
+                    headers=headers,
+                    timeout=10,
+                    verify=False,
+                )
+                if resp.status_code == 401:
+                    last_error = requests.HTTPError(
+                        f"401 Client Error: Unauthorized for url: {url}"
+                    )
+                    continue
+                resp.raise_for_status()
+                payload = resp.json()
+                version = str(payload.get("value") or "").strip()
+                return version or None
+            except Exception as exc:
+                last_error = exc
+                continue
+        if last_error is not None:
+            raise last_error
+        return None
     except Exception as exc:
         LOG.warning("获取 Rancher 版本失败: %s", exc)
         return None
@@ -172,10 +190,7 @@ def _is_k8s_cert_expiry_item(name: str) -> bool:
     if not name:
         return False
     trimmed = name.strip()
-    lowered = trimmed.lower()
-    if trimmed == "K8s 证书过期时间检查":
-        return True
-    if "证书过期时间" in trimmed and ("k8s" in lowered or "kubernetes" in lowered):
+    if "证书过期时间" in trimmed:
         return True
     return False
 
