@@ -124,6 +124,7 @@ class InspectionRun(Base):
     pod_count = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     completed_at = Column(DateTime, nullable=True)
+    last_progress_at = Column(DateTime, nullable=True)
     plan_json = Column(Text, nullable=True)
     prometheus_version = Column(String(20), nullable=False, default="3.2")
     executor = Column(String(20), nullable=False, default="server")

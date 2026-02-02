@@ -79,7 +79,9 @@ _DEFAULT_INSPECTIONS_SENTINEL = Path("data/state/default_inspections_seeded.flag
 AGENT_HEARTBEAT_TIMEOUT_MINUTES = 1
 AGENT_HEARTBEAT_TIMEOUT = timedelta(minutes=AGENT_HEARTBEAT_TIMEOUT_MINUTES)
 CONNECTION_TEST_OPERATOR = "__system_connection_test__"
-RUN_TIMEOUT_SECONDS = int(os.getenv("INSPECTION_RUN_TIMEOUT_SECONDS", "180"))
+# 巡检超时相关（可通过环境变量覆盖）
+# 仅针对“运行中但长时间无进度”的任务，不对排队中的任务计时。
+RUN_STUCK_TIMEOUT_SECONDS = int(os.getenv("INSPECTION_RUN_STUCK_SECONDS", "5"))
 MAX_CLUSTER_NAME_LENGTH = 150
 DEFAULT_PROMETHEUS_URL = (
     "http://rancher-monitoring-prometheus.cattle-monitoring-system:9090"
@@ -340,30 +342,40 @@ def _requeue_stale_agent_runs(db: Session) -> int:
 
 def _expire_stuck_runs(db: Session) -> int:
     """
-    将运行中超过超时时间的巡检任务标记为失败，防止占用队列。
+    将运行中且长时间无进度的巡检任务标记为失败，防止占用队列。
+    仅基于“最后进度更新时间”判断，不强制总耗时。
     """
-    cutoff = datetime.utcnow() - timedelta(seconds=RUN_TIMEOUT_SECONDS)
+    if RUN_STUCK_TIMEOUT_SECONDS <= 0:
+        return 0
     candidates = (
         db.query(models.InspectionRun)
         .filter(
             models.InspectionRun.status == "running",
             models.InspectionRun.completed_at.is_(None),
-            models.InspectionRun.created_at < cutoff,
         )
         .all()
     )
+    now = datetime.utcnow()
+    cutoff = now - timedelta(seconds=RUN_STUCK_TIMEOUT_SECONDS)
     expired = 0
     for run in candidates:
+        last_progress = run.last_progress_at or run.created_at
+        if not last_progress or last_progress >= cutoff:
+            continue
+        # 如果已处理完所有项但未标记完成，不视为超时
+        if run.total_items and run.processed_items >= run.total_items:
+            continue
         run.status = "failed"
         if run.executor == "agent":
             run.agent_status = "failed"
-        note = f"巡检超过 {RUN_TIMEOUT_SECONDS // 60} 分钟未完成，已自动超时。"
+        minutes = max(1, RUN_STUCK_TIMEOUT_SECONDS // 60)
+        note = f"巡检超过 {minutes} 分钟无进度，已自动超时。"
         if run.summary:
             if note not in run.summary:
                 run.summary = f"{run.summary}\n{note}"
         else:
             run.summary = note
-        run.completed_at = datetime.utcnow()
+        run.completed_at = now
         db.add(run)
         if crud._should_log_run(run):  # type: ignore[attr-defined]
             run_label = crud.describe_inspection_run(db, run)
@@ -379,7 +391,7 @@ def _expire_stuck_runs(db: Session) -> int:
         expired += 1
     if expired:
         db.commit()
-        logger.warning("已标记 %s 个运行超时的巡检任务为失败。", expired)
+        logger.warning("已标记 %s 个运行无进度超时的巡检任务为失败。", expired)
     return expired
 
 
