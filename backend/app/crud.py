@@ -924,6 +924,8 @@ def delete_inspection_runs_bulk(
     if not runs:
         return 0
 
+    should_log = any(_should_log_run(run) for run in runs)
+
     # 先删除结果，再删除巡检记录，统一提交一次
     db.query(models.InspectionResult).filter(
         models.InspectionResult.run_id.in_(ids)
@@ -933,7 +935,7 @@ def delete_inspection_runs_bulk(
     ).delete(synchronize_session=False)
     db.commit()
 
-    if any(_should_log_run(run) for run in runs):
+    if should_log:
         description = log_description or f"批量删除 {len(ids)} 条巡检记录"
         log_action(
             db,
