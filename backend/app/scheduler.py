@@ -242,6 +242,13 @@ class InspectionScheduler:
             logger.info("Skip inspection schedules due to license: %s", exc)
             return
         with SessionLocal() as db:
+            # 先清理超时的巡检任务，防止占用队列
+            try:
+                from .main import _expire_stuck_runs
+
+                _expire_stuck_runs(db)
+            except Exception:
+                logger.exception("清理超时巡检任务失败。")
             self._cleanup_metrics(db, now)
             schedules = crud.list_inspection_schedules(db)
             for schedule in schedules:

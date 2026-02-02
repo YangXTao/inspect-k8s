@@ -79,6 +79,7 @@ _DEFAULT_INSPECTIONS_SENTINEL = Path("data/state/default_inspections_seeded.flag
 AGENT_HEARTBEAT_TIMEOUT_MINUTES = 1
 AGENT_HEARTBEAT_TIMEOUT = timedelta(minutes=AGENT_HEARTBEAT_TIMEOUT_MINUTES)
 CONNECTION_TEST_OPERATOR = "__system_connection_test__"
+RUN_TIMEOUT_SECONDS = int(os.getenv("INSPECTION_RUN_TIMEOUT_SECONDS", "180"))
 MAX_CLUSTER_NAME_LENGTH = 150
 DEFAULT_PROMETHEUS_URL = (
     "http://rancher-monitoring-prometheus.cattle-monitoring-system:9090"
@@ -335,6 +336,51 @@ def _requeue_stale_agent_runs(db: Session) -> int:
         db.commit()
         logger.warning("已回滚 %s 个超时的 Agent 巡检任务。", recovered)
     return recovered
+
+
+def _expire_stuck_runs(db: Session) -> int:
+    """
+    将运行中超过超时时间的巡检任务标记为失败，防止占用队列。
+    """
+    cutoff = datetime.utcnow() - timedelta(seconds=RUN_TIMEOUT_SECONDS)
+    candidates = (
+        db.query(models.InspectionRun)
+        .filter(
+            models.InspectionRun.status == "running",
+            models.InspectionRun.completed_at.is_(None),
+            models.InspectionRun.created_at < cutoff,
+        )
+        .all()
+    )
+    expired = 0
+    for run in candidates:
+        run.status = "failed"
+        if run.executor == "agent":
+            run.agent_status = "failed"
+        note = f"巡检超过 {RUN_TIMEOUT_SECONDS // 60} 分钟未完成，已自动超时。"
+        if run.summary:
+            if note not in run.summary:
+                run.summary = f"{run.summary}\n{note}"
+        else:
+            run.summary = note
+        run.completed_at = datetime.utcnow()
+        db.add(run)
+        if crud._should_log_run(run):  # type: ignore[attr-defined]
+            run_label = crud.describe_inspection_run(db, run)
+            audit_override = crud._resolve_run_audit_override(run)  # type: ignore[attr-defined]
+            crud.log_action(
+                db,
+                action="update",
+                entity_type="inspection_run",
+                entity_id=run.id,
+                description=f"巡检超时自动失败：{run_label}",
+                **audit_override,
+            )
+        expired += 1
+    if expired:
+        db.commit()
+        logger.warning("已标记 %s 个运行超时的巡检任务为失败。", expired)
+    return expired
 
 
 def _normalise_cluster_name(name: str | None) -> str:
@@ -610,6 +656,7 @@ def _agent_request_dependency(
     try:
         agent = _resolve_agent_from_header(db, authorization)
         _requeue_stale_agent_runs(db)
+        _expire_stuck_runs(db)
         yield AgentRequestContext(db=db, agent=agent)
     finally:
         db.close()
@@ -3953,6 +4000,7 @@ def list_inspection_runs(
         "巡检记录查看",
     )
     _requeue_stale_agent_runs(db)
+    _expire_stuck_runs(db)
     runs = [
         run
         for run in crud.list_inspection_runs(db)
@@ -3974,6 +4022,7 @@ def get_inspection_run(
         "巡检结果查看",
     )
     _requeue_stale_agent_runs(db)
+    _expire_stuck_runs(db)
     run = crud.get_inspection_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")
