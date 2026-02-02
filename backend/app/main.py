@@ -49,6 +49,7 @@ from .auth import (
     PASSWORD_ITERATIONS,
     PASSWORD_SALT_BYTES,
     SESSION_TTL_HOURS,
+    SESSION_IDLE_TIMEOUT_SECONDS,
     build_login_challenge,
     create_session,
     ensure_default_admin,
@@ -1492,7 +1493,8 @@ def login(
     db.add(user)
     db.add(session)
     db.commit()
-    max_age = SESSION_TTL_HOURS * 3600
+    # 与会话空闲超时保持一致
+    max_age = SESSION_IDLE_TIMEOUT_SECONDS
     cookie_samesite = (
         COOKIE_SAMESITE
         if COOKIE_SAMESITE in {"lax", "strict", "none"}

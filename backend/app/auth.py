@@ -14,7 +14,11 @@ from sqlalchemy.orm import Session
 from . import models
 
 AUTH_COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "inspect_session")
-SESSION_TTL_HOURS = int(os.getenv("AUTH_SESSION_TTL_HOURS", "168"))
+# 默认 24 小时，满足“长时间不操作 24 小时自动登出”
+SESSION_TTL_HOURS = int(os.getenv("AUTH_SESSION_TTL_HOURS", "24"))
+SESSION_IDLE_TIMEOUT_SECONDS = int(
+    os.getenv("AUTH_SESSION_IDLE_TIMEOUT_SECONDS", str(24 * 3600))
+)
 COOKIE_SAMESITE = os.getenv("AUTH_COOKIE_SAMESITE", "lax").lower()
 COOKIE_SECURE = os.getenv("AUTH_COOKIE_SECURE", "false").lower() in {
     "1",
@@ -402,7 +406,7 @@ def user_has_any_permission(
 
 def create_session(db: Session, user: models.AuthUser) -> models.AuthSession:
     session_id = secrets.token_urlsafe(32)
-    expires_at = datetime.utcnow() + timedelta(hours=SESSION_TTL_HOURS)
+    expires_at = datetime.utcnow() + timedelta(seconds=SESSION_IDLE_TIMEOUT_SECONDS)
     session = models.AuthSession(
         id=session_id,
         user_id=user.id,
@@ -425,7 +429,9 @@ def get_user_from_session(
     if not session:
         return None
     now = datetime.utcnow()
-    if session.expires_at <= now:
+    idle_seconds = SESSION_IDLE_TIMEOUT_SECONDS
+    last_seen = session.last_seen_at or session.created_at or session.expires_at
+    if session.expires_at <= now or (now - last_seen).total_seconds() > idle_seconds:
         db.delete(session)
         db.commit()
         return None
@@ -437,6 +443,8 @@ def get_user_from_session(
         or (now - session.last_seen_at).total_seconds() > 300
     ):
         session.last_seen_at = now
+        # 滑动过期：有操作则刷新过期时间
+        session.expires_at = now + timedelta(seconds=idle_seconds)
         db.add(session)
         db.commit()
     # 避免会话关闭后访问用户字段触发 DetachedInstanceError
