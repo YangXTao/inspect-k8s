@@ -547,7 +547,7 @@ def create_inspection_run(
         executor=executor,
         agent_status=agent_status,
         agent_id=agent_id,
-        last_progress_at=datetime.utcnow(),
+        last_progress_at=None,
     )
     db.add(run)
     db.commit()
@@ -585,8 +585,9 @@ def finalize_inspection_run(
     if run.total_items:
         processed = min(max(processed, run.total_items), run.total_items)
     run.processed_items = max(processed, run.processed_items or 0)
-    run.completed_at = datetime.utcnow()
-    run.last_progress_at = datetime.utcnow()
+    now = datetime.utcnow()
+    run.completed_at = now
+    run.last_progress_at = now
     db.add(run)
     db.commit()
     db.refresh(run)
@@ -639,8 +640,10 @@ def update_inspection_run_progress(
     run: models.InspectionRun,
     processed_items: int,
 ) -> models.InspectionRun:
-    run.processed_items = max(0, min(processed_items, run.total_items or processed_items))
-    run.last_progress_at = datetime.utcnow()
+    new_processed = max(0, min(processed_items, run.total_items or processed_items))
+    if new_processed > (run.processed_items or 0):
+        run.last_progress_at = datetime.utcnow()
+    run.processed_items = new_processed
     db.add(run)
     db.commit()
     db.refresh(run)
@@ -892,8 +895,9 @@ def update_inspection_run_agent_state(
     if status is not None:
         run.status = status
     if processed_items is not None:
+        if processed_items > (run.processed_items or 0):
+            run.last_progress_at = datetime.utcnow()
         run.processed_items = processed_items
-        run.last_progress_at = datetime.utcnow()
     db.add(run)
     db.commit()
     db.refresh(run)

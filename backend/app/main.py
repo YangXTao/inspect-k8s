@@ -81,7 +81,7 @@ AGENT_HEARTBEAT_TIMEOUT = timedelta(minutes=AGENT_HEARTBEAT_TIMEOUT_MINUTES)
 CONNECTION_TEST_OPERATOR = "__system_connection_test__"
 # 巡检超时相关（可通过环境变量覆盖）
 # 仅针对“运行中但长时间无进度”的任务，不对排队中的任务计时。
-RUN_STUCK_TIMEOUT_SECONDS = int(os.getenv("INSPECTION_RUN_STUCK_SECONDS", "5"))
+RUN_STUCK_TIMEOUT_SECONDS = int(os.getenv("INSPECTION_RUN_STUCK_SECONDS", "30"))
 MAX_CLUSTER_NAME_LENGTH = 150
 DEFAULT_PROMETHEUS_URL = (
     "http://rancher-monitoring-prometheus.cattle-monitoring-system:9090"
@@ -359,8 +359,11 @@ def _expire_stuck_runs(db: Session) -> int:
     cutoff = now - timedelta(seconds=RUN_STUCK_TIMEOUT_SECONDS)
     expired = 0
     for run in candidates:
-        last_progress = run.last_progress_at or run.created_at
-        if not last_progress or last_progress >= cutoff:
+        # 未产生任何进度，不判定超时，避免刚启动或队列切换时被误杀
+        last_progress = run.last_progress_at
+        if last_progress is None:
+            continue
+        if last_progress >= cutoff:
             continue
         # 如果已处理完所有项但未标记完成，不视为超时
         if run.total_items and run.processed_items >= run.total_items:
