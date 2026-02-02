@@ -632,6 +632,19 @@ export function deleteInspectionRun(
   });
 }
 
+export function deleteInspectionRunsBulk(
+  runIds: number[],
+  options?: { deleteFiles?: boolean }
+): Promise<{ deleted: number }> {
+  return request<{ deleted: number }>("/inspection-runs/bulk-delete", {
+    method: "POST",
+    body: JSON.stringify({
+      run_ids: runIds,
+      delete_files: Boolean(options?.deleteFiles),
+    }),
+  });
+}
+
 export function cancelInspectionRun(runId: number): Promise<InspectionRun> {
   return request<InspectionRun>(`/inspection-runs/${runId}/cancel`, {
     method: "POST",
