@@ -2366,7 +2366,6 @@ const AgentQuickCreate = ({
   const [rancherUrl, setRancherUrl] = useState("");
   const [rancherApiKey, setRancherApiKey] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
-  const scheduleFormErrorRef = useRef<HTMLDivElement | null>(null);
 
   const trimmedName = name.trim();
   const trimmedBackendUrl = backendUrl.trim();
@@ -6995,6 +6994,7 @@ const ScheduleSettingsPanel = ({
   const [itemKeyword, setItemKeyword] = useState("");
   const [itemVersionFilter, setItemVersionFilter] = useState("all");
   const [formError, setFormError] = useState<string | null>(null);
+  const scheduleFormErrorRef = useRef<HTMLDivElement | null>(null);
   const [scheduleKeyword, setScheduleKeyword] = useState("");
   const [scheduleStatusFilter, setScheduleStatusFilter] = useState<
     "all" | "enabled" | "disabled"
