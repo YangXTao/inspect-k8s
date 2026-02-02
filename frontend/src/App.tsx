@@ -1841,9 +1841,6 @@ const DashboardOverviewView = ({
       ) => {
         const candidates = recentRunsByCluster.get(cluster.id) ?? [];
         for (const run of candidates) {
-          if (run.status !== "finished") {
-            continue;
-          }
           const detail = runDetails[run.id];
           if (!detail) {
             continue;
@@ -3533,14 +3530,14 @@ const HistoryView = ({
   const visibleSelectedCount = useMemo(
     () =>
       selectedRunIds.filter((id) =>
-        filteredRuns.some((run) => run.id === id)
+        pagedRuns.some((run) => run.id === id)
       ).length,
-    [selectedRunIds, filteredRuns]
+    [selectedRunIds, pagedRuns]
   );
 
   const allSelected =
-    filteredRuns.length > 0 &&
-    filteredRuns.every((run) => selectedRunIds.includes(run.id));
+    pagedRuns.length > 0 &&
+    pagedRuns.every((run) => selectedRunIds.includes(run.id));
 
   const handleToggleRun = useCallback(
     (runId: number) => {
@@ -3561,11 +3558,11 @@ const HistoryView = ({
       if (
         !canRunInspections ||
         !canDeleteHistory ||
-        filteredRuns.length === 0
+        pagedRuns.length === 0
       ) {
         return prev;
       }
-      const visibleIds = filteredRuns.map((run) => run.id);
+      const visibleIds = pagedRuns.map((run) => run.id);
       const allVisibleSelected = visibleIds.every((id) => prev.includes(id));
       if (allVisibleSelected) {
         return prev.filter((id) => !visibleIds.includes(id));
@@ -3574,7 +3571,7 @@ const HistoryView = ({
       visibleIds.forEach((id) => merged.add(id));
       return Array.from(merged);
     });
-  }, [filteredRuns, canRunInspections, canDeleteHistory]);
+  }, [pagedRuns, canRunInspections, canDeleteHistory]);
 
   const handlePageChange = useCallback(
     (offset: number) => {

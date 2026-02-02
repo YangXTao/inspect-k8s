@@ -81,7 +81,7 @@ AGENT_HEARTBEAT_TIMEOUT = timedelta(minutes=AGENT_HEARTBEAT_TIMEOUT_MINUTES)
 CONNECTION_TEST_OPERATOR = "__system_connection_test__"
 # 巡检超时相关（可通过环境变量覆盖）
 # 仅针对“运行中但长时间无进度”的任务，不对排队中的任务计时。
-RUN_STUCK_TIMEOUT_SECONDS = int(os.getenv("INSPECTION_RUN_STUCK_SECONDS", "30"))
+RUN_STUCK_TIMEOUT_SECONDS = int(os.getenv("INSPECTION_RUN_STUCK_SECONDS", "120"))
 MAX_CLUSTER_NAME_LENGTH = 150
 DEFAULT_PROMETHEUS_URL = (
     "http://rancher-monitoring-prometheus.cattle-monitoring-system:9090"
