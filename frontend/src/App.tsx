@@ -1331,6 +1331,19 @@ const DashboardOverviewView = ({
     ],
     []
   );
+
+  const pickColorDeterministic = useCallback(
+    (clusterId: number): string => {
+      // 稳定哈希，避免因序列顺序变化导致颜色抖动
+      let hash = clusterId;
+      hash = (hash ^ (hash << 13)) >>> 0;
+      hash = (hash ^ (hash >> 17)) >>> 0;
+      hash = (hash ^ (hash << 5)) >>> 0;
+      const index = hash % chartColors.length;
+      return chartColors[index];
+    },
+    [chartColors]
+  );
   const [clusterColorMap, setClusterColorMap] = useState<
     Record<number, string>
   >({});
@@ -1364,17 +1377,10 @@ const DashboardOverviewView = ({
           delete next[numericKey];
         }
       });
-      const used = new Set(Object.values(next));
       const assignColor = (clusterId: number) => {
-        if (next[clusterId]) {
-          return;
+        if (!next[clusterId]) {
+          next[clusterId] = pickColorDeterministic(clusterId);
         }
-        let color = chartColors.find((item) => !used.has(item));
-        if (!color) {
-          color = chartColors[clusterId % chartColors.length];
-        }
-        used.add(color);
-        next[clusterId] = color;
       };
       overviewMetrics.series.forEach((series) => {
         assignColor(series.cluster_id);
