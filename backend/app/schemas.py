@@ -370,6 +370,15 @@ class InspectionRunListOut(BaseModel):
         return mapping.get(status, "未知状态")
 
 
+class BulkDeleteRunsRequest(BaseModel):
+    run_ids: List[int]
+    delete_files: bool = False
+
+
+class BulkDeleteRunsResponse(BaseModel):
+    deleted: int = 0
+
+
 class InspectionScheduleBase(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
     cron: str = Field(..., max_length=50)

@@ -2994,8 +2994,13 @@ def delete_cluster(
             .all()
         )
         report_paths = [run.report_path for run in runs if run.report_path]
-        for run in runs:
-            crud.delete_inspection_run(db, run)
+        run_ids = [run.id for run in runs]
+        if run_ids:
+            crud.delete_inspection_runs_bulk(
+                db,
+                run_ids,
+                log_description=f"删除集群 {cluster.name} 时批量删除 {len(run_ids)} 条巡检记录",
+            )
 
     crud.archive_cluster(db, cluster)
     if archived_name and cluster.name != archived_name:
@@ -4081,6 +4086,52 @@ def delete_inspection_run(
     if delete_files:
         _remove_file_safely(report_path)
     return {}
+
+
+@app.post("/inspection-runs/bulk-delete", response_model=schemas.BulkDeleteRunsResponse)
+def delete_inspection_runs_bulk(
+    payload: schemas.BulkDeleteRunsRequest,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
+):
+    _require_any_permission(
+        db,
+        current_user,
+        ["history.delete", "runRecord.delete", "result.delete", "report.delete"],
+        "巡检记录删除",
+    )
+    run_ids = list(dict.fromkeys(payload.run_ids or []))
+    if not run_ids:
+        return schemas.BulkDeleteRunsResponse(deleted=0)
+
+    runs = (
+        db.query(models.InspectionRun)
+        .filter(models.InspectionRun.id.in_(run_ids))
+        .all()
+    )
+    if not runs:
+        return schemas.BulkDeleteRunsResponse(deleted=0)
+
+    running = [run for run in runs if run.status == "running"]
+    if running:
+        raise HTTPException(status_code=400, detail="所选包含进行中的巡检任务，请先取消后再删除。")
+
+    report_paths: list[str] = []
+    if payload.delete_files:
+        report_paths = [run.report_path for run in runs if run.report_path]
+
+    deleted = crud.delete_inspection_runs_bulk(
+        db,
+        run_ids,
+        log_description=f"批量删除巡检记录（{len(run_ids)} 条）",
+    )
+
+    if payload.delete_files:
+        for path in report_paths:
+            _remove_file_safely(path)
+
+    return schemas.BulkDeleteRunsResponse(deleted=deleted)
 
 
 @app.get("/inspection-runs/{run_id}/report")
