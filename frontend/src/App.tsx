@@ -2366,6 +2366,7 @@ const AgentQuickCreate = ({
   const [rancherUrl, setRancherUrl] = useState("");
   const [rancherApiKey, setRancherApiKey] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const scheduleFormErrorRef = useRef<HTMLDivElement | null>(null);
 
   const trimmedName = name.trim();
   const trimmedBackendUrl = backendUrl.trim();
@@ -7097,6 +7098,15 @@ const ScheduleSettingsPanel = ({
   }, [schedulePageSize, scheduleKeyword, scheduleStatusFilter]);
 
   useEffect(() => {
+    if (formError && scheduleFormErrorRef.current) {
+      scheduleFormErrorRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }
+  }, [formError]);
+
+  useEffect(() => {
     setSelectedScheduleIds((prev) =>
       prev.filter((id) => schedules.some((schedule) => schedule.id === id))
     );
@@ -7822,7 +7832,14 @@ const ScheduleSettingsPanel = ({
                 </button>
               </div>
             </div>
-            {formError && <div className="feedback error">{formError}</div>}
+            {formError && (
+              <div
+                ref={scheduleFormErrorRef}
+                className="feedback error"
+              >
+                {formError}
+              </div>
+            )}
             <form className="settings-form" onSubmit={handleSubmit}>
               <label>
                 任务名称

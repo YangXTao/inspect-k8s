@@ -444,7 +444,7 @@ def _calculate_run_progress(run: models.InspectionRun) -> tuple[int, int, int]:
     status = (run.status or "").lower()
     if total_items > 0:
         processed_items = max(0, min(processed_items, total_items))
-        if status in {"finished", "failed"}:
+        if status in {"finished"}:
             processed_items = max(processed_items, total_items)
         elif status in {"queued"}:
             processed_items = 0
