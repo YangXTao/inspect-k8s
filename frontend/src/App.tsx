@@ -31,6 +31,7 @@ import {
   deleteCluster as apiDeleteCluster,
   deleteInspectionItem as apiDeleteInspectionItem,
   deleteInspectionRun as apiDeleteInspectionRun,
+  deleteInspectionRunsBulk as apiDeleteInspectionRunsBulk,
   deleteInspectionSchedule as apiDeleteInspectionSchedule,
   exportInspectionItems,
   exportInspectionItemsYaml,
@@ -13111,10 +13112,13 @@ const hasManualKubeconfig = useMemo(
         onConfirm: async (optionsMap) => {
           try {
             const deleteFiles = Boolean(optionsMap?.deleteReportFile);
-            for (const run of targets) {
-              logWithTimestamp("info", "删除巡检记录: %s", run.id);
-              await apiDeleteInspectionRun(run.id, { deleteFiles });
-            }
+            const runIds = targets.map((run) => run.id);
+            logWithTimestamp(
+              "info",
+              "批量删除巡检记录: %s 条",
+              runIds.length
+            );
+            await apiDeleteInspectionRunsBulk(runIds, { deleteFiles });
             await refreshRuns();
             await refreshClusters();
             showClusterNotice(scope, `已删除 ${targets.length} 条巡检记录`, "success");

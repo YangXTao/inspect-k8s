@@ -903,6 +903,48 @@ def delete_run_results(db: Session, run: models.InspectionRun) -> None:
     db.commit()
 
 
+def delete_inspection_runs_bulk(
+    db: Session,
+    run_ids: Iterable[int],
+    *,
+    log_description: Optional[str] = None,
+) -> int:
+    """
+    批量删除巡检记录及其结果，减少逐条提交带来的性能开销。
+    """
+    ids = [int(run_id) for run_id in dict.fromkeys(run_ids) if run_id is not None]
+    if not ids:
+        return 0
+
+    runs = (
+        db.query(models.InspectionRun)
+        .filter(models.InspectionRun.id.in_(ids))
+        .all()
+    )
+    if not runs:
+        return 0
+
+    # 先删除结果，再删除巡检记录，统一提交一次
+    db.query(models.InspectionResult).filter(
+        models.InspectionResult.run_id.in_(ids)
+    ).delete(synchronize_session=False)
+    db.query(models.InspectionRun).filter(
+        models.InspectionRun.id.in_(ids)
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    if any(_should_log_run(run) for run in runs):
+        description = log_description or f"批量删除 {len(ids)} 条巡检记录"
+        log_action(
+            db,
+            action="delete",
+            entity_type="inspection_run",
+            entity_id=None,
+            description=description,
+        )
+    return len(runs)
+
+
 def add_run_result_by_item_id(
     db: Session,
     run: models.InspectionRun,
