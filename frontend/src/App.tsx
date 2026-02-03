@@ -5938,6 +5938,7 @@ const InspectionSettingsPanel = ({
               )}
               <span className="inspection-section-count">共 {totalItems} 条</span>
             </div>
+          </div>
           <div className="settings-list full">
             <div className="table-wrapper spacious">
               {items.length === 0 ? (
