@@ -5388,6 +5388,7 @@ const InspectionSettingsPanel = ({
     : "当前账号无巡检项管理权限。";
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [editingItem, setEditingItem] = useState<InspectionItem | null>(null);
+  const [formModalOpen, setFormModalOpen] = useState(false);
   const [formName, setFormName] = useState("");
   const [formDescription, setFormDescription] = useState("");
   const [formTypeMode, setFormTypeMode] = useState<
@@ -5436,6 +5437,7 @@ const InspectionSettingsPanel = ({
   }, [editingItem]);
 
   const startEdit = (item: InspectionItem) => {
+    setFormModalOpen(true);
     setEditingItem(item);
     setFormName(item.name ?? "");
     setFormDescription(item.description ?? "");
@@ -5527,6 +5529,11 @@ const InspectionSettingsPanel = ({
     setPromqlDescribe("");
     setConfigText("{}");
     setFormError(null);
+  };
+
+  const startCreate = () => {
+    resetForm();
+    setFormModalOpen(true);
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -5641,6 +5648,7 @@ const InspectionSettingsPanel = ({
       config: parsedConfig,
     });
     resetForm();
+    setFormModalOpen(false);
   };
 
 
@@ -5811,6 +5819,16 @@ const InspectionSettingsPanel = ({
           {currentSummary && <p>{currentSummary}</p>}
         </div>
         <div className="settings-actions">
+          {!readOnly && (
+            <button
+              type="button"
+              className="primary"
+              onClick={startCreate}
+              disabled={submitting}
+            >
+              新增巡检项
+            </button>
+          )}
           <button
             type="button"
             className="secondary"
@@ -6072,15 +6090,22 @@ const InspectionSettingsPanel = ({
             )}
           </div>
         </section>
-        {!readOnly && (
-          <section className="inspection-section inspection-section-form">
-            <div className="inspection-section-header">
-              <div>
-                <h4>{editingItem ? "编辑巡检项" : "新增巡检项"}</h4>
-                <span className="inspection-section-hint">
-                  选择类型后填写配置，保存后立即生效
-                </span>
-              </div>
+      </div>
+      {!readOnly && formModalOpen && (
+        <div className="modal-backdrop nested">
+          <div className="modal large">
+            <div className="modal-header">
+              <h3>{editingItem ? "编辑巡检项" : "新增巡检项"}</h3>
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => {
+                  resetForm();
+                  setFormModalOpen(false);
+                }}
+              >
+                关闭
+              </button>
             </div>
             <form className="settings-form inspection-form" onSubmit={handleSubmit}>
               <label>
@@ -6245,38 +6270,38 @@ const InspectionSettingsPanel = ({
                   </label>
                 </>
               )}
-            {formTypeMode === "other" && (
-              <label>
-                配置 (JSON)
-                <textarea
-                  value={configText}
-                  onChange={(event) => setConfigText(event.target.value)}
-                  rows={6}
+              {formTypeMode === "other" && (
+                <label>
+                  配置 (JSON)
+                  <textarea
+                    value={configText}
+                    onChange={(event) => setConfigText(event.target.value)}
+                    rows={6}
+                    disabled={submitting}
+                  />
+                </label>
+              )}
+              <div className="settings-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={resetForm}
                   disabled={submitting}
-                />
-              </label>
-            )}
-            <div className="settings-actions">
-              <button
-                type="button"
-                className="secondary"
-                onClick={resetForm}
-                disabled={submitting}
-              >
-                重置
-              </button>
-              <button
-                type="submit"
-                className="primary"
-                disabled={submitting}
-              >
-                {editingItem ? "保存修改" : "新增"}
-              </button>
-            </div>
+                >
+                  重置
+                </button>
+                <button
+                  type="submit"
+                  className="primary"
+                  disabled={submitting}
+                >
+                  {editingItem ? "保存修改" : "新增"}
+                </button>
+              </div>
             </form>
-          </section>
-        )}
-      </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
