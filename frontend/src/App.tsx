@@ -13,7 +13,7 @@
   lazy,
   Suspense,
 } from "react";
-import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Helmet } from "react-helmet";
 import {
   cancelInspectionRun,
