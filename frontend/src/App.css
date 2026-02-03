@@ -2159,8 +2159,7 @@ th {
   gap: 18px;
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  padding-right: 0;
+  overflow: hidden;
 }
 
 .inspection-section {
@@ -2172,6 +2171,7 @@ th {
   flex-direction: column;
   gap: 12px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  height: calc(100vh - 200px);
 }
 
 .inspection-section-header {
@@ -2203,7 +2203,7 @@ th {
 
 .inspection-section-count {
   font-size: 12px;
-  color: #64748b;
+  color: #475569;
 }
 
 .version-manager {
@@ -2714,6 +2714,9 @@ th {
   flex-direction: column;
   gap: 10px;
 }
+.settings-list.full {
+  flex: 1 1 auto;
+}
 
 .settings-list table {
   width: 100%;
@@ -2750,7 +2753,8 @@ th {
 .settings-list .table-wrapper {
   border-radius: 10px;
   background: #fff;
-  max-height: min(360px, 45vh);
+  max-height: none;
+  flex: 1;
   overflow: auto;
 }
 

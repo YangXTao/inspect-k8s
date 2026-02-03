@@ -5804,9 +5804,6 @@ const InspectionSettingsPanel = ({
     setPageInput("");
   }, [pageInput, totalPages]);
 
-  const currentSummary = editingItem
-    ? `正在编辑：${editingItem.name}`
-    : "";
   const promqlSeverityLabel = promqlSeverity === "critical" ? "严重" : "告警";
   const showVersionColumn =
     itemFilterType === "all" || itemFilterType === "promql";
@@ -5815,8 +5812,7 @@ const InspectionSettingsPanel = ({
     <div className="inspection-settings-panel">
       <div className="settings-header">
         <div>
-          <h3>巡检项管理</h3>
-          {currentSummary && <p>{currentSummary}</p>}
+          <h3>巡检项列表</h3>
         </div>
         <div className="settings-actions">
           {!readOnly && (
@@ -5826,7 +5822,7 @@ const InspectionSettingsPanel = ({
               onClick={startCreate}
               disabled={submitting}
             >
-              新增巡检项
+              添加巡检项
             </button>
           )}
           <button
@@ -5875,82 +5871,75 @@ const InspectionSettingsPanel = ({
       <div className="inspection-settings-body">
         <section className="inspection-section inspection-section-list">
           <div className="inspection-section-header">
-            <div>
-              <h4>已有巡检项</h4>
-              <span className="inspection-section-hint">
-                支持批量选择、导出与删除操作
-              </span>
-            </div>
-            <span className="inspection-section-count">共 {totalItems} 条</span>
-          </div>
-          <div className="settings-list">
-            <div className="settings-list-header">
-              <div className="settings-actions">
-                {!readOnly && (
-                  <>
-                    <label className="table-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={
-                          filteredItems.length > 0 &&
-                          selectedFilteredCount === filteredItems.length
-                        }
-                        onChange={toggleSelectAll}
-                      />
-                      <span>全选</span>
-                    </label>
-                    <span>已选 {selectedFilteredCount} / {totalItems}</span>
-                    <button
-                      type="button"
-                      className="link-button danger"
-                      onClick={handleDeleteSelected}
-                      disabled={selectedFilteredCount === 0}
-                    >
-                      删除
-                    </button>
-                  </>
-                )}
-                {itemFilterType === "promql" && (
-                  <label className="settings-filter">
-                    Prometheus 版本
-                    <select
-                      value={itemFilterVersion}
-                      onChange={(event) =>
-                        setItemFilterVersion(event.target.value)
+            <div className="settings-actions compact">
+              {!readOnly && (
+                <>
+                  <label className="table-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={
+                        filteredItems.length > 0 &&
+                        selectedFilteredCount === filteredItems.length
                       }
-                    >
-                      <option value="all">全部</option>
-                      {prometheusVersionOptions.map((version) => (
-                        <option key={version} value={version}>
-                          {version}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={toggleSelectAll}
+                    />
+                    <span>全选</span>
                   </label>
-                )}
+                  <span className="muted-text">
+                    已选 {selectedFilteredCount} / {totalItems}
+                  </span>
+                  <button
+                    type="button"
+                    className="link-button danger"
+                    onClick={handleDeleteSelected}
+                    disabled={selectedFilteredCount === 0}
+                  >
+                    删除
+                  </button>
+                </>
+              )}
+              <label className="settings-filter">
+                类型
+                <select
+                  value={itemFilterType}
+                  onChange={(event) =>
+                    setItemFilterType(
+                      event.target.value as
+                        | "all"
+                        | "command"
+                        | "promql"
+                        | "other"
+                    )
+                  }
+                >
+                  <option value="all">全部</option>
+                  <option value="command">命令行</option>
+                  <option value="promql">PromQL</option>
+                  <option value="other">其他</option>
+                </select>
+              </label>
+              {itemFilterType === "promql" && (
                 <label className="settings-filter">
-                  类型
+                  Prometheus 版本
                   <select
-                    value={itemFilterType}
+                    value={itemFilterVersion}
                     onChange={(event) =>
-                      setItemFilterType(
-                        event.target.value as
-                          | "all"
-                          | "command"
-                          | "promql"
-                          | "other"
-                      )
+                      setItemFilterVersion(event.target.value)
                     }
                   >
                     <option value="all">全部</option>
-                    <option value="command">命令行</option>
-                    <option value="promql">PromQL</option>
-                    <option value="other">其他</option>
+                    {prometheusVersionOptions.map((version) => (
+                      <option key={version} value={version}>
+                        {version}
+                      </option>
+                    ))}
                   </select>
                 </label>
-              </div>
+              )}
+              <span className="inspection-section-count">共 {totalItems} 条</span>
             </div>
-            <div className="table-wrapper">
+          <div className="settings-list full">
+            <div className="table-wrapper spacious">
               {items.length === 0 ? (
                 <div className="placeholder">暂无巡检项</div>
               ) : filteredItems.length === 0 ? (
