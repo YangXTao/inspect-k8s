@@ -1,11 +1,15 @@
 FROM 192.168.10.51/base/node:20-alpine AS build
 WORKDIR /frontend
 ARG VITE_API_BASE_URL=auto
+ARG VITE_BUILD_OPTS="--sourcemap"
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 COPY package*.json ./
 RUN npm ci
 COPY . .
-RUN npm install react-helmet@6.1.0 && npm run build
+# 说明：
+# 1) 默认开启 --sourcemap，便于排查线上报错（可被外部 build-arg 覆盖）。
+# 2) 保留 react-helmet 安装以兼容旧锁文件。
+RUN npm install react-helmet@6.1.0 && npm run build -- --sourcemap ${VITE_BUILD_OPTS}
 
 FROM 192.168.10.51/base/nginx:1.27-alpine
 WORKDIR /etc/nginx

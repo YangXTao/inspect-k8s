@@ -11,16 +11,7 @@
   useRef,
   useState,
 } from "react";
-import {
-  Link,
-  Navigate,
-  NavLink,
-  Route,
-  Routes,
-  useLocation,
-  useNavigate,
-  useParams,
-} from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Helmet } from "react-helmet";
 import {
   cancelInspectionRun,
@@ -74,6 +65,8 @@ import {
   deleteUser,
 } from "./api";
 import { appConfig } from "./config";
+import TopNavigation from "./components/TopNavigation";
+import SettingsPage from "./components/SettingsPage";
 import CompanyLogoUrl from "./assets/company-logo.png?url";
 import type {
   AgentRegisterResponse,
@@ -97,6 +90,13 @@ import type {
 } from "./types";
 
 type NoticeType = "success" | "warning" | "error" | null;
+import type {
+  ConfirmDialogState,
+  ConfirmDialogOption,
+  SettingsModalTab,
+  SettingsModalTabRenderContext,
+} from "./types-ui";
+
 type ConfirmVariant = "primary" | "danger";
 type NoticeScope = "overview" | "clusterDetail" | "history" | "runDetail";
 type GlobalNotice = {
@@ -135,35 +135,6 @@ type LicenseCapabilities = {
   canDownloadReports: boolean;
   status: LicenseStatus | null;
 };
-
-interface ConfirmDialogOption {
-  id: string;
-  label: string;
-  description?: string;
-  defaultChecked?: boolean;
-}
-
-interface ConfirmDialogState {
-  title: string;
-  message: string;
-  confirmLabel?: string;
-  cancelLabel?: string;
-  variant?: ConfirmVariant;
-  onConfirm: (options?: Record<string, boolean>) => Promise<void> | void;
-  scope?: "global" | "settings";
-  options?: ConfirmDialogOption[];
-}
-
-interface SettingsModalTabRenderContext {
-  close: () => void;
-  selectTab: (tabId: string) => void;
-}
-
-interface SettingsModalTab {
-  id: string;
-  label: string;
-  render: (context: SettingsModalTabRenderContext) => ReactNode;
-}
 
 const CLUSTER_ID_STORAGE_KEY = "clusterDisplayIdMap.v1";
 const CLUSTER_PAGE_SIZE_OPTIONS = [10, 20, 50];
