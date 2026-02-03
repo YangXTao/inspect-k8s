@@ -2164,7 +2164,7 @@ th {
 
 .inspection-section {
   background: #ffffff;
-  border: 1px solid #e5e7eb;
+  border: 1px solid transparent;
   border-radius: 14px;
   padding: 12px 14px;
   display: flex;

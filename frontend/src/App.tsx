@@ -6084,7 +6084,7 @@ const InspectionSettingsPanel = ({
         <div className="modal-backdrop nested">
           <div className="modal large">
             <div className="modal-header">
-              <h3>{editingItem ? "编辑巡检项" : "新增巡检项"}</h3>
+              <h3>{editingItem ? "编辑巡检项" : "添加巡检项"}</h3>
               <button
                 type="button"
                 className="link-button"
@@ -6284,7 +6284,7 @@ const InspectionSettingsPanel = ({
                   className="primary"
                   disabled={submitting}
                 >
-                  {editingItem ? "保存修改" : "新增"}
+                  {editingItem ? "保存修改" : "添加"}
                 </button>
               </div>
             </form>
