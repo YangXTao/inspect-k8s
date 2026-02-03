@@ -145,16 +145,13 @@ const TopNavigation = ({
         <div className="top-navigation-user" ref={menuRef}>
           <button
             type="button"
-            className={`avatar-trigger${menuOpen ? " open" : ""}`}
+            className={`avatar-trigger avatar-compact${menuOpen ? " open" : ""}`}
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             onClick={() => setMenuOpen((prev) => !prev)}
+            title={displayName || "用户"}
           >
             <span className="avatar-circle">{avatarLabel}</span>
-            <span className="avatar-meta">
-              <span className="avatar-name">{displayName || "用户"}</span>
-              <span className="avatar-desc">个人中心</span>
-            </span>
             <span className="avatar-caret" aria-hidden="true">
               <svg viewBox="0 0 20 20">
                 <path

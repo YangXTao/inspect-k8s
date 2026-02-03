@@ -76,16 +76,10 @@ const SettingsPage = ({
     onTabChange(tabId);
   };
 
-  const isCompactTab =
-    effectiveTabId === "overview" || effectiveTabId === "license";
-  const modalClassName = `settings-modal${
-    isCompactTab ? " settings-modal-compact" : ""
-  }`;
-
   return (
     <div className="settings-page">
       <div
-        className={modalClassName}
+        className="settings-modal"
         role="region"
         aria-label="系统设置"
         ref={containerRef}
