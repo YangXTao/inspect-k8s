@@ -85,22 +85,8 @@ const SettingsPage = ({
         ref={containerRef}
         tabIndex={-1}
       >
-        <div className="settings-modal-header">
-          <div>
-            <h2>系统设置</h2>
-            <p>统一管理巡检项、Agent 节点以及 License 授权。</p>
-          </div>
-          <button
-            type="button"
-            className="link-button"
-            onClick={onLeave}
-            aria-label="返回上一页"
-          >
-            返回
-          </button>
-        </div>
         <div className="settings-modal-shell">
-          <div className="settings-modal-sidebar">
+          <aside className="settings-modal-sidebar">
             <nav className="settings-modal-nav">
               {tabs.map((tab) => (
                 <button
@@ -115,36 +101,7 @@ const SettingsPage = ({
                 </button>
               ))}
             </nav>
-            {user && (
-              <div className="settings-user-card">
-                <div className="settings-user-avatar">
-                  {(user.display_name || user.username || "A")[0]?.toUpperCase()}
-                </div>
-                <div className="settings-user-info">
-                  <div className="settings-user-name">
-                    {user.display_name || user.username}
-                  </div>
-                  <div className="settings-user-meta">账号：{user.username}</div>
-                  <div className="settings-user-actions">
-                    <button
-                      type="button"
-                      className="secondary ghost"
-                      onClick={onChangePassword}
-                    >
-                      修改密码
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary danger"
-                      onClick={onLogout}
-                    >
-                      退出登录
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+          </aside>
           <section className="settings-modal-main">
             {currentTab.render({
               close: onLeave,

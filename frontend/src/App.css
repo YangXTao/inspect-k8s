@@ -1961,30 +1961,6 @@ th {
   backdrop-filter: blur(2px);
 }
 
-.settings-modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 6px 4px 10px;
-}
-
-.settings-modal-header h2 {
-  margin: 0;
-  font-size: 20px;
-  color: #0f172a;
-}
-
-.settings-modal-header p {
-  margin: 2px 0 0;
-  color: #475569;
-  font-size: 13px;
-}
-
-.settings-modal-header .link-button {
-  font-weight: 600;
-  color: #1d4ed8;
-}
 
 .settings-modal-shell {
   display: grid;
