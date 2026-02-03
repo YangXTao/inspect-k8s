@@ -10,6 +10,8 @@
   useMemo,
   useRef,
   useState,
+  lazy,
+  Suspense,
 } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Helmet } from "react-helmet";
@@ -66,8 +68,8 @@ import {
 } from "./api";
 import { appConfig } from "./config";
 import TopNavigation from "./components/TopNavigation";
-import SettingsPage from "./components/SettingsPage";
 import ConfirmationModal from "./ConfirmationModal";
+const LazySettingsPage = lazy(() => import("./components/SettingsPage"));
 import CompanyLogoUrl from "./assets/company-logo.png?url";
 import type {
   AgentRegisterResponse,
@@ -10397,6 +10399,37 @@ const App = () => {
     null
   );
   const isAuthenticated = authUser !== null;
+  const location = useLocation();
+  const navigate = useNavigate();
+  const previousPathRef = useRef(location.pathname);
+  const [suppressOverviewDetailLoading, setSuppressOverviewDetailLoading] =
+    useState(false);
+  useEffect(() => {
+    const previousPath = previousPathRef.current;
+    if (location.pathname === "/" && previousPath !== "/") {
+      setSuppressOverviewDetailLoading(true);
+    } else if (location.pathname !== "/") {
+      setSuppressOverviewDetailLoading(false);
+    }
+    previousPathRef.current = location.pathname;
+  }, [location.pathname]);
+  const effectiveSuppressDetailLoading =
+    suppressOverviewDetailLoading ||
+    (location.pathname === "/" && previousPathRef.current !== "/");
+  const currentNoticeScope = useMemo(
+    () => resolveNoticeScope(location.pathname),
+    [location.pathname]
+  );
+  const loginRedirectState = useMemo(
+    () => ({
+      from: {
+        pathname: location.pathname,
+        search: location.search,
+        hash: location.hash,
+      },
+    }),
+    [location.pathname, location.search, location.hash]
+  );
   const permissionSet = useMemo(
     () => new Set(authUser?.permissions ?? []),
     [authUser?.permissions]
@@ -10912,37 +10945,6 @@ const App = () => {
     [items]
   );
 
-const location = useLocation();
-const navigate = useNavigate();
-const previousPathRef = useRef(location.pathname);
-const [suppressOverviewDetailLoading, setSuppressOverviewDetailLoading] =
-  useState(false);
-useEffect(() => {
-  const previousPath = previousPathRef.current;
-  if (location.pathname === "/" && previousPath !== "/") {
-    setSuppressOverviewDetailLoading(true);
-  } else if (location.pathname !== "/") {
-    setSuppressOverviewDetailLoading(false);
-  }
-  previousPathRef.current = location.pathname;
-}, [location.pathname]);
-const effectiveSuppressDetailLoading =
-  suppressOverviewDetailLoading ||
-  (location.pathname === "/" && previousPathRef.current !== "/");
-const currentNoticeScope = useMemo(
-  () => resolveNoticeScope(location.pathname),
-  [location.pathname]
-);
-const loginRedirectState = useMemo(
-  () => ({
-    from: {
-      pathname: location.pathname,
-      search: location.search,
-      hash: location.hash,
-    },
-  }),
-  [location.pathname, location.search, location.hash]
-);
   const handleLogin = useCallback(
     async (username: string, password: string) => {
       setAuthSubmitting(true);
@@ -14114,22 +14116,24 @@ const hasManualKubeconfig = useMemo(
           <Route
             path="/setting/*"
             element={
-              <SettingsPage
-                tabs={settingsTabs}
-                initialTabId="overview"
-                activeTabId={settingsTabId}
-                onTabChange={handleSelectSettingsTab}
-                onLeave={handleLeaveSettings}
-                user={authUser}
-                onLogout={handleLogout}
-                onChangePassword={handleOpenPasswordModal}
-                confirmState={
-                  confirmState && confirmState.scope === "settings"
-                    ? confirmState
-                    : null
-                }
-                onConfirmClose={() => setConfirmState(null)}
-              />
+              <Suspense fallback={<div className="page-loading">加载中...</div>}>
+                <LazySettingsPage
+                  tabs={settingsTabs}
+                  initialTabId="overview"
+                  activeTabId={settingsTabId}
+                  onTabChange={handleSelectSettingsTab}
+                  onLeave={handleLeaveSettings}
+                  user={authUser}
+                  onLogout={handleLogout}
+                  onChangePassword={handleOpenPasswordModal}
+                  confirmState={
+                    confirmState && confirmState.scope === "settings"
+                      ? confirmState
+                      : null
+                  }
+                  onConfirmClose={() => setConfirmState(null)}
+                />
+              </Suspense>
             }
           />
           <Route
