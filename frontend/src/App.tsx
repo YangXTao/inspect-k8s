@@ -22,7 +22,6 @@ import {
   useParams,
 } from "react-router-dom";
 import { Helmet } from "react-helmet";
-import type { Location as RouterLocation } from "history";
 import {
   cancelInspectionRun,
   createAgent as apiCreateAgent,
@@ -2141,32 +2140,16 @@ const logWithTimestamp = (
 };
 
 const TopNavigation = ({
-  onOpenSettings,
   showClusters,
   showAudit,
   showSchedule,
   showHistory,
 }: {
-  onOpenSettings: () => void;
   showClusters: boolean;
   showAudit: boolean;
   showSchedule: boolean;
   showHistory: boolean;
 }) => {
-  const handleSettingsClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (
-      event.metaKey ||
-      event.ctrlKey ||
-      event.shiftKey ||
-      event.altKey ||
-      event.button !== 0
-    ) {
-      return;
-    }
-    event.preventDefault();
-    onOpenSettings();
-  };
-
   return (
     <header className="top-navigation">
       <Link
@@ -2269,10 +2252,11 @@ const TopNavigation = ({
             </span>
           </NavLink>
         )}
-        <Link
+        <NavLink
           to={SETTINGS_BASE_PATH}
-          className="top-navigation-link"
-          onClick={handleSettingsClick}
+          className={({ isActive }) =>
+            `top-navigation-link${isActive ? " active" : ""}`
+          }
         >
           <span className="top-navigation-link-inner">
             <span className="top-navigation-link-icon" aria-hidden="true">
@@ -2285,7 +2269,7 @@ const TopNavigation = ({
             </span>
             <span>设置</span>
           </span>
-        </Link>
+        </NavLink>
       </nav>
     </header>
   );
@@ -5481,13 +5465,12 @@ const ConfirmationModal = ({ state, onClose }: ConfirmationModalProps) => {
   );
 };
 
-interface SettingsModalProps {
-  open: boolean;
+interface SettingsPageProps {
   tabs: SettingsModalTab[];
   initialTabId?: string;
   activeTabId: string;
   onTabChange: (tabId: string) => void;
-  onClose: () => void;
+  onLeave: () => void;
   user?: AuthUser | null;
   onLogout?: () => void;
   onChangePassword?: () => void;
@@ -5495,19 +5478,18 @@ interface SettingsModalProps {
   onConfirmClose?: () => void;
 }
 
-const SettingsModal = ({
-  open,
+const SettingsPage = ({
   tabs,
   initialTabId,
   activeTabId,
   onTabChange,
-  onClose,
+  onLeave,
   user,
   onLogout,
   onChangePassword,
   confirmState,
   onConfirmClose,
-}: SettingsModalProps) => {
+}: SettingsPageProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const hasTabs = tabs.length > 0;
   const fallbackTabId =
@@ -5521,24 +5503,21 @@ const SettingsModal = ({
     tabs.find((tab) => tab.id === effectiveTabId) ?? tabs[0] ?? null;
 
   useEffect(() => {
-    if (!open) {
-      return;
-    }
     const handleKeyDown = (event: { key: string }) => {
       if (event.key === "Escape") {
         if (confirmState && onConfirmClose) {
           onConfirmClose();
         } else {
-          onClose();
+          onLeave();
         }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, confirmState, onClose, onConfirmClose]);
+  }, [confirmState, onLeave, onConfirmClose]);
 
   useEffect(() => {
-    if (!open || !containerRef.current) {
+    if (!containerRef.current) {
       return;
     }
     const previouslyFocused = document.activeElement as HTMLElement | null;
@@ -5546,9 +5525,9 @@ const SettingsModal = ({
     return () => {
       previouslyFocused?.focus?.();
     };
-  }, [open]);
+  }, []);
 
-  if (!open || !hasTabs || !currentTab) {
+  if (!hasTabs || !currentTab) {
     return null;
   }
 
@@ -5563,10 +5542,10 @@ const SettingsModal = ({
   }`;
 
   return (
-    <div className="modal-backdrop settings-confirm-backdrop" aria-modal="true">
+    <div className="settings-page">
       <div
         className={modalClassName}
-        role="dialog"
+        role="region"
         aria-label="系统设置"
         ref={containerRef}
         tabIndex={-1}
@@ -5579,10 +5558,10 @@ const SettingsModal = ({
           <button
             type="button"
             className="link-button"
-            onClick={onClose}
-            aria-label="关闭设置"
+            onClick={onLeave}
+            aria-label="返回上一页"
           >
-            关闭
+            返回
           </button>
         </div>
         <div className="settings-modal-shell">
@@ -5635,7 +5614,7 @@ const SettingsModal = ({
           </div>
           <section className="settings-modal-main">
             {currentTab.render({
-              close: onClose,
+              close: onLeave,
               selectTab,
             })}
           </section>
@@ -5644,7 +5623,7 @@ const SettingsModal = ({
       {confirmState && (
         <ConfirmationModal
           state={confirmState}
-          onClose={onConfirmClose ?? onClose}
+          onClose={onConfirmClose ?? onLeave}
         />
       )}
     </div>
@@ -10983,7 +10962,6 @@ const App = () => {
       setAuthSubmitting(false);
       setAuthUser(null);
       setAuthChecked(true);
-      setSettingsOpen(false);
       setClusters([]);
       setAgents([]);
       setRuns([]);
@@ -10991,6 +10969,7 @@ const App = () => {
       setSchedules([]);
       setRoles([]);
       setUsers([]);
+      setSettingsTabId("overview");
     }
   }, []);
 
@@ -11089,13 +11068,11 @@ const App = () => {
     Record<number, number>
   >({});
 
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSubmitting, setSettingsSubmitting] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [settingsNotice, setSettingsNotice] = useState<string | null>(null);
   const [settingsTabId, setSettingsTabId] = useState<string>("overview");
   const previousSettingsPathRef = useRef<string>("/");
-  const backgroundLocationRef = useRef<RouterLocation | null>(null);
   const [roles, setRoles] = useState<AuthRole[]>([]);
   const [rolesLoading, setRolesLoading] = useState(false);
   const [rolesError, setRolesError] = useState<string | null>(null);
@@ -11396,15 +11373,6 @@ const loginRedirectState = useMemo(
   }),
   [location.pathname, location.search, location.hash]
 );
-  const backgroundLocation =
-    (
-      location.state as
-        | {
-            backgroundLocation?: RouterLocation;
-          }
-        | undefined
-    )?.backgroundLocation ?? null;
-
   const handleLogin = useCallback(
     async (username: string, password: string) => {
       setAuthSubmitting(true);
@@ -11412,8 +11380,6 @@ const loginRedirectState = useMemo(
       try {
         const user = await login(username, password);
         setAuthUser(user);
-        backgroundLocationRef.current = null;
-        setSettingsOpen(false);
         setSettingsTabId("overview");
         setConfirmState(null);
         previousSettingsPathRef.current = "/";
@@ -11427,12 +11393,6 @@ const loginRedirectState = useMemo(
     },
     [navigate]
   );
-
-  useEffect(() => {
-    if (backgroundLocation) {
-      backgroundLocationRef.current = backgroundLocation;
-    }
-  }, [backgroundLocation]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -11509,38 +11469,15 @@ const loginRedirectState = useMemo(
   }, [isAuthenticated, location.pathname]);
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      return;
-    }
-    if (!location.pathname.startsWith(SETTINGS_BASE_PATH)) {
-      return;
-    }
-    if (backgroundLocation || backgroundLocationRef.current) {
-      return;
-    }
-    setSettingsOpen(false);
-    setSettingsTabId("overview");
-    previousSettingsPathRef.current = "/";
-    navigate("/", { replace: true });
-  }, [isAuthenticated, location.pathname, backgroundLocation, navigate]);
-
-  useEffect(() => {
     if (isAuthenticated) {
       return;
     }
-    setSettingsOpen(false);
     setSettingsTabId("overview");
     setConfirmState((prev) =>
       prev && prev.scope === "settings" ? null : prev
     );
-    backgroundLocationRef.current = null;
     previousSettingsPathRef.current = "/";
   }, [isAuthenticated]);
-
-  const routesLocation =
-    location.pathname.startsWith(SETTINGS_BASE_PATH) && backgroundLocation
-      ? backgroundLocation
-      : location;
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -11626,12 +11563,13 @@ const loginRedirectState = useMemo(
   }, [location.pathname, location.search, location.hash]);
 
   useEffect(() => {
-    if (!settingsOpen) {
+    if (!location.pathname.startsWith(SETTINGS_BASE_PATH)) {
       setConfirmState((prev) =>
         prev && prev.scope === "settings" ? null : prev
       );
+      setSettingsTabId("overview");
     }
-  }, [settingsOpen]);
+  }, [location.pathname]);
 
   const setClusterTesting = useCallback((clusterId: number, value: boolean) => {
     setTestingClusterIds((prev) => {
@@ -12387,44 +12325,20 @@ const loginRedirectState = useMemo(
     [clusters]
   );
 
-  const handleOpenSettings = useCallback(() => {
-    setSettingsError(null);
-    setSettingsNotice(null);
-
-    if (location.pathname.startsWith(SETTINGS_BASE_PATH)) {
-      setSettingsOpen(true);
-      return;
-    }
-
-    const currentPath = `${location.pathname}${location.search}${location.hash}`;
-    previousSettingsPathRef.current =
-      currentPath.length > 0 ? currentPath : "/";
-    backgroundLocationRef.current = location;
-    setSettingsTabId("overview");
-    setSettingsOpen(true);
-    navigate(SETTINGS_BASE_PATH, {
-      state: { backgroundLocation: location },
-    });
-  }, [location, navigate]);
-
-  const handleCloseSettings = useCallback(() => {
-    const background = backgroundLocationRef.current;
-    setSettingsOpen(false);
+  const handleLeaveSettings = useCallback(() => {
     setConfirmState((prev) =>
       prev && prev.scope === "settings" ? null : prev
     );
-    if (location.pathname.startsWith(SETTINGS_BASE_PATH) && background) {
-      backgroundLocationRef.current = null;
-      navigate(-1);
-      return;
-    }
+    setSettingsTabId("overview");
     const target =
-      (background
-        ? `${background.pathname}${background.search}${background.hash}`
-        : previousSettingsPathRef.current) || "/";
-    backgroundLocationRef.current = null;
-    navigate(target, { replace: true });
-  }, [location.pathname, navigate]);
+      previousSettingsPathRef.current &&
+      !previousSettingsPathRef.current.startsWith(SETTINGS_BASE_PATH)
+        ? previousSettingsPathRef.current
+        : "/";
+    navigate(target, {
+      replace: true,
+    });
+  }, [navigate]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -14347,10 +14261,8 @@ const hasManualKubeconfig = useMemo(
           ? SETTINGS_BASE_PATH
           : `${SETTINGS_BASE_PATH}/${nextTab}`;
       if (location.pathname !== targetPath) {
-        const baseBackground = backgroundLocation ?? backgroundLocationRef.current;
         navigate(targetPath, {
           replace: location.pathname.startsWith(SETTINGS_BASE_PATH),
-          state: baseBackground ? { backgroundLocation: baseBackground } : undefined,
         });
       }
     },
@@ -14359,7 +14271,6 @@ const hasManualKubeconfig = useMemo(
       settingsTabId,
       navigate,
       location.pathname,
-      backgroundLocation,
     ]
   );
 
@@ -14368,7 +14279,8 @@ const hasManualKubeconfig = useMemo(
       return;
     }
     if (location.pathname.startsWith(SETTINGS_BASE_PATH)) {
-      setSettingsOpen(true);
+      setSettingsError(null);
+      setSettingsNotice(null);
       const segments = location.pathname.split("/").filter(Boolean);
       const requestedTab = (segments[1] ?? "overview").toLowerCase();
       const validTabIds = settingsTabs.map((tab) => tab.id);
@@ -14392,24 +14304,17 @@ const hasManualKubeconfig = useMemo(
             ? SETTINGS_BASE_PATH
             : `${SETTINGS_BASE_PATH}/${nextTab}`;
         if (location.pathname !== fallbackPath) {
-          const baseBackground =
-            backgroundLocation ?? backgroundLocationRef.current;
           navigate(fallbackPath, {
             replace: true,
-            state: baseBackground ? { backgroundLocation: baseBackground } : undefined,
           });
         }
       }
-    } else {
-      setSettingsOpen(false);
-      backgroundLocationRef.current = null;
     }
   }, [
     location.pathname,
     settingsTabs,
     settingsTabId,
     navigate,
-    backgroundLocation,
     authChecked,
   ]);
 
@@ -14604,7 +14509,6 @@ const hasManualKubeconfig = useMemo(
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
       </Helmet>
       <TopNavigation
-        onOpenSettings={handleOpenSettings}
         showClusters={canViewClusterAgents}
         showAudit={canViewAudit}
         showSchedule={canViewSchedule}
@@ -14620,7 +14524,7 @@ const hasManualKubeconfig = useMemo(
         </div>
       )}
       <main className="app-shell">
-        <Routes location={routesLocation}>
+        <Routes>
           <Route path="/" element={overviewRouteElement} />
           <Route
             path="/clusters"
@@ -14633,7 +14537,27 @@ const hasManualKubeconfig = useMemo(
             }
           />
           <Route path="/login" element={<Navigate to="/" replace />} />
-          <Route path="/setting/*" element={overviewRouteElement} />
+          <Route
+            path="/setting/*"
+            element={
+              <SettingsPage
+                tabs={settingsTabs}
+                initialTabId="overview"
+                activeTabId={settingsTabId}
+                onTabChange={handleSelectSettingsTab}
+                onLeave={handleLeaveSettings}
+                user={authUser}
+                onLogout={handleLogout}
+                onChangePassword={handleOpenPasswordModal}
+                confirmState={
+                  confirmState && confirmState.scope === "settings"
+                    ? confirmState
+                    : null
+                }
+                onConfirmClose={() => setConfirmState(null)}
+              />
+            }
+          />
           <Route
             path="/audit"
             element={
@@ -14778,24 +14702,6 @@ const hasManualKubeconfig = useMemo(
       <ConfirmationModal
         state={confirmState && confirmState.scope !== "settings" ? confirmState : null}
         onClose={() => setConfirmState(null)}
-      />
-
-      <SettingsModal
-        open={settingsOpen}
-        tabs={settingsTabs}
-        initialTabId="overview"
-        onClose={handleCloseSettings}
-        user={authUser}
-        onLogout={handleLogout}
-        onChangePassword={handleOpenPasswordModal}
-        confirmState={
-          confirmState && confirmState.scope === "settings"
-            ? confirmState
-            : null
-        }
-        onConfirmClose={() => setConfirmState(null)}
-        activeTabId={settingsTabId}
-        onTabChange={handleSelectSettingsTab}
       />
 
       <PasswordModal
