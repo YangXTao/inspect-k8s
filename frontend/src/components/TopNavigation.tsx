@@ -1,4 +1,4 @@
-import { Link, NavLink } from "react-router-dom";
+﻿import { Link, NavLink } from "react-router-dom";
 import type { AuthUser } from "../types";
 import { useEffect, useRef, useState } from "react";
 
@@ -158,7 +158,7 @@ const TopNavigation = ({
             <span className="avatar-caret" aria-hidden="true">
               <svg viewBox="0 0 20 20">
                 <path
-                  d="M5.3 7.7a1 1 0 0 1 1.4 0L10 11l3.3-3.3a1 1 0 0 1 1.4 1.4l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 0 1 0-1.4Z"
+                  d="M5.3 7.7a1 1 0 0 1 1.4 0L10 11l3.3-3.3a1 1 0 1 1 1.4 1.4l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 0 1 0-1.4Z"
                   fill="currentColor"
                 />
               </svg>

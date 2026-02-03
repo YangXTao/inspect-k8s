@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+﻿import { useEffect, useMemo, useRef } from "react";
 import type { ConfirmDialogState, SettingsModalTab } from "../types-ui";
 import type { AuthUser } from "../types";
 import ConfirmationModal from "../ConfirmationModal";
