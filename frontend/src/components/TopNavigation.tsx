@@ -152,17 +152,24 @@ const TopNavigation = ({
             title={displayName || "用户"}
           >
             <span className="avatar-circle">{avatarLabel}</span>
-            <span className="avatar-caret" aria-hidden="true">
-              <svg viewBox="0 0 20 20">
-                <path
-                  d="M5.3 7.7a1 1 0 0 1 1.4 0L10 11l3.3-3.3a1 1 0 1 1 1.4 1.4l-4 4a1 1 0 0 1-1.4 0l-4-4a1 1 0 0 1 0-1.4Z"
-                  fill="currentColor"
-                />
-              </svg>
-            </span>
           </button>
           {menuOpen && (
             <div className="avatar-menu" role="menu">
+              <div className="avatar-menu-header">
+                <div className="avatar-menu-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path
+                      d="M12 12.5a3.25 3.25 0 1 0-3.25-3.25A3.25 3.25 0 0 0 12 12.5Zm0 1.5c-2.17 0-6.5 1.09-6.5 3.25V19a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-1.75c0-2.16-4.33-3.25-6.5-3.25Z"
+                      fill="currentColor"
+                    />
+                  </svg>
+                </div>
+                <div className="avatar-menu-text">
+                  <div className="avatar-menu-name">{displayName || "admin"}</div>
+                  <div className="avatar-menu-sub">Default Admin</div>
+                </div>
+              </div>
+              <div className="avatar-menu-divider" aria-hidden="true" />
               <button
                 type="button"
                 role="menuitem"
