@@ -411,12 +411,14 @@ const AUDIT_ENTITY_OPTIONS = [
 ];
 const SETTINGS_BASE_PATH = "/setting";
 const SETTINGS_TAB_IDS = [
-  "overview",
+  "general",
   "inspection",
   "prometheus-version",
   "users",
-  "license",
 ] as const;
+const GENERAL_BASE_URL_STORAGE_KEY = "k8s-inspection.baseUrl";
+const GENERAL_RETENTION_DAYS_STORAGE_KEY = "k8s-inspection.reportRetentionDays";
+const DEFAULT_REPORT_RETENTION_DAYS = 30;
 const CONNECTION_TEST_OPERATOR = "__system_connection_test__";
 
 const BEIJING_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
@@ -5920,7 +5922,7 @@ const InspectionSettingsPanel = ({
             </div>
             {items.length > 0 && (
               <div className="inspection-section-pagination">
-                <div className="inline-pagination">
+                <div className="inline-pagination history-pagination-controls">
                   <label className="page-size-control">
                     每页
                     <select
@@ -6068,12 +6070,12 @@ const InspectionSettingsPanel = ({
       </div>
       {!readOnly && formModalOpen && (
         <div className="modal-backdrop fullscreen">
-          <div className="modal compact">
+          <div className="modal compact inspection-item-modal">
             <div className="modal-header">
               <h3>{editingItem ? "编辑巡检项" : "添加巡检项"}</h3>
               <button
                 type="button"
-                className="link-button"
+                className="link-button modal-close"
                 onClick={() => {
                   resetForm();
                   setFormModalOpen(false);
@@ -6082,8 +6084,11 @@ const InspectionSettingsPanel = ({
                 关闭
               </button>
             </div>
-            <form className="settings-form inspection-form" onSubmit={handleSubmit}>
-              <label>
+            <form
+              className="settings-form inspection-form inspection-form-grid"
+              onSubmit={handleSubmit}
+            >
+              <label className="field-span-2">
                 名称
                 <input
                   type="text"
@@ -6124,7 +6129,7 @@ const InspectionSettingsPanel = ({
                   <option value="promql">PromQL</option>
                 </select>
               </label>
-              <label>
+              <label className="field-span-2">
                 描述
                 <input
                   type="text"
@@ -6135,7 +6140,7 @@ const InspectionSettingsPanel = ({
                 />
               </label>
               {formTypeMode === "command" && (
-                <label>
+                <label className="field-span-full">
                   命令
                   <input
                     type="text"
@@ -6147,20 +6152,20 @@ const InspectionSettingsPanel = ({
                 </label>
               )}
               {formTypeMode === "command" && (
-                <label>
+                <label className="field-span-full">
                   告警建议
                   <textarea
                     value={commandSuggestion}
                     onChange={(event) => setCommandSuggestion(event.target.value)}
                     disabled={submitting}
-                    rows={3}
+                    rows={2}
                     placeholder="例如：检查证书是否临近过期"
                   />
                 </label>
               )}
               {formTypeMode === "promql" && (
                 <>
-                  <label>
+                  <label className="field-span-full">
                     PromQL 表达式
                     <input
                       type="text"
@@ -6170,7 +6175,7 @@ const InspectionSettingsPanel = ({
                       placeholder="例如：sum(rate(container_cpu_usage_seconds_total[5m]))"
                     />
                   </label>
-                  <div className="field-row">
+                  <div className="field-row field-span-full">
                     <label>
                       严重程度
                       <select
@@ -6220,28 +6225,28 @@ const InspectionSettingsPanel = ({
                       />
                     </label>
                   </div>
-                  <label>
+                  <label className="field-span-full">
                     {promqlSeverityLabel}建议
                     <textarea
                       value={promqlDescribe}
                       onChange={(event) => setPromqlDescribe(event.target.value)}
                       disabled={submitting}
-                      rows={3}
+                      rows={2}
                       placeholder="达到阈值时写入巡检建议，例如：检查集群负载或扩容"
                     />
                   </label>
                 </>
               )}
-              <label>
+              <label className="field-span-full">
                 配置 (JSON)
                 <textarea
                   value={configText}
                   onChange={(event) => setConfigText(event.target.value)}
-                  rows={6}
+                  rows={4}
                   disabled={submitting}
                 />
               </label>
-              <div className="settings-actions">
+              <div className="settings-actions field-span-full">
                 <button
                   type="button"
                   className="secondary"
@@ -8564,30 +8569,93 @@ const UserSettingsPanel = ({
   );
 };
 
-interface LicenseSettingsPanelProps {
+interface GeneralSettingsPanelProps {
   status: LicenseCapabilities;
   uploading: boolean;
   textUploading: boolean;
   canUpload: boolean;
   onUpload: (file: File) => Promise<LicenseStatus | null>;
   onUploadText: (value: string) => Promise<LicenseStatus | null>;
-  onRefresh: () => Promise<LicenseStatus | null>;
 }
 
-const LicenseSettingsPanel = ({
+const GeneralSettingsPanel = ({
   status,
   uploading,
   textUploading,
   canUpload,
   onUpload,
   onUploadText,
-  onRefresh,
-}: LicenseSettingsPanelProps) => {
+}: GeneralSettingsPanelProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [textValue, setTextValue] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
   const [localNotice, setLocalNotice] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
+  const [generalNotice, setGeneralNotice] = useState<string | null>(null);
+  const [generalError, setGeneralError] = useState<string | null>(null);
+  const [baseUrl, setBaseUrl] = useState(() => {
+    if (typeof window === "undefined") {
+      return appConfig.apiBaseUrl;
+    }
+    const stored = window.localStorage.getItem(
+      GENERAL_BASE_URL_STORAGE_KEY
+    );
+    if (stored && stored.trim()) {
+      return stored;
+    }
+    const apiBase = appConfig.apiBaseUrl?.trim() ?? "";
+    let resolved =
+      apiBase.length === 0
+        ? window.location.origin
+        : apiBase.startsWith("/")
+          ? `${window.location.origin}${apiBase}`
+          : apiBase;
+    resolved = resolved.replace(/\/api\/?$/i, "");
+    return resolved || window.location.origin;
+  });
+  const [retentionDays, setRetentionDays] = useState(() => {
+    if (typeof window === "undefined") {
+      return String(DEFAULT_REPORT_RETENTION_DAYS);
+    }
+    const stored = window.localStorage.getItem(
+      GENERAL_RETENTION_DAYS_STORAGE_KEY
+    );
+    if (stored && stored.trim()) {
+      return stored;
+    }
+    return String(DEFAULT_REPORT_RETENTION_DAYS);
+  });
+
+  const handleSaveGeneral = () => {
+    const trimmedBaseUrl = baseUrl.trim();
+    if (!trimmedBaseUrl) {
+      setGeneralError("BaseURL 不能为空");
+      setGeneralNotice(null);
+      return;
+    }
+    if (!/^https?:\/\//i.test(trimmedBaseUrl)) {
+      setGeneralError("BaseURL 需以 http:// 或 https:// 开头");
+      setGeneralNotice(null);
+      return;
+    }
+    const parsedDays = Number(retentionDays);
+    if (!Number.isFinite(parsedDays) || parsedDays <= 0) {
+      setGeneralError("巡检报告保存时长需为正整数");
+      setGeneralNotice(null);
+      return;
+    }
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(
+        GENERAL_BASE_URL_STORAGE_KEY,
+        trimmedBaseUrl
+      );
+      window.localStorage.setItem(
+        GENERAL_RETENTION_DAYS_STORAGE_KEY,
+        String(Math.floor(parsedDays))
+      );
+    }
+    setGeneralError(null);
+    setGeneralNotice("已保存通用设置");
+  };
 
   const handleFileChange = async (
     event: ChangeEvent<HTMLInputElement>
@@ -8602,8 +8670,10 @@ const LicenseSettingsPanel = ({
       return;
     }
     try {
+      setLocalNotice(null);
       setLocalError(null);
       await onUpload(file);
+      setLocalNotice("已上传 License 文件");
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "上传 License 失败";
@@ -8623,29 +8693,15 @@ const LicenseSettingsPanel = ({
       return;
     }
     try {
+      setLocalNotice(null);
       setLocalError(null);
       await onUploadText(content);
       setTextValue("");
+      setLocalNotice("已导入 License 文本");
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "导入 License 失败";
       setLocalError(message);
-    }
-  };
-
-  const handleRefresh = async () => {
-    try {
-      setRefreshing(true);
-      setLocalError(null);
-      setLocalNotice(null);
-      await onRefresh();
-      setLocalNotice("已刷新 License 状态");
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "刷新 License 状态失败";
-      setLocalError(message);
-    } finally {
-      setRefreshing(false);
     }
   };
 
@@ -8661,111 +8717,159 @@ const LicenseSettingsPanel = ({
     return () => window.clearTimeout(timer);
   }, [localNotice]);
 
+  useEffect(() => {
+    if (!generalNotice || typeof window === "undefined") {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setGeneralNotice(null);
+    }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [generalNotice]);
+
   return (
-    <div className="settings-content settings-content-stack license-panel">
-      <div className="settings-header">
-        <div>
-          <h3>License 管理</h3>
-          <p>统一管理巡检项、Agent 节点以及 License 授权。</p>
+    <div className="settings-content settings-content-stack general-settings-panel">
+      {generalNotice && <div className="feedback success">{generalNotice}</div>}
+      {generalError && <div className="feedback error">{generalError}</div>}
+      <section className="general-settings-card">
+        <div className="general-settings-header">
+          <h3>BaseURL</h3>
+          <p>用于 Agent 上报心跳的地址，默认与 Backend 地址一致。</p>
+        </div>
+        <div className="general-settings-body">
+          <label className="general-settings-field">
+            <span>BaseURL</span>
+            <input
+              type="text"
+              value={baseUrl}
+              onChange={(event) => setBaseUrl(event.target.value)}
+              placeholder="例如：http://backend:8000"
+            />
+          </label>
+          <span className="general-settings-hint">
+            当前默认：{baseUrl || "未设置"}
+          </span>
         </div>
         <div className="settings-actions">
-          <button
-            type="button"
-            className="secondary"
-            onClick={handleRefresh}
-            disabled={refreshing}
-          >
-            {refreshing ? "刷新中..." : "刷新状态"}
+          <button type="button" className="primary" onClick={handleSaveGeneral}>
+            保存
           </button>
         </div>
-      </div>
-      {localNotice && <div className="feedback success">{localNotice}</div>}
-      {status.reason && !status.valid && (
-        <div className="feedback warning">{status.reason}</div>
-      )}
-      {!canUpload && (
-        <div className="feedback warning">当前账号无 License 上传权限</div>
-      )}
-      {localError && <div className="feedback error">{localError}</div>}
-      <section className="settings-list">
-        <table>
-          <tbody>
-            <tr>
-              <th>状态</th>
-              <td>{status.valid ? "已激活" : "未激活"}</td>
-            </tr>
-            <tr>
-              <th>授权对象</th>
-              <td>{licenseStatus?.licensee ?? "-"}</td>
-            </tr>
-            <tr>
-              <th>产品</th>
-              <td>{licenseStatus?.product ?? "-"}</td>
-            </tr>
-            <tr>
-              <th>有效期</th>
-              <td>
-                {licenseStatus?.not_before ?? "-"} ~{" "}
-                {licenseStatus?.expires_at ?? "-"}
-              </td>
-            </tr>
-            <tr>
-              <th>特性</th>
-              <td>
-                {status.features.length === 0 ? (
-                  "-"
-                ) : (
-                  <div className="chip-group">
-                    {status.features.map((feature) => (
-                      <span key={feature} className="chip">
-                        {feature}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </td>
-            </tr>
-          </tbody>
-        </table>
       </section>
-      {canUpload && (
-        <div className="license-detail-grid">
-          <section className="settings-form license-form">
-            <h4>License 文件</h4>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".lic,.txt,.json"
-              onChange={handleFileChange}
-              disabled={uploading}
-            />
-            <p className="settings-overview-hint">
-              支持 .lic / .txt / .json 文件，上传后立即生效。
-            </p>
-          </section>
-          <section className="settings-form license-form">
-            <h4>License 文本</h4>
-            <form onSubmit={handleSubmitText}>
-              <textarea
-                rows={6}
-                value={textValue}
-                onChange={(event) => setTextValue(event.target.value)}
-                placeholder="-----BEGIN LICENSE-----"
-                disabled={textUploading}
-              />
-              <div className="settings-actions">
-                <button
-                  type="submit"
-                  className="primary"
-                  disabled={textUploading}
-                >
-                  {textUploading ? "导入中..." : "导入文本"}
-                </button>
-              </div>
-            </form>
-          </section>
+      <section className="general-settings-card">
+        <div className="general-settings-header">
+          <h3>巡检报告保存时长</h3>
+          <p>默认 30 天，超过保存时长的报告会自动 GC 清理。</p>
         </div>
-      )}
+        <div className="general-settings-body">
+          <label className="general-settings-field">
+            <span>保留天数</span>
+            <input
+              type="number"
+              min={1}
+              value={retentionDays}
+              onChange={(event) => setRetentionDays(event.target.value)}
+              placeholder="例如：30"
+            />
+          </label>
+        </div>
+        <div className="settings-actions">
+          <button type="button" className="primary" onClick={handleSaveGeneral}>
+            保存
+          </button>
+        </div>
+      </section>
+      <section className="general-settings-card">
+        <div className="general-settings-header">
+          <h3>License 管理</h3>
+        </div>
+        {localNotice && <div className="feedback success">{localNotice}</div>}
+        {status.reason && !status.valid && (
+          <div className="feedback warning">{status.reason}</div>
+        )}
+        {!canUpload && (
+          <div className="feedback warning">当前账号无 License 上传权限</div>
+        )}
+        {localError && <div className="feedback error">{localError}</div>}
+        <div className="general-license-grid">
+          <div className="general-license-status">
+            <table>
+              <tbody>
+                <tr>
+                  <th>状态</th>
+                  <td>{status.valid ? "已激活" : "未激活"}</td>
+                </tr>
+                <tr>
+                  <th>授权对象</th>
+                  <td>{licenseStatus?.licensee ?? "-"}</td>
+                </tr>
+                <tr>
+                  <th>产品</th>
+                  <td>{licenseStatus?.product ?? "-"}</td>
+                </tr>
+                <tr>
+                  <th>有效期</th>
+                  <td>
+                    {licenseStatus?.not_before ?? "-"} ~{" "}
+                    {licenseStatus?.expires_at ?? "-"}
+                  </td>
+                </tr>
+                <tr>
+                  <th>特性</th>
+                  <td>
+                    {status.features.length === 0 ? (
+                      "-"
+                    ) : (
+                      <div className="chip-group">
+                        {status.features.map((feature) => (
+                          <span key={feature} className="chip">
+                            {feature}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          {canUpload && (
+            <div className="general-license-upload">
+              <label className="general-settings-field">
+                <span>License 文件</span>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".lic,.txt,.json"
+                  onChange={handleFileChange}
+                  disabled={uploading}
+                />
+              </label>
+              <form onSubmit={handleSubmitText}>
+                <label className="general-settings-field">
+                  <span>License 文本</span>
+                  <textarea
+                    rows={4}
+                    value={textValue}
+                    onChange={(event) => setTextValue(event.target.value)}
+                    placeholder="-----BEGIN LICENSE-----"
+                    disabled={textUploading}
+                  />
+                </label>
+                <div className="settings-actions">
+                  <button
+                    type="submit"
+                    className="primary"
+                    disabled={textUploading}
+                  >
+                    {textUploading ? "导入中..." : "导入文本"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+        </div>
+      </section>
     </div>
   );
 };
@@ -10548,7 +10652,7 @@ const App = () => {
       setSchedules([]);
       setRoles([]);
       setUsers([]);
-      setSettingsTabId("overview");
+      setSettingsTabId("general");
     }
   }, []);
 
@@ -10561,8 +10665,8 @@ const App = () => {
   const handleOpenSettings = useCallback(() => {
     setSettingsError(null);
     setSettingsNotice(null);
-    setSettingsTabId("overview");
-    navigate(SETTINGS_BASE_PATH, {
+    setSettingsTabId("general");
+    navigate(`${SETTINGS_BASE_PATH}/general`, {
       replace: location.pathname.startsWith(SETTINGS_BASE_PATH),
     });
   }, [location.pathname, navigate]);
@@ -10659,7 +10763,7 @@ const App = () => {
   const [settingsSubmitting, setSettingsSubmitting] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [settingsNotice, setSettingsNotice] = useState<string | null>(null);
-  const [settingsTabId, setSettingsTabId] = useState<string>("overview");
+  const [settingsTabId, setSettingsTabId] = useState<string>("general");
   const previousSettingsPathRef = useRef<string>("/");
   const [roles, setRoles] = useState<AuthRole[]>([]);
   const [rolesLoading, setRolesLoading] = useState(false);
@@ -10937,7 +11041,7 @@ const App = () => {
       try {
         const user = await login(username, password);
         setAuthUser(user);
-        setSettingsTabId("overview");
+        setSettingsTabId("general");
         setConfirmState(null);
         previousSettingsPathRef.current = "/";
         navigate("/", { replace: true });
@@ -10976,7 +11080,9 @@ const App = () => {
       entityType = "cluster_config";
     } else if (pathname.startsWith("/setting")) {
       const segments = pathname.split("/").filter(Boolean);
-      const tab = (segments[1] ?? "overview").toLowerCase();
+      const rawTab = (segments[1] ?? "general").toLowerCase();
+      const tab =
+        rawTab === "license" || rawTab === "overview" ? "general" : rawTab;
       if (tab === "inspection") {
         description = "查询巡检项";
         entityType = "inspection_item";
@@ -10986,11 +11092,11 @@ const App = () => {
       } else if (tab === "users") {
         description = "查询用户管理";
         entityType = "auth_user";
-      } else if (tab === "license") {
-        description = "查询 License 设置";
-        entityType = "license";
+      } else if (tab === "general") {
+        description = "查询通用设置";
+        entityType = "setting";
       } else {
-        description = "查询设置总览";
+        description = "查询通用设置";
         entityType = "setting";
       }
     } else if (pathname.startsWith("/clusters/")) {
@@ -11029,7 +11135,7 @@ const App = () => {
     if (isAuthenticated) {
       return;
     }
-    setSettingsTabId("overview");
+    setSettingsTabId("general");
     setConfirmState((prev) =>
       prev && prev.scope === "settings" ? null : prev
     );
@@ -11124,7 +11230,7 @@ const App = () => {
       setConfirmState((prev) =>
         prev && prev.scope === "settings" ? null : prev
       );
-      setSettingsTabId("overview");
+      setSettingsTabId("general");
     }
   }, [location.pathname]);
 
@@ -11886,7 +11992,7 @@ const App = () => {
     setConfirmState((prev) =>
       prev && prev.scope === "settings" ? null : prev
     );
-    setSettingsTabId("overview");
+    setSettingsTabId("general");
     const target =
       previousSettingsPathRef.current &&
       !previousSettingsPathRef.current.startsWith(SETTINGS_BASE_PATH)
@@ -13649,16 +13755,17 @@ const hasManualKubeconfig = useMemo(
     () => {
       const tabs: SettingsModalTab[] = [
         {
-          id: "overview",
-          label: "设置总览",
-          render: ({ selectTab }) => (
-          <SettingsOverviewPanel
-            onOpenInspection={() => selectTab("inspection")}
-            onOpenLicense={() => selectTab("license")}
-            license={licenseCapabilities}
-            canOpenInspection={canViewInspectionItems}
-            canOpenLicense={canViewLicense}
-          />
+          id: "general",
+          label: "通用设置",
+          render: () => (
+            <GeneralSettingsPanel
+              status={licenseCapabilities}
+              uploading={licenseUploading}
+              textUploading={licenseTextUploading}
+              canUpload={canManageLicense}
+              onUpload={handleUploadLicenseFile}
+              onUploadText={handleUploadLicenseText}
+            />
           ),
         },
         {
@@ -13719,21 +13826,6 @@ const hasManualKubeconfig = useMemo(
             />
           ),
         },
-        {
-          id: "license",
-          label: "License 管理",
-          render: () => (
-            <LicenseSettingsPanel
-              status={licenseCapabilities}
-              uploading={licenseUploading}
-              textUploading={licenseTextUploading}
-              canUpload={canManageLicense}
-              onUpload={handleUploadLicenseFile}
-              onUploadText={handleUploadLicenseText}
-              onRefresh={refreshLicenseStatus}
-            />
-          ),
-        },
       ];
       return tabs.filter((tab) => {
         if (tab.id === "inspection") {
@@ -13744,9 +13836,6 @@ const hasManualKubeconfig = useMemo(
         }
         if (tab.id === "users") {
           return canViewUsers;
-        }
-        if (tab.id === "license") {
-          return canViewLicense;
         }
         return true;
       });
@@ -13793,12 +13882,10 @@ const hasManualKubeconfig = useMemo(
       licenseTextUploading,
       handleUploadLicenseFile,
       handleUploadLicenseText,
-      refreshLicenseStatus,
       canViewInspectionItems,
       canViewPrometheusVersions,
       canViewRoles,
       canViewUsers,
-      canViewLicense,
       canManageInspectionItems,
       canManagePrometheusVersions,
       canManageLicense,
@@ -13808,27 +13895,23 @@ const hasManualKubeconfig = useMemo(
   const handleSelectSettingsTab = useCallback(
     (tabId: string) => {
       const normalized = tabId.toLowerCase();
+      const resolved =
+        normalized === "license" || normalized === "overview"
+          ? "general"
+          : normalized;
       const validTabIds = settingsTabs.map((tab) => tab.id);
-      const nextTab = validTabIds.includes(normalized) ? normalized : "overview";
+      const nextTab = validTabIds.includes(resolved) ? resolved : "general";
       if (nextTab !== settingsTabId) {
         setSettingsTabId(nextTab);
       }
-      const targetPath =
-        nextTab === "overview"
-          ? SETTINGS_BASE_PATH
-          : `${SETTINGS_BASE_PATH}/${nextTab}`;
+      const targetPath = `${SETTINGS_BASE_PATH}/${nextTab}`;
       if (location.pathname !== targetPath) {
         navigate(targetPath, {
           replace: location.pathname.startsWith(SETTINGS_BASE_PATH),
         });
       }
     },
-    [
-      settingsTabs,
-      settingsTabId,
-      navigate,
-      location.pathname,
-    ]
+    [settingsTabs, settingsTabId, navigate, location.pathname]
   );
 
   useEffect(() => {
@@ -13839,15 +13922,18 @@ const hasManualKubeconfig = useMemo(
       setSettingsError(null);
       setSettingsNotice(null);
       const segments = location.pathname.split("/").filter(Boolean);
-      const requestedTab = (segments[1] ?? "overview").toLowerCase();
+      const rawTab = (segments[1] ?? "").toLowerCase();
+      const isAlias =
+        !rawTab || rawTab === "license" || rawTab === "overview";
+      const requestedTab = isAlias ? "general" : rawTab;
       const validTabIds = settingsTabs.map((tab) => tab.id);
       const nextTab = validTabIds.includes(requestedTab)
         ? requestedTab
-        : "overview";
+        : "general";
       if (nextTab !== settingsTabId) {
         setSettingsTabId(nextTab);
       }
-      if (!validTabIds.includes(requestedTab)) {
+      if (!validTabIds.includes(requestedTab) || isAlias) {
         if (
           !authChecked &&
           SETTINGS_TAB_IDS.includes(
@@ -13856,10 +13942,7 @@ const hasManualKubeconfig = useMemo(
         ) {
           return;
         }
-        const fallbackPath =
-          nextTab === "overview"
-            ? SETTINGS_BASE_PATH
-            : `${SETTINGS_BASE_PATH}/${nextTab}`;
+        const fallbackPath = `${SETTINGS_BASE_PATH}/${nextTab}`;
         if (location.pathname !== fallbackPath) {
           navigate(fallbackPath, {
             replace: true,
@@ -14104,7 +14187,7 @@ const hasManualKubeconfig = useMemo(
               <Suspense fallback={<div className="page-loading">加载中...</div>}>
                 <LazySettingsPage
                   tabs={settingsTabs}
-                  initialTabId="overview"
+                  initialTabId="general"
                   activeTabId={settingsTabId}
                   onTabChange={handleSelectSettingsTab}
                   onLeave={handleLeaveSettings}

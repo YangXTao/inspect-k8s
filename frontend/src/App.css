@@ -2027,7 +2027,7 @@ th {
   height: 100%;
   background: #f1f5f9;
   border-right: 1px solid #e2e8f0;
-  padding: 8px 10px;
+  padding: 14px 10px;
 }
 
 .settings-modal-nav {
@@ -2150,11 +2150,127 @@ th {
 .settings-modal-main > * {
   border: none;
   border-radius: 0;
-  padding: 18px 20px;
+  padding: 14px 20px;
   background: transparent;
   flex: 1;
   min-height: 0;
   overflow: visible;
+}
+
+.general-settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.general-settings-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 14px 16px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.general-settings-card .settings-actions {
+  justify-content: flex-end;
+}
+
+.general-settings-header h3 {
+  margin: 0;
+  font-size: 15px;
+  color: #0f172a;
+}
+
+.general-settings-header p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.general-settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.general-settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.general-settings-field input,
+.general-settings-field select,
+.general-settings-field textarea {
+  border-radius: 10px;
+  border: 1px solid #cbd5f5;
+  padding: 6px 10px;
+  font-size: 13px;
+  background: #fff;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.general-settings-hint {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.general-license-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(320px, 1.2fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.general-license-status table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.general-license-status th,
+.general-license-status td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 6px 4px;
+  text-align: left;
+}
+
+.general-license-status th {
+  width: 92px;
+  color: #475569;
+  font-weight: 600;
+}
+
+.general-license-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.general-license-upload form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.general-license-upload .settings-actions {
+  justify-content: flex-end;
+}
+
+.general-license-upload textarea {
+  min-height: 120px;
+}
+
+@media (max-width: 1100px) {
+  .general-license-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .settings-modal-compact .settings-modal-main > * {
@@ -2801,7 +2917,8 @@ th {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  font-size: 12px;
+  font-size: 13px;
+  color: #475569;
 }
 
 .modal-backdrop.fullscreen {
@@ -2819,6 +2936,25 @@ th {
   max-height: 90vh;
   overflow: auto;
   font-size: 14px;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.modal-close {
+  margin-left: auto;
+}
+
+.modal.compact.inspection-item-modal {
+  width: min(1200px, 96vw);
+  max-width: 1200px;
+  max-height: calc(100vh - 96px);
+  overflow: hidden;
 }
 
 .settings-pagination {
@@ -2842,8 +2978,32 @@ th {
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 14px;
-  padding: 14px;
+  padding: 12px;
   box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
+}
+
+.inspection-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.inspection-form-grid .field-span-2 {
+  grid-column: span 2;
+}
+
+.inspection-form-grid .field-span-full {
+  grid-column: 1 / -1;
+}
+
+.inspection-form-grid .field-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.inspection-form-grid .settings-actions {
+  justify-content: flex-end;
 }
 
 .inspection-form label {
@@ -2852,7 +3012,7 @@ th {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 8px;
+  gap: 6px;
 }
 
 .inspection-form input,
@@ -2865,6 +3025,26 @@ th {
   background: #fff;
   width: 100%;
   box-sizing: border-box;
+}
+
+@media (max-width: 1100px) {
+  .inspection-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .inspection-form-grid .field-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 780px) {
+  .inspection-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .inspection-form-grid .field-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .inspection-form input:focus,
@@ -2880,6 +3060,11 @@ th {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.settings-form.inspection-form-grid {
+  display: grid;
+  gap: 12px 16px;
 }
 
 .permission-panel {
