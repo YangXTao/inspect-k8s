@@ -59,14 +59,11 @@ const SettingsPage = ({
   }, [confirmState, onLeave, onConfirmClose]);
 
   useEffect(() => {
-    const locked = effectiveTabId !== "inspection";
-    document.body.classList.toggle("settings-lock", locked);
-    document.body.classList.toggle("settings-scrollable", !locked);
+    document.body.classList.add("settings-scrollable");
     return () => {
-      document.body.classList.remove("settings-lock");
       document.body.classList.remove("settings-scrollable");
     };
-  }, [effectiveTabId]);
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -88,7 +85,7 @@ const SettingsPage = ({
   };
 
   return (
-    <div className={`settings-page${effectiveTabId === "inspection" ? " scrollable" : ""}`}>
+    <div className="settings-page">
       <div
         className="settings-modal"
         role="region"
