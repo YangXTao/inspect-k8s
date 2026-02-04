@@ -15,6 +15,7 @@ html,
 body {
   height: 100%;
   background: #f6f7fb;
+  overflow: hidden;
 }
 
 html::-webkit-scrollbar,
@@ -1977,12 +1978,13 @@ th {
 
 .settings-page {
   width: 100%;
-  padding: calc(var(--top-nav-height, 64px) + 8px) 0 0;
+  padding: calc(var(--top-nav-height, 64px) + 8px) 0 24px;
   display: flex;
   justify-content: stretch;
   background: #f6f7fb;
   min-height: calc(100vh - var(--top-nav-height, 64px));
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .settings-modal {
@@ -2754,7 +2756,7 @@ th {
   flex: 1 1 auto;
 }
 .settings-list.full .table-wrapper {
-  max-height: calc(100vh - 260px);
+  max-height: calc(100vh - var(--top-nav-height, 64px) - 200px);
   overflow: auto;
 }
 
