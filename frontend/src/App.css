@@ -22,6 +22,12 @@ body.login-lock {
 .settings-lock {
   overflow: hidden;
 }
+.settings-scrollable {
+  overflow: auto;
+}
+.settings-lock {
+  overflow: hidden;
+}
 
 .login-page {
   height: 100vh;
@@ -1960,6 +1966,10 @@ th {
   min-height: calc(100vh - var(--top-nav-height, 64px));
   overflow: hidden;
 }
+.settings-page.scrollable {
+  padding-top: var(--top-nav-height, 64px);
+  overflow-y: auto;
+}
 
 .settings-modal {
   display: flex;
@@ -1993,8 +2003,8 @@ th {
 
 .settings-modal-shell {
   display: grid;
-  grid-template-columns: 180px 1fr;
-  gap: 14px;
+  grid-template-columns: 190px 1fr;
+  gap: 0;
   align-items: start;
   width: 100%;
   flex: 1;
@@ -2010,6 +2020,9 @@ th {
   position: sticky;
   top: calc(var(--top-nav-height, 64px));
   height: calc(100vh - var(--top-nav-height, 64px));
+  background: #f1f5f9;
+  border-right: 1px solid #e2e8f0;
+  padding: 12px 10px;
 }
 
 .settings-modal-nav {
@@ -2125,6 +2138,7 @@ th {
   border-radius: 14px;
   border: 1px solid #e2e8f0;
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+  margin-left: -1px;
 }
 
 .settings-modal-main > * {
@@ -2167,7 +2181,7 @@ th {
   gap: 18px;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .inspection-section {
@@ -2179,7 +2193,6 @@ th {
   flex-direction: column;
   gap: 12px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
-  height: calc(100vh - 200px);
 }
 
 .inspection-section-header {
