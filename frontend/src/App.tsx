@@ -5917,7 +5917,9 @@ const InspectionSettingsPanel = ({
                 </label>
               )}
               <span className="inspection-section-count">共 {totalItems} 条</span>
-              {items.length > 0 && (
+            </div>
+            {items.length > 0 && (
+              <div className="inspection-section-pagination">
                 <div className="inline-pagination">
                   <label className="page-size-control">
                     每页
@@ -5979,8 +5981,8 @@ const InspectionSettingsPanel = ({
                     </button>
                   </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
           <div className="settings-list full">
             <div className="table-wrapper spacious">
@@ -10976,7 +10978,7 @@ const App = () => {
       const segments = pathname.split("/").filter(Boolean);
       const tab = (segments[1] ?? "overview").toLowerCase();
       if (tab === "inspection") {
-        description = "查询巡检项设置";
+        description = "查询巡检项";
         entityType = "inspection_item";
       } else if (tab === "prometheus-version") {
         description = "查询 Prometheus 版本设置";
@@ -13661,7 +13663,7 @@ const hasManualKubeconfig = useMemo(
         },
         {
           id: "inspection",
-          label: "巡检项设置",
+          label: "巡检项",
           render: ({ close }) => (
             <InspectionSettingsPanel
               items={sortedItems}
