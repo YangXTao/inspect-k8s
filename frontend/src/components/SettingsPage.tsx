@@ -2,6 +2,7 @@
 import type { ConfirmDialogState, SettingsModalTab } from "../types-ui";
 import type { AuthUser } from "../types";
 import ConfirmationModal from "../ConfirmationModal";
+import { useEffect, useMemo, useRef } from "react";
 
 interface SettingsPageProps {
   tabs: SettingsModalTab[];
@@ -56,6 +57,13 @@ const SettingsPage = ({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [confirmState, onLeave, onConfirmClose]);
+
+  useEffect(() => {
+    document.body.classList.add("settings-lock");
+    return () => {
+      document.body.classList.remove("settings-lock");
+    };
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current) {

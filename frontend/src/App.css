@@ -19,6 +19,9 @@ body {
 body.login-lock {
   overflow: hidden;
 }
+.settings-lock {
+  overflow: hidden;
+}
 
 .login-page {
   height: 100vh;
@@ -1507,6 +1510,10 @@ button:disabled {
   border: 1px solid #e2e8f0;
 }
 
+.table-wrapper.spacious {
+  flex: 1;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -1951,6 +1958,7 @@ th {
   justify-content: stretch;
   background: #f6f7fb;
   min-height: calc(100vh - var(--top-nav-height, 64px));
+  overflow: hidden;
 }
 
 .settings-modal {
@@ -2109,7 +2117,7 @@ th {
   min-width: 0;
   padding: 0;
   max-height: 100%;
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -2756,6 +2764,31 @@ th {
   max-height: none;
   flex: 1;
   overflow: auto;
+}
+
+.inline-pagination {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.modal-backdrop.fullscreen {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 130;
+}
+
+.modal.compact {
+  width: min(820px, 90vw);
+  max-height: 90vh;
+  overflow: auto;
+  font-size: 14px;
 }
 
 .settings-pagination {
