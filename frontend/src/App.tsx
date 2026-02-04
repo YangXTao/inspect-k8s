@@ -6088,7 +6088,7 @@ const InspectionSettingsPanel = ({
               className="settings-form inspection-form inspection-form-grid"
               onSubmit={handleSubmit}
             >
-              <label className="field-span-2">
+              <label className="field-span-2 field-compact">
                 名称
                 <input
                   type="text"
@@ -6098,37 +6098,43 @@ const InspectionSettingsPanel = ({
                   placeholder="例如：etcd-health"
                 />
               </label>
-              {formTypeMode === "promql" && (
+              <div className="field-row field-span-full inspection-form-row-two">
+                {formTypeMode === "promql" ? (
+                  <label>
+                    Prometheus 版本
+                    <select
+                      value={prometheusVersion}
+                      onChange={(event) =>
+                        setPrometheusVersion(event.target.value)
+                      }
+                      disabled={submitting}
+                    >
+                      {prometheusVersionOptions.map((version) => (
+                        <option key={version} value={version}>
+                          {version}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <div className="field-placeholder" aria-hidden="true" />
+                )}
                 <label>
-                  Prometheus 版本
+                  类型
                   <select
-                    value={prometheusVersion}
-                    onChange={(event) => setPrometheusVersion(event.target.value)}
+                    value={formTypeMode}
+                    onChange={(event) =>
+                      setFormTypeMode(
+                        event.target.value as "command" | "promql"
+                      )
+                    }
                     disabled={submitting}
                   >
-                    {prometheusVersionOptions.map((version) => (
-                      <option key={version} value={version}>
-                        {version}
-                      </option>
-                    ))}
+                    <option value="command">命令行</option>
+                    <option value="promql">PromQL</option>
                   </select>
                 </label>
-              )}
-              <label>
-                类型
-                <select
-                  value={formTypeMode}
-                  onChange={(event) =>
-                    setFormTypeMode(
-                      event.target.value as "command" | "promql"
-                    )
-                  }
-                  disabled={submitting}
-                >
-                  <option value="command">命令行</option>
-                  <option value="promql">PromQL</option>
-                </select>
-              </label>
+              </div>
               <label className="field-span-2">
                 描述
                 <input
@@ -6189,9 +6195,9 @@ const InspectionSettingsPanel = ({
                       >
                         <option value="warning">告警</option>
                         <option value="critical">Critical（严重）</option>
-                      </select>
-                    </label>
-                    <label>
+                    </select>
+                  </label>
+                    <label className="field-narrow">
                       比较符
                       <select
                         value={promqlComparison}
@@ -6214,7 +6220,7 @@ const InspectionSettingsPanel = ({
                         ))}
                       </select>
                     </label>
-                    <label>
+                    <label className="field-narrow">
                       {promqlSeverityLabel}阈值
                       <input
                         type="number"
@@ -8731,56 +8737,48 @@ const GeneralSettingsPanel = ({
     <div className="settings-content settings-content-stack general-settings-panel">
       {generalNotice && <div className="feedback success">{generalNotice}</div>}
       {generalError && <div className="feedback error">{generalError}</div>}
-      <section className="general-settings-card">
-        <div className="general-settings-header">
-          <h3>BaseURL</h3>
-          <p>用于 Agent 上报心跳的地址，默认与 Backend 地址一致。</p>
-        </div>
-        <div className="general-settings-body">
-          <label className="general-settings-field">
-            <span>BaseURL</span>
-            <input
-              type="text"
-              value={baseUrl}
-              onChange={(event) => setBaseUrl(event.target.value)}
-              placeholder="例如：http://backend:8000"
-            />
+      <div className="general-settings-grid">
+        <div className="general-settings-row">
+          <label className="general-settings-label" htmlFor="general-base-url">
+            BaseURL
           </label>
-          <span className="general-settings-hint">
-            当前默认：{baseUrl || "未设置"}
-          </span>
+          <input
+            id="general-base-url"
+            className="general-settings-input"
+            type="text"
+            value={baseUrl}
+            onChange={(event) => setBaseUrl(event.target.value)}
+            placeholder="例如：http://backend:8000"
+          />
         </div>
-        <div className="settings-actions">
-          <button type="button" className="primary" onClick={handleSaveGeneral}>
-            保存
-          </button>
-        </div>
-      </section>
-      <section className="general-settings-card">
-        <div className="general-settings-header">
-          <h3>巡检报告保存时长</h3>
-          <p>默认 30 天，超过保存时长的报告会自动 GC 清理。</p>
-        </div>
-        <div className="general-settings-body">
-          <label className="general-settings-field">
-            <span>保留天数</span>
+        <div className="general-settings-row">
+          <label
+            className="general-settings-label"
+            htmlFor="general-retention-days"
+          >
+            巡检报告保存时长
+          </label>
+          <div className="general-settings-inline">
             <input
+              id="general-retention-days"
+              className="general-settings-input short"
               type="number"
               min={1}
               value={retentionDays}
               onChange={(event) => setRetentionDays(event.target.value)}
-              placeholder="例如：30"
+              placeholder="30"
             />
-          </label>
+            <span className="general-settings-unit">天</span>
+          </div>
         </div>
-        <div className="settings-actions">
+        <div className="general-settings-actions">
           <button type="button" className="primary" onClick={handleSaveGeneral}>
             保存
           </button>
         </div>
-      </section>
-      <section className="general-settings-card">
-        <div className="general-settings-header">
+      </div>
+      <section className="general-license-section">
+        <div className="general-license-header">
           <h3>License 管理</h3>
         </div>
         {localNotice && <div className="feedback success">{localNotice}</div>}
@@ -8849,7 +8847,7 @@ const GeneralSettingsPanel = ({
                 <label className="general-settings-field">
                   <span>License 文本</span>
                   <textarea
-                    rows={4}
+                    rows={3}
                     value={textValue}
                     onChange={(event) => setTextValue(event.target.value)}
                     placeholder="-----BEGIN LICENSE-----"

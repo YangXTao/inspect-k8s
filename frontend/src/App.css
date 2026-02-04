@@ -2160,40 +2160,72 @@ th {
 .general-settings-panel {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
+  font-size: 13px;
+  color: #1e293b;
 }
 
-.general-settings-card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  padding: 14px 16px;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+.general-settings-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.general-settings-row {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.general-settings-label {
+  font-weight: 600;
+  color: #1e293b;
+  font-size: 13px;
+}
+
+.general-settings-inline {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  align-items: center;
+  gap: 8px;
 }
 
-.general-settings-card .settings-actions {
+.general-settings-unit {
+  font-size: 13px;
+  color: #475569;
+}
+
+.general-settings-input {
+  border-radius: 10px;
+  border: 1px solid #cbd5f5;
+  padding: 6px 10px;
+  font-size: 13px;
+  background: #fff;
+  width: 100%;
+  max-width: 560px;
+  box-sizing: border-box;
+}
+
+.general-settings-input.short {
+  max-width: 120px;
+}
+
+.general-settings-actions {
+  display: flex;
   justify-content: flex-end;
 }
 
-.general-settings-header h3 {
-  margin: 0;
-  font-size: 15px;
-  color: #0f172a;
-}
-
-.general-settings-header p {
-  margin: 4px 0 0;
-  font-size: 12px;
-  color: #64748b;
-}
-
-.general-settings-body {
+.general-license-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+  padding-top: 6px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.general-license-header h3 {
+  margin: 0;
+  font-size: 14px;
+  color: #0f172a;
 }
 
 .general-settings-field {
@@ -2210,39 +2242,34 @@ th {
   border-radius: 10px;
   border: 1px solid #cbd5f5;
   padding: 6px 10px;
-  font-size: 13px;
+  font-size: 12px;
   background: #fff;
   width: 100%;
   box-sizing: border-box;
 }
 
-.general-settings-hint {
-  font-size: 12px;
-  color: #94a3b8;
-}
-
 .general-license-grid {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) minmax(320px, 1.2fr);
-  gap: 14px;
+  grid-template-columns: minmax(220px, 1fr) minmax(280px, 1.1fr);
+  gap: 12px;
   align-items: start;
 }
 
 .general-license-status table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .general-license-status th,
 .general-license-status td {
   border-bottom: 1px solid #e2e8f0;
-  padding: 6px 4px;
+  padding: 4px 4px;
   text-align: left;
 }
 
 .general-license-status th {
-  width: 92px;
+  width: 78px;
   color: #475569;
   font-weight: 600;
 }
@@ -2257,6 +2284,25 @@ th {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.general-license-upload textarea {
+  min-height: 96px;
+}
+
+@media (max-width: 960px) {
+  .general-settings-row {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .general-settings-input {
+    max-width: none;
+  }
+
+  .general-license-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .general-license-upload .settings-actions {
@@ -3000,6 +3046,27 @@ th {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+
+.inspection-form-grid .inspection-form-row-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.inspection-form-grid .field-placeholder {
+  min-height: 58px;
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+.inspection-form-grid .field-compact input {
+  max-width: 480px;
+}
+
+.inspection-form-grid .field-narrow input,
+.inspection-form-grid .field-narrow select {
+  max-width: 140px;
 }
 
 .inspection-form-grid .settings-actions {
