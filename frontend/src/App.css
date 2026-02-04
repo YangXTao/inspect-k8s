@@ -16,26 +16,16 @@ body {
   height: 100%;
   background: #f6f7fb;
   overflow: auto;
-  scrollbar-width: none;
-}
-
-html::-webkit-scrollbar,
-body::-webkit-scrollbar {
-  width: 0;
-  height: 0;
 }
 
 body.login-lock {
   overflow: hidden;
 }
-.settings-lock {
+body.settings-lock {
   overflow: hidden;
 }
 .settings-scrollable {
   overflow: auto;
-}
-.settings-lock {
-  overflow: hidden;
 }
 
 .login-page {
@@ -1968,11 +1958,12 @@ th {
 
 .settings-page {
   width: 100%;
-  padding: calc(var(--top-nav-height, 64px) + 12px) 0 24px;
+  padding: 12px 0 24px;
   display: flex;
   justify-content: stretch;
   background: #f6f7fb;
-  min-height: calc(100vh - var(--top-nav-height, 64px));
+  height: calc(100vh - var(--top-nav-height, 64px));
+  box-sizing: border-box;
   overflow: hidden;
 }
 
@@ -1982,14 +1973,22 @@ th {
   gap: 16px;
   width: 100%;
   max-width: none;
-  min-height: calc(100vh - var(--top-nav-height, 64px));
+  height: 100%;
+  min-height: 0;
   position: relative;
-  padding: 18px 22px 24px;
+  padding: 12px 22px 20px;
   background: transparent;
   border-radius: 0;
   box-shadow: none;
   border: none;
-  margin-top: 8px;
+  margin-top: 0;
+}
+
+.settings-page:focus,
+.settings-page:focus-visible,
+.settings-modal:focus,
+.settings-modal:focus-visible {
+  outline: none;
 }
 
 .settings-modal-compact {
@@ -2024,8 +2023,8 @@ th {
   min-width: 160px;
   align-self: stretch;
   position: sticky;
-  top: calc(var(--top-nav-height, 64px));
-  height: calc(100vh - var(--top-nav-height, 64px));
+  top: 0;
+  height: 100%;
   background: #f1f5f9;
   border-right: 1px solid #e2e8f0;
   padding: 12px 10px;

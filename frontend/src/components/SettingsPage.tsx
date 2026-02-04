@@ -1,8 +1,7 @@
-﻿import { useEffect, useMemo, useRef } from "react";
+﻿import { useEffect, useMemo } from "react";
 import type { ConfirmDialogState, SettingsModalTab } from "../types-ui";
 import type { AuthUser } from "../types";
 import ConfirmationModal from "../ConfirmationModal";
-import { useEffect, useMemo, useRef } from "react";
 
 interface SettingsPageProps {
   tabs: SettingsModalTab[];
@@ -29,7 +28,6 @@ const SettingsPage = ({
   confirmState,
   onConfirmClose,
 }: SettingsPageProps) => {
-  const containerRef = useRef<HTMLDivElement>(null);
   const hasTabs = tabs.length > 0;
   const fallbackTabId = useMemo(
     () =>
@@ -59,13 +57,10 @@ const SettingsPage = ({
   }, [confirmState, onLeave, onConfirmClose]);
 
   useEffect(() => {
-    if (!containerRef.current) {
-      return;
-    }
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    containerRef.current.focus();
+    const { body } = document;
+    body.classList.add("settings-lock");
     return () => {
-      previouslyFocused?.focus?.();
+      body.classList.remove("settings-lock");
     };
   }, []);
 
@@ -83,8 +78,6 @@ const SettingsPage = ({
         className="settings-modal"
         role="region"
         aria-label="系统设置"
-        ref={containerRef}
-        tabIndex={-1}
       >
         <div className="settings-modal-shell">
           <aside className="settings-modal-sidebar">
