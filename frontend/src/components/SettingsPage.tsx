@@ -59,9 +59,9 @@ const SettingsPage = ({
   }, [confirmState, onLeave, onConfirmClose]);
 
   useEffect(() => {
-    document.body.classList.add("settings-scrollable");
+    document.body.classList.add("settings-lock");
     return () => {
-      document.body.classList.remove("settings-scrollable");
+      document.body.classList.remove("settings-lock");
     };
   }, []);
 

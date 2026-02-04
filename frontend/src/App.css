@@ -1982,8 +1982,7 @@ th {
   justify-content: stretch;
   background: #f6f7fb;
   min-height: calc(100vh - var(--top-nav-height, 64px));
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .settings-modal {
@@ -2753,6 +2752,10 @@ th {
 }
 .settings-list.full {
   flex: 1 1 auto;
+}
+.settings-list.full .table-wrapper {
+  max-height: calc(100vh - 260px);
+  overflow: auto;
 }
 
 .settings-list table {
