@@ -6114,7 +6114,7 @@ const InspectionSettingsPanel = ({
                     placeholder="例如：etcd-health"
                   />
                 </label>
-                <label className="field-narrow">
+                <label className="field-narrow field-type">
                   类型
                   <select
                     value={formTypeMode}
@@ -6132,7 +6132,7 @@ const InspectionSettingsPanel = ({
               </div>
               {formTypeMode === "promql" && (
                 <div className="field-row field-span-full inspection-form-row-two">
-                  <label className="field-narrow">
+                  <label className="field-narrow field-prom-version">
                     Prometheus 版本
                     <select
                       value={prometheusVersion}
@@ -6198,7 +6198,7 @@ const InspectionSettingsPanel = ({
                     />
                   </label>
                   <div className="field-row field-span-full">
-                    <label>
+                    <label className="field-narrow field-tiny">
                       严重程度
                       <select
                         value={promqlSeverity}
@@ -6213,7 +6213,7 @@ const InspectionSettingsPanel = ({
                         <option value="critical">Critical（严重）</option>
                     </select>
                   </label>
-                    <label className="field-narrow">
+                    <label className="field-narrow field-tiny">
                       比较符
                       <select
                         value={promqlComparison}
@@ -6236,7 +6236,7 @@ const InspectionSettingsPanel = ({
                         ))}
                       </select>
                     </label>
-                    <label className="field-narrow">
+                    <label className="field-narrow field-tiny">
                       {promqlSeverityLabel}阈值
                       <input
                         type="number"
@@ -11067,6 +11067,24 @@ const App = () => {
     [items]
   );
 
+  const userRoleLabel = useMemo(() => {
+    if (!authUser) {
+      return "";
+    }
+    const roleNames =
+      authUser.roles && authUser.roles.length > 0
+        ? authUser.roles
+        : authUser.role
+          ? [authUser.role]
+          : [];
+    if (roleNames.length === 0) {
+      return "";
+    }
+    const primaryRole = roleNames[0];
+    const matched = roles.find((role) => role.name === primaryRole);
+    return (matched?.display_name || matched?.name || primaryRole || "").trim();
+  }, [authUser, roles]);
+
   const handleLogin = useCallback(
     async (username: string, password: string) => {
       setAuthSubmitting(true);
@@ -14183,6 +14201,7 @@ const hasManualKubeconfig = useMemo(
       </Helmet>
       <TopNavigation
         user={authUser}
+        roleLabel={userRoleLabel}
         onOpenSettings={handleOpenSettings}
         onChangePassword={handleOpenPasswordModal}
         onLogout={handleLogout}

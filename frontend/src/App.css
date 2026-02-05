@@ -2201,12 +2201,12 @@ th {
   font-size: 13px;
   background: #fff;
   width: 100%;
-  max-width: 320px;
+  max-width: 190px;
   box-sizing: border-box;
 }
 
 .general-settings-input.short {
-  max-width: 120px;
+  max-width: 52px;
 }
 
 .general-settings-actions {
@@ -2258,18 +2258,18 @@ th {
 .general-license-status table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .general-license-status th,
 .general-license-status td {
   border-bottom: 1px solid #e2e8f0;
-  padding: 4px 4px;
+  padding: 8px 6px;
   text-align: left;
 }
 
 .general-license-status th {
-  width: 78px;
+  width: 90px;
   color: #475569;
   font-weight: 600;
 }
@@ -3062,12 +3062,25 @@ th {
 
 .inspection-form-grid .field-compact input,
 .inspection-form-grid .field-compact select {
-  max-width: 360px;
+  max-width: 260px;
 }
 
 .inspection-form-grid .field-narrow input,
 .inspection-form-grid .field-narrow select {
-  max-width: 220px;
+  max-width: 200px;
+}
+
+.inspection-form-grid .field-type select {
+  max-width: 120px;
+}
+
+.inspection-form-grid .field-prom-version select {
+  max-width: 100px;
+}
+
+.inspection-form-grid .field-tiny input,
+.inspection-form-grid .field-tiny select {
+  max-width: 80px;
 }
 
 .inspection-form-grid .settings-actions {

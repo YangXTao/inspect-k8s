@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 interface TopNavigationProps {
   user?: AuthUser | null;
+  roleLabel?: string;
   onOpenSettings: () => void;
   onChangePassword?: () => void;
   onLogout?: () => void;
@@ -15,6 +16,7 @@ interface TopNavigationProps {
 
 const TopNavigation = ({
   user,
+  roleLabel,
   onOpenSettings,
   onChangePassword,
   onLogout,
@@ -39,6 +41,7 @@ const TopNavigation = ({
 
   const displayName = (user?.display_name || user?.username || "A").trim();
   const avatarLabel = displayName ? displayName[0]?.toUpperCase() : "A";
+  const displayRole = (roleLabel || user?.role || "").trim() || "Default Admin";
 
   return (
     <header className="top-navigation">
@@ -166,7 +169,7 @@ const TopNavigation = ({
                 </div>
                 <div className="avatar-menu-text">
                   <div className="avatar-menu-name">{displayName || "admin"}</div>
-                  <div className="avatar-menu-sub">Default Admin</div>
+                  <div className="avatar-menu-sub">{displayRole}</div>
                 </div>
               </div>
               <div className="avatar-menu-divider" aria-hidden="true" />
