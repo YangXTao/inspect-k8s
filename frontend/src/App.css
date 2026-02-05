@@ -375,23 +375,23 @@ body.settings-lock {
 .app-shell {
   width: calc(100% - 20px);
   margin: 6px auto 1px;
-  padding: 0 0 16px;
+  padding: 0 0 12px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 8px;
   min-height: auto;
 }
 
 .app-header {
-  background: linear-gradient(135deg, #1d4ed8, #3b82f6);
-  border-radius: 14px;
-  color: #fff;
-  padding: 18px 20px;
+  background: transparent;
+  border-radius: 0;
+  color: #0f172a;
+  padding: 0;
   display: flex;
   justify-content: space-between;
   gap: 12px;
   align-items: flex-start;
-  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.18);
+  box-shadow: none;
 }
 
 .header-actions {
@@ -406,9 +406,9 @@ body.settings-lock {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 18px;
+  gap: 8px;
   align-self: center;
-  margin-left: 14px;
+  margin-left: 0;
   margin-top: 0;
 }
 

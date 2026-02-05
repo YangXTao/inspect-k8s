@@ -2984,7 +2984,6 @@ const OverviewView = ({
               type="button"
               className="primary"
               onClick={() => setIsCreateClusterOpen(true)}
-              disabled={!canCreateAgents}
             >
               添加集群
             </button>
