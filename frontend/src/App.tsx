@@ -3253,6 +3253,23 @@ const OverviewView = ({
           </>
         )}
       </section>
+      <AgentQuickCreate
+        clusters={clusters}
+        agents={agents}
+        canCreateAgents={canCreateAgents}
+        createDisabledReason={createAgentDisabledReason}
+        submitting={agentSubmitting}
+        notice={agentNotice}
+        error={agentError}
+        generatedCommand={generatedAgentCommand}
+        isOpen={isCreateClusterOpen}
+        onClose={() => {
+          setIsCreateClusterOpen(false);
+          onClearAgentCommand();
+        }}
+        onCreate={onCreateAgent}
+        onClearCommand={onClearAgentCommand}
+      />
 
     </>
   );
@@ -10127,23 +10144,6 @@ const RunDetailView = ({
           </div>
         )}
       </section>
-      <AgentQuickCreate
-        clusters={clusters}
-        agents={agents}
-        canCreateAgents={canCreateAgents}
-        createDisabledReason={createAgentDisabledReason}
-        submitting={agentSubmitting}
-        notice={agentNotice}
-        error={agentError}
-        generatedCommand={generatedAgentCommand}
-        isOpen={isCreateClusterOpen}
-        onClose={() => {
-          setIsCreateClusterOpen(false);
-          onClearAgentCommand();
-        }}
-        onCreate={onCreateAgent}
-        onClearCommand={onClearAgentCommand}
-      />
     </>
   );
 };
