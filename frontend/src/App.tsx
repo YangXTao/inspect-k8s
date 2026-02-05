@@ -2953,22 +2953,6 @@ const OverviewView = ({
 
   return (
     <>
-      <header className="app-header">
-        <div className="branding">
-          {appConfig.branding.logoUrl ? (
-            <img
-              src={appConfig.branding.logoUrl}
-              alt="logo"
-              className="branding-logo"
-            />
-          ) : null}
-          <div>
-            <h1>Kubernetes 巡检中心</h1>
-          </div>
-        </div>
-        <div className="header-actions" />
-      </header>
-
       {!license.loading && !license.valid && (
         <div className="feedback warning">
           {license.reason ?? "当前 License 未生效或未安装。"}
@@ -2983,7 +2967,10 @@ const OverviewView = ({
             <button
               type="button"
               className="primary"
-              onClick={() => setIsCreateClusterOpen(true)}
+              onClick={() => {
+                onClearAgentCommand();
+                setIsCreateClusterOpen(true);
+              }}
             >
               添加集群
             </button>
