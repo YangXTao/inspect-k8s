@@ -2364,13 +2364,21 @@ th {
   border: 1px dashed #e2e8f0;
   border-radius: 12px;
   padding: 8px 10px;
-  max-height: 320px;
+  max-height: 420px;
   overflow: auto;
   background: #f8fafc;
 }
 
 .template-modal .item-list {
   margin: 0;
+}
+
+.template-modal .item-list label {
+  align-items: center;
+}
+
+.template-modal .item-list input[type="checkbox"] {
+  margin-top: 0;
 }
 
 .inspection-settings-body {
@@ -2840,6 +2848,12 @@ th {
   justify-content: space-between;
 }
 
+.settings-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
 .settings-actions {
   display: flex;
   gap: 8px;
@@ -3031,7 +3045,7 @@ th {
   max-width: 1200px;
   max-height: calc(100vh - 96px);
   overflow: hidden;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .modal.compact.inspection-item-modal .modal-header {
@@ -3039,19 +3053,25 @@ th {
 }
 
 .modal.compact.inspection-item-modal .inspection-form-grid {
-  gap: 10px 12px;
+  gap: 12px 16px;
 }
 
 .modal.compact.inspection-item-modal .inspection-form label {
-  font-size: 13px;
-  gap: 5px;
+  font-size: 14px;
+  gap: 6px;
 }
 
 .modal.compact.inspection-item-modal .inspection-form input,
 .modal.compact.inspection-item-modal .inspection-form select,
 .modal.compact.inspection-item-modal .inspection-form textarea {
-  padding: 7px 9px;
-  font-size: 13px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
+.modal.compact.template-modal {
+  width: min(1100px, 94vw);
+  max-width: 1100px;
+  max-height: calc(100vh - 88px);
 }
 
 .settings-pagination {

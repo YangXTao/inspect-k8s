@@ -5890,7 +5890,7 @@ const InspectionSettingsPanel = ({
     <div className="inspection-settings-panel">
       <div className="settings-header">
         <div>
-          <h3>巡检项列表</h3>
+          <h3>巡检项</h3>
         </div>
         <div className="settings-actions">
           {!readOnly && (
@@ -6418,6 +6418,7 @@ const InspectionTemplateSettingsPanel = ({
   const [templateName, setTemplateName] = useState("");
   const [templateItemIds, setTemplateItemIds] = useState<number[]>([]);
   const [templateKeyword, setTemplateKeyword] = useState("");
+  const [templatePromVersion, setTemplatePromVersion] = useState("all");
   const [formError, setFormError] = useState<string | null>(null);
 
   const itemNameMap = useMemo(() => {
@@ -6438,20 +6439,49 @@ const InspectionTemplateSettingsPanel = ({
       .slice()
       .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
     if (!keyword) {
-      return list;
+      return list.filter((item) => {
+        if (!isPromqlType(item.check_type)) {
+          return true;
+        }
+        if (templatePromVersion === "all") {
+          return true;
+        }
+        return (
+          normalizePrometheusVersion(
+            item.prometheus_version,
+            prometheusVersionOptions
+          ) === templatePromVersion
+        );
+      });
     }
     return list.filter((item) => {
       const name = (item.name || "").toLowerCase();
       const desc = (item.description || "").toLowerCase();
-      return name.includes(keyword) || desc.includes(keyword);
+      const matchesKeyword = name.includes(keyword) || desc.includes(keyword);
+      if (!matchesKeyword) {
+        return false;
+      }
+      if (!isPromqlType(item.check_type)) {
+        return true;
+      }
+      if (templatePromVersion === "all") {
+        return true;
+      }
+      return (
+        normalizePrometheusVersion(
+          item.prometheus_version,
+          prometheusVersionOptions
+        ) === templatePromVersion
+      );
     });
-  }, [items, templateKeyword]);
+  }, [items, templateKeyword, templatePromVersion, prometheusVersionOptions]);
 
   const resetForm = () => {
     setEditingTemplate(null);
     setTemplateName("");
     setTemplateItemIds([]);
     setTemplateKeyword("");
+    setTemplatePromVersion("all");
     setFormError(null);
   };
 
@@ -6465,6 +6495,7 @@ const InspectionTemplateSettingsPanel = ({
     setTemplateName(template.name);
     setTemplateItemIds(template.item_ids ?? []);
     setTemplateKeyword("");
+    setTemplatePromVersion("all");
     setFormError(null);
     setFormOpen(true);
   };
@@ -6561,7 +6592,20 @@ const InspectionTemplateSettingsPanel = ({
               ) : (
                 templates.map((template) => {
                   const names = (template.item_ids ?? [])
-                    .map((id) => itemNameMap.get(id) || `#${id}`)
+                    .map((id) => {
+                      const item = items.find((entry) => entry.id === id);
+                      if (!item) {
+                        return `#${id}`;
+                      }
+                      if (isPromqlType(item.check_type)) {
+                        const versionLabel = normalizePrometheusVersion(
+                          item.prometheus_version,
+                          prometheusVersionOptions
+                        );
+                        return `${item.name}(${versionLabel})`;
+                      }
+                      return item.name;
+                    })
                     .filter(Boolean);
                   let summary = "-";
                   if (names.length > 0) {
@@ -6638,6 +6682,19 @@ const InspectionTemplateSettingsPanel = ({
                   placeholder="搜索巡检项"
                   disabled={submitting}
                 />
+                <select
+                  className="inspection-items-filter inspection-template-select"
+                  value={templatePromVersion}
+                  onChange={(event) => setTemplatePromVersion(event.target.value)}
+                  disabled={submitting}
+                >
+                  <option value="all">Prometheus 全部版本</option>
+                  {prometheusVersionOptions.map((version) => (
+                    <option key={version} value={version}>
+                      {version}
+                    </option>
+                  ))}
+                </select>
                 <span className="selection-hint">
                   已选 {templateItemIds.length} / {filteredItems.length}
                 </span>
