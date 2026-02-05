@@ -426,6 +426,35 @@ const SETTINGS_TAB_IDS = [
 ] as const;
 const DEFAULT_REPORT_RETENTION_DAYS = 30;
 const CONNECTION_TEST_OPERATOR = "__system_connection_test__";
+const SCHEDULE_OPERATOR_SUFFIX = "（定时巡检）";
+
+const resolveRunTypeLabel = (operator?: string | null) => {
+  const trimmed = (operator ?? "").trim();
+  if (!trimmed) {
+    return "手动";
+  }
+  if (trimmed === CONNECTION_TEST_OPERATOR) {
+    return "系统校验";
+  }
+  if (trimmed.endsWith(SCHEDULE_OPERATOR_SUFFIX)) {
+    return "定时";
+  }
+  return "手动";
+};
+
+const resolveTemplateLabel = (operator?: string | null) => {
+  const trimmed = (operator ?? "").trim();
+  if (!trimmed) {
+    return "-";
+  }
+  if (trimmed === CONNECTION_TEST_OPERATOR) {
+    return "系统校验";
+  }
+  if (trimmed.endsWith(SCHEDULE_OPERATOR_SUFFIX)) {
+    return trimmed.slice(0, -SCHEDULE_OPERATOR_SUFFIX.length);
+  }
+  return trimmed;
+};
 
 const resolveDefaultBaseUrl = () => {
   if (typeof window === "undefined") {
@@ -3316,7 +3345,8 @@ const HistoryView = ({
           runDisplayIds[run.id] ?? `#${run.id}`,
           clusterDisplayIds[run.cluster_id] ?? `#${run.cluster_id}`,
           run.cluster_name,
-          run.operator,
+          resolveRunTypeLabel(run.operator),
+          resolveTemplateLabel(run.operator),
           run.agent_name,
         ]
           .filter(Boolean)
@@ -3502,7 +3532,7 @@ const HistoryView = ({
               type="text"
               value={historyKeyword}
               onChange={handleKeywordFilterChange}
-              placeholder="按巡检编号 / 集群 / 巡检模板搜索"
+              placeholder="按巡检编号 / 集群 / 巡检类型搜索"
             />
             {historyKeyword && (
               <button
@@ -3608,7 +3638,7 @@ const HistoryView = ({
               <tr>
                 <th>巡检编号</th>
                 <th>集群</th>
-                <th>巡检模板</th>
+                <th>巡检类型</th>
                 <th>状态</th>
                 <th>Agent 状态</th>
                 <th>开始时间</th>
@@ -3657,7 +3687,7 @@ const HistoryView = ({
                       )}
                     </td>
                     <td>{clusterLabel}</td>
-                    <td>{run.operator || "-"}</td>
+                    <td>{resolveRunTypeLabel(run.operator)}</td>
                     <td>
                       <span className={statusClass(run.status)}>
                         {run.status_label ?? run.status}
@@ -4653,8 +4683,8 @@ const ClusterDetailView = ({
         <div className="detail-card">
           <h2>执行巡检</h2>
           <div className="inspection-template-panel">
-            <label className="template-picker-label">
-              巡检模板
+            <div className="template-picker-label">
+              <span>巡检模板</span>
               <div className="template-picker" ref={templatePickerRef}>
                 <div className="template-picker-input">
                   <input
@@ -4690,7 +4720,7 @@ const ClusterDetailView = ({
                   </div>
                 )}
               </div>
-            </label>
+            </div>
 
             <div className="template-selected-list">
               {selectedTemplates.length === 0 ? (
@@ -4790,7 +4820,7 @@ const ClusterDetailView = ({
               <thead>
                 <tr>
                   <th>巡检编号</th>
-                  <th>巡检模板</th>
+                  <th>巡检类型</th>
                   <th>状态</th>
                   <th>Agent 状态</th>
                   <th>开始时间</th>
@@ -4820,7 +4850,7 @@ const ClusterDetailView = ({
                           <span>{runSlug}</span>
                         )}
                       </td>
-                      <td>{run.operator || "-"}</td>
+                      <td>{resolveRunTypeLabel(run.operator)}</td>
                       <td>
                         {renderRunStatusBadge(
                           run.status,
@@ -6431,7 +6461,7 @@ const InspectionTemplateSettingsPanel = ({
                   onChange={(event) => setTemplatePromVersion(event.target.value)}
                   disabled={submitting}
                 >
-                  <option value="all">Prometheus 全部版本</option>
+                  <option value="all">Prometheus版本</option>
                   {prometheusVersionOptions.map((version) => (
                     <option key={version} value={version}>
                       {version}
@@ -9791,7 +9821,11 @@ const RunDetailView = ({
           </div>
           <div>
             <strong>巡检模板：</strong>
-            {summaryRun?.operator || "-"}
+            {resolveTemplateLabel(summaryRun?.operator)}
+          </div>
+          <div>
+            <strong>巡检类型：</strong>
+            {resolveRunTypeLabel(summaryRun?.operator)}
           </div>
           <div>
             <strong>Prometheus 版本：</strong>

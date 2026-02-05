@@ -2361,15 +2361,16 @@ th {
 }
 
 .template-modal {
-  --template-field-width: 300px;
-  --template-select-width: 180px;
+  --template-field-width: 200px;
+  --template-select-width: 170px;
+  --template-toolbar-gap: 6px;
 }
 
 .template-modal .template-form-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: var(--template-toolbar-gap);
+  flex-wrap: nowrap;
 }
 
 .template-modal .template-form-toolbar .inspection-items-filter {
@@ -2385,14 +2386,15 @@ th {
 }
 
 .template-modal .template-form-toolbar .template-select-all {
-  padding: 8px 10px;
-  font-size: 13px;
+  padding: 6px 10px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
 .template-modal .template-form-toolbar .selection-hint {
   margin-left: auto;
   white-space: nowrap;
+  font-size: 12px;
 }
 
 .template-modal .template-name-input {
@@ -4517,7 +4519,9 @@ th {
 
 .template-picker {
   position: relative;
-  max-width: 520px;
+  width: min(180px, 100%);
+  max-width: 180px;
+  align-self: flex-start;
 }
 
 .template-picker-input {

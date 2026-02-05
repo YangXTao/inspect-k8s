@@ -26,6 +26,7 @@ from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfbase.ttfonts import TTFont
 from xml.sax.saxutils import escape
 
+from .crud import CONNECTION_TEST_OPERATOR, SCHEDULED_AUDIT_SUFFIX
 from .models import InspectionResult, InspectionRun
 from .schemas import _extract_connection_meta
 
@@ -192,6 +193,17 @@ def _get_rancher_meta(run: InspectionRun) -> Tuple[Optional[str], Optional[str]]
     return version_label, count_label
 
 
+def _resolve_run_type_label(operator: Optional[str]) -> str:
+    trimmed = (operator or "").strip()
+    if not trimmed:
+        return "手动"
+    if trimmed == CONNECTION_TEST_OPERATOR:
+        return "系统校验"
+    if trimmed.endswith(SCHEDULED_AUDIT_SUFFIX):
+        return "定时"
+    return "手动"
+
+
 def generate_markdown_report(
     *,
     run: InspectionRun,
@@ -256,7 +268,7 @@ def generate_markdown_report(
     lines.append("| 项目 | 内容 |")
     lines.append("| --- | --- |")
     lines.append(f"| 巡检编号 | {display_label} |")
-    lines.append(f"| 巡检人 | {run.operator or '未填写'} |")
+    lines.append(f"| 巡检类型 | {_resolve_run_type_label(run.operator)} |")
     lines.append(f"| 目标集群 | {cluster_label} |")
     lines.append(f"| 集群版本 | {version_label} |")
     lines.append(f"| 节点数量 | {node_count_label} |")
@@ -580,7 +592,7 @@ def generate_pdf_report(
 
     meta_rows = [
         ("巡检编号", str(display_id or run.id)),
-        ("巡检人", run.operator or "未填写"),
+        ("巡检类型", _resolve_run_type_label(run.operator)),
         ("目标集群", cluster_label),
         ("集群版本", version_label),
         ("节点数量", node_count_label),
