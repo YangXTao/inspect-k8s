@@ -6716,20 +6716,6 @@ const InspectionTemplateSettingsPanel = ({
                           <div>
                             <div className="item-title-row">
                               <div className="item-name">{item.name}</div>
-                              {isPromqlType(item.check_type) ? (
-                                <span className="item-tag promql">
-                                  PromQL ·{" "}
-                                  {normalizePrometheusVersion(
-                                    item.prometheus_version,
-                                    prometheusVersionOptions
-                                  )}
-                                </span>
-                              ) : (
-                                <span className="item-tag neutral">通用</span>
-                              )}
-                            </div>
-                            <div className="item-desc">
-                              {item.description || "未提供描述"}
                             </div>
                           </div>
                         </label>

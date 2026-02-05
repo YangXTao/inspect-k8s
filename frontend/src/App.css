@@ -2373,12 +2373,21 @@ th {
   margin: 0;
 }
 
+.template-modal .item-list li {
+  padding: 8px 12px;
+}
+
+.template-modal .item-list li:hover {
+  transform: none;
+}
+
 .template-modal .item-list label {
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: flex-start;
-  gap: 4px;
+  gap: 2px;
+  width: 100%;
 }
 
 .template-modal .item-list input[type="checkbox"] {
@@ -2388,6 +2397,10 @@ th {
 
 .template-modal .item-list label > div {
   flex: 1 1 auto;
+}
+
+.template-modal .item-desc {
+  display: none;
 }
 
 .inspection-settings-body {
@@ -3081,6 +3094,20 @@ th {
   width: min(980px, 92vw);
   max-width: 980px;
   max-height: calc(100vh - 88px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.template-modal .settings-form.template-form {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.template-item-list {
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 0;
 }
 
 .settings-pagination {
@@ -3181,7 +3208,7 @@ th {
 
 .inspection-form-grid .field-alert-severity input,
 .inspection-form-grid .field-alert-severity select {
-  max-width: 110px;
+  max-width: 150px;
 }
 
 .inspection-form-grid .settings-actions {
