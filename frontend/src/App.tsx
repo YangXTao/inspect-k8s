@@ -2206,6 +2206,8 @@ interface AgentQuickCreateProps {
   notice: string | null;
   error: string | null;
   generatedCommand: string | null;
+  isOpen: boolean;
+  onClose: () => void;
   onCreate: (payload: {
     name: string;
     backend_url: string;
@@ -2218,7 +2220,9 @@ interface AgentQuickCreateProps {
   onClearCommand: () => void;
 }
 
-const DEFAULT_AGENT_PROM_URL =
+const DEFAULT_RKE_PROM_URL =
+  "http://prometheus-operated.cattle-prometheus:9090";
+const DEFAULT_RKE2_PROM_URL =
   "http://rancher-monitoring-prometheus.cattle-monitoring-system:9090";
 
 const AgentQuickCreate = ({
@@ -2230,28 +2234,35 @@ const AgentQuickCreate = ({
   notice,
   error,
   generatedCommand,
+  isOpen,
+  onClose,
   onCreate,
   onClearCommand,
 }: AgentQuickCreateProps) => {
   const [name, setName] = useState("");
-  const [backendUrl, setBackendUrl] = useState("");
   const [description, setDescription] = useState("");
   const [prometheusUrl, setPrometheusUrl] = useState("");
+  const [clusterType, setClusterType] = useState<"rke" | "rke2" | "general">(
+    "rke2"
+  );
+  const [prometheusToken, setPrometheusToken] = useState("");
+  const [baseUrl, setBaseUrl] = useState(() => resolveDefaultBaseUrl());
   const [isRancherLocal, setIsRancherLocal] = useState(false);
   const [rancherUrl, setRancherUrl] = useState("");
   const [rancherApiKey, setRancherApiKey] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
 
   const trimmedName = name.trim();
-  const trimmedBackendUrl = backendUrl.trim();
   const trimmedPrometheusUrl = prometheusUrl.trim();
+  const trimmedPrometheusToken = prometheusToken.trim();
   const trimmedRancherUrl = rancherUrl.trim();
   const trimmedRancherApiKey = rancherApiKey.trim();
-  const invalidBackendUrl =
-    trimmedBackendUrl.length > 0 && !/^https?:\/\//i.test(trimmedBackendUrl);
   const invalidPrometheusUrl =
     trimmedPrometheusUrl.length > 0 &&
     !/^https?:\/\//i.test(trimmedPrometheusUrl);
+  const invalidBaseUrl =
+    baseUrl.trim().length > 0 && !/^https?:\/\//i.test(baseUrl.trim());
   const invalidRancherUrl =
     trimmedRancherUrl.length > 0 && !/^https?:\/\//i.test(trimmedRancherUrl);
   const duplicateAgent = useMemo(
@@ -2267,35 +2278,65 @@ const AgentQuickCreate = ({
     [clusters, trimmedName]
   );
 
-  if (!canCreateAgents) {
-    return (
-      <div className="agent-inline-form">
-        <div className="agent-inline-form-header">
-          <strong>快速创建 Agent</strong>
-          {createDisabledReason && (
-            <span className="agent-inline-hint">{createDisabledReason}</span>
-          )}
-        </div>
-        <p className="agent-inline-copy">
-          Agent 名称必须与计划接入的集群名称保持一致，注册后不可修改。Backend 地址用于生成注册命令，请填写 Agent 节点可访问的地址。
-        </p>
-      </div>
-    );
-  }
+  useEffect(() => {
+    let cancelled = false;
+    if (!isOpen) {
+      return;
+    }
+    const loadSettings = async () => {
+      try {
+        const settings = await getGeneralSettings();
+        if (cancelled) {
+          return;
+        }
+        const resolvedBaseUrl = (settings.base_url || "").trim();
+        setBaseUrl(resolvedBaseUrl || resolveDefaultBaseUrl());
+      } catch {
+        if (!cancelled) {
+          setBaseUrl(resolveDefaultBaseUrl());
+        }
+      }
+    };
+    void loadSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (clusterType !== "general" && prometheusUrl) {
+      setPrometheusUrl("");
+    }
+    if (clusterType !== "rke" && prometheusToken) {
+      setPrometheusToken("");
+    }
+  }, [clusterType, prometheusUrl, prometheusToken]);
+
+  useEffect(() => {
+    if (isOpen) {
+      return;
+    }
+    setFormError(null);
+    setCopyNotice(null);
+  }, [isOpen]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const normalizedName = name.trim();
     if (!normalizedName) {
-      setFormError("Agent 名称不能为空");
+      setFormError("集群名称不能为空");
       return;
     }
-    if (!trimmedBackendUrl) {
-      setFormError("Backend 地址不能为空");
+    if (!baseUrl.trim()) {
+      setFormError("通用设置 BaseURL 不能为空，请先配置。");
       return;
     }
-    if (invalidBackendUrl) {
-      setFormError("Backend 地址需以 http:// 或 https:// 开头");
+    if (invalidBaseUrl) {
+      setFormError("通用设置 BaseURL 需以 http:// 或 https:// 开头");
+      return;
+    }
+    if (clusterType === "general" && !trimmedPrometheusUrl) {
+      setFormError("Prometheus 地址不能为空");
       return;
     }
     if (invalidPrometheusUrl) {
@@ -2317,7 +2358,7 @@ const AgentQuickCreate = ({
       }
     }
     if (duplicateAgent) {
-      setFormError("Agent 名称已存在，请更换其他名称");
+      setFormError("集群名称已存在，请更换其他名称");
       return;
     }
     if (duplicateCluster) {
@@ -2327,10 +2368,14 @@ const AgentQuickCreate = ({
     setFormError(null);
     try {
       const resolvedPrometheusUrl =
-        trimmedPrometheusUrl || DEFAULT_AGENT_PROM_URL;
+        clusterType === "general"
+          ? trimmedPrometheusUrl
+          : clusterType === "rke"
+            ? DEFAULT_RKE_PROM_URL
+            : DEFAULT_RKE2_PROM_URL;
       await onCreate({
         name: normalizedName,
-        backend_url: trimmedBackendUrl,
+        backend_url: baseUrl.trim(),
         description: description.trim() || undefined,
         prometheus_url: resolvedPrometheusUrl || undefined,
         ...(isRancherLocal
@@ -2342,105 +2387,211 @@ const AgentQuickCreate = ({
           : {}),
       });
       setName("");
-      setBackendUrl("");
       setDescription("");
       setPrometheusUrl("");
+      setPrometheusToken("");
+      setClusterType("rke2");
       setIsRancherLocal(false);
       setRancherUrl("");
       setRancherApiKey("");
+      setCopyNotice(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "创建 Agent 失败";
+      const message = err instanceof Error ? err.message : "添加集群失败";
       setFormError(message);
     }
   };
 
+  if (!isOpen) {
+    return null;
+  }
+
+  const handleCopyCommand = async () => {
+    if (!generatedCommand) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(generatedCommand);
+      setCopyNotice("已复制注册命令");
+    } catch {
+      setCopyNotice("复制失败，请手动选择复制");
+    }
+  };
+
+  const resolvedPrometheusUrl =
+    clusterType === "general"
+      ? trimmedPrometheusUrl
+      : clusterType === "rke"
+        ? DEFAULT_RKE_PROM_URL
+        : DEFAULT_RKE2_PROM_URL;
+  const promTokenCommand =
+    clusterType === "rke" && trimmedPrometheusToken
+      ? `curl -H \"Authorization: Bearer ${trimmedPrometheusToken}\" ${DEFAULT_RKE_PROM_URL}`
+      : `curl -H \"Authorization: Bearer $TOKEN\" ${DEFAULT_RKE_PROM_URL}`;
+
   return (
-    <div className="agent-inline-form">
-      <div className="agent-inline-form-header">
-        <strong>快速创建 Agent</strong>
-        {!canCreateAgents && createDisabledReason && (
-          <span className="agent-inline-hint">{createDisabledReason}</span>
-        )}
-      </div>
-      <p className="agent-inline-copy">
-        Agent 名称必须与计划接入的集群名称保持一致，注册后不可修改。Backend 地址用于生成注册命令，请填写 Agent 节点可访问的地址。
-      </p>
-      <form className="agent-inline-form-body" onSubmit={handleSubmit}>
-        <input
-          type="text"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="Agent / 集群名称"
-          disabled={submitting || !canCreateAgents}
-        />
-        <input
-          type="text"
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-          placeholder="描述（可选）"
-          disabled={submitting || !canCreateAgents}
-        />
-        <input
-          type="text"
-          value={backendUrl}
-          onChange={(event) => setBackendUrl(event.target.value)}
-          placeholder="Backend 地址（必填）"
-          disabled={submitting || !canCreateAgents}
-        />
-        <input
-          type="text"
-          value={prometheusUrl}
-          onChange={(event) => setPrometheusUrl(event.target.value)}
-          placeholder="Prometheus 地址（可选）"
-          disabled={submitting || !canCreateAgents}
-        />
-        <label className="agent-inline-toggle">
-          <input
-            type="checkbox"
-            checked={isRancherLocal}
-            onChange={(event) => setIsRancherLocal(event.target.checked)}
-            disabled={submitting || !canCreateAgents}
-          />
-          <span>Rancher Local 集群</span>
-        </label>
-        {isRancherLocal && (
-          <>
-            <input
-              type="text"
-              value={rancherUrl}
-              onChange={(event) => setRancherUrl(event.target.value)}
-              placeholder="Rancher 地址（必填）"
-              disabled={submitting || !canCreateAgents}
-            />
-            <input
-              type="password"
-              value={rancherApiKey}
-              onChange={(event) => setRancherApiKey(event.target.value)}
-              placeholder="Rancher API 密钥（必填）"
-              disabled={submitting || !canCreateAgents}
-            />
-          </>
-        )}
-        <button
-          type="submit"
-          className="secondary"
-          disabled={submitting || !canCreateAgents}
-        >
-          {submitting ? "创建中..." : "创建 Agent"}
-        </button>
-      </form>
-      {formError && <div className="feedback error">{formError}</div>}
-      {error && !formError && <div className="feedback error">{error}</div>}
-      {notice && <div className="feedback success">{notice}</div>}
-      {generatedCommand && (
-        <div className="agent-token-box">
-          <p>创建成功，请在目标节点执行以下命令完成注册。</p>
-          <code>{generatedCommand}</code>
-          <button type="button" className="secondary" onClick={onClearCommand}>
-            我已保存命令
+    <div className="modal-backdrop fullscreen">
+      <div className="modal compact cluster-create-modal">
+        <div className="modal-header">
+          <h3>添加集群</h3>
+          <button type="button" className="link-button modal-close" onClick={onClose}>
+            关闭
           </button>
         </div>
-      )}
+        {!canCreateAgents && createDisabledReason && (
+          <div className="feedback warning">{createDisabledReason}</div>
+        )}
+        <form className="cluster-create-form" onSubmit={handleSubmit}>
+          <div className="cluster-form-row two-cols">
+            <label className="field-short">
+              集群名称
+              <input
+                type="text"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="例如：cluster01"
+                disabled={submitting || !canCreateAgents}
+              />
+            </label>
+            <label className="field-short">
+              描述
+              <input
+                type="text"
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                placeholder="可选"
+                disabled={submitting || !canCreateAgents}
+              />
+            </label>
+          </div>
+
+          <div className="cluster-form-row">
+            <label className="field-short">
+              类型
+              <select
+                value={clusterType}
+                onChange={(event) =>
+                  setClusterType(event.target.value as "rke" | "rke2" | "general")
+                }
+                disabled={submitting || !canCreateAgents}
+              >
+                <option value="rke">RKE</option>
+                <option value="rke2">RKE2</option>
+                <option value="general">通用</option>
+              </select>
+            </label>
+            {clusterType === "general" && (
+              <label className="field-short">
+                Prometheus 地址
+                <input
+                  type="text"
+                  value={prometheusUrl}
+                  onChange={(event) => setPrometheusUrl(event.target.value)}
+                  placeholder="例如：http://prometheus:9090"
+                  disabled={submitting || !canCreateAgents}
+                />
+              </label>
+            )}
+          </div>
+
+          {clusterType !== "general" && (
+            <div className="cluster-hint">
+              Prometheus 默认地址：{resolvedPrometheusUrl}
+            </div>
+          )}
+
+          {clusterType === "rke" && (
+            <div className="cluster-form-row two-cols">
+              <label className="field-short">
+                Token
+                <input
+                  type="text"
+                  value={prometheusToken}
+                  onChange={(event) => setPrometheusToken(event.target.value)}
+                  placeholder="Prometheus Token"
+                  disabled={submitting || !canCreateAgents}
+                />
+              </label>
+              <div className="cluster-hint-block">
+                请到 Prometheus 服务中查看
+                <code>/var/run/secrets/kubernetes.io/serviceaccount/token</code>
+                ，巡检时使用：
+                <code>{promTokenCommand}</code>
+              </div>
+            </div>
+          )}
+
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={isRancherLocal}
+              onChange={(event) => setIsRancherLocal(event.target.checked)}
+              disabled={submitting || !canCreateAgents}
+            />
+            <span>Rancher Local 集群</span>
+          </label>
+
+          {isRancherLocal && (
+            <div className="cluster-form-row two-cols">
+              <label>
+                Rancher 地址
+                <input
+                  type="text"
+                  value={rancherUrl}
+                  onChange={(event) => setRancherUrl(event.target.value)}
+                  placeholder="例如：http://rancher.example.com"
+                  disabled={submitting || !canCreateAgents}
+                />
+              </label>
+              <label>
+                Rancher API 密钥
+                <input
+                  type="text"
+                  value={rancherApiKey}
+                  onChange={(event) => setRancherApiKey(event.target.value)}
+                  placeholder="Token-xxxxx"
+                  disabled={submitting || !canCreateAgents}
+                />
+              </label>
+            </div>
+          )}
+
+          {(formError || error) && (
+            <div className="feedback error">{formError || error}</div>
+          )}
+          {notice && <div className="feedback info">{notice}</div>}
+
+          {generatedCommand && (
+            <div className="cluster-command-box">
+              <div className="cluster-command-header">
+                <strong>注册命令</strong>
+                <div className="cluster-command-actions">
+                  <button type="button" className="secondary" onClick={handleCopyCommand}>
+                    一键复制
+                  </button>
+                  <button type="button" className="link-button" onClick={onClearCommand}>
+                    清除
+                  </button>
+                </div>
+              </div>
+              <pre>{generatedCommand}</pre>
+              {copyNotice && <div className="feedback info">{copyNotice}</div>}
+            </div>
+          )}
+
+          <div className="settings-actions">
+            <button type="button" className="secondary" onClick={onClose}>
+              取消
+            </button>
+            <button
+              type="submit"
+              className="primary"
+              disabled={submitting || !canCreateAgents || invalidBaseUrl}
+            >
+              {submitting ? "添加中..." : "添加集群"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 };
@@ -2543,6 +2694,7 @@ const OverviewView = ({
     ClusterConnectionStatus | "all"
   >("all");
   const [clusterKeyword, setClusterKeyword] = useState("");
+  const [isCreateClusterOpen, setIsCreateClusterOpen] = useState(false);
   const enabledAgents = useMemo(
     () => agents.filter((agent) => agent.is_enabled),
     [agents]
@@ -2814,52 +2966,7 @@ const OverviewView = ({
             <h1>Kubernetes 巡检中心</h1>
           </div>
         </div>
-        <div className="header-actions">
-          {enableServerClusterUpload ? (
-            <div className="cluster-upload">
-              <label>添加集群</label>
-              {!license.loading && !license.valid && (
-                <div className="feedback error">
-                  {license.reason ?? "当前 License 无效，无法添加集群。"}
-                </div>
-              )}
-              <input
-                type="text"
-                placeholder="自定义集群名称"
-                value={clusterNameInput}
-                disabled={!license.canManageClusters}
-                onChange={(event) => setClusterNameInput(event.target.value)}
-              />
-              <input
-                type="text"
-                placeholder="Prometheus 地址"
-                value={clusterPromInput}
-                disabled={!license.canManageClusters}
-                onChange={(event) => setClusterPromInput(event.target.value)}
-              />
-              <button
-                className="secondary"
-                onClick={() => void onUpload()}
-                disabled={clusterUploading || !license.canManageClusters}
-              >
-                {clusterUploading ? "上传中..." : "上传集群"}
-              </button>
-            </div>
-          ) : (
-            <AgentQuickCreate
-              clusters={clusters}
-              agents={agents}
-              canCreateAgents={canCreateAgents}
-              createDisabledReason={createAgentDisabledReason}
-              submitting={agentSubmitting}
-              notice={agentNotice}
-              error={agentError}
-              generatedCommand={generatedAgentCommand}
-              onCreate={onCreateAgent}
-              onClearCommand={onClearAgentCommand}
-            />
-          )}
-        </div>
+        <div className="header-actions" />
       </header>
 
       {!license.loading && !license.valid && (
@@ -2872,8 +2979,16 @@ const OverviewView = ({
       <section className="card cluster-panel">
         <div className="card-header">
           <h2>集群列表</h2>
-          {clusters.length > 0 && (
-            <div className="card-actions">
+          <div className="card-actions">
+            <button
+              type="button"
+              className="primary"
+              onClick={() => setIsCreateClusterOpen(true)}
+              disabled={!canCreateAgents}
+            >
+              添加集群
+            </button>
+            {clusters.length > 0 && (
               <div className="cluster-filters">
                 <select
                   value={clusterFilterStatus}
@@ -2895,36 +3010,36 @@ const OverviewView = ({
                   placeholder="关键字筛选"
                 />
               </div>
-              {canRemoveClusters && (
-                <>
-                  <span className="selection-hint">
-                    已选 {selectedFilteredCount} / {filteredClusters.length}
-                  </span>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={handleToggleAllClusters}
-                    disabled={!canRemoveClusters}
-                  >
-                    {allSelected ? "取消全选" : "全选"}
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary danger"
-                    onClick={handleDeleteSelectedClusters}
-                    disabled={selectedClusterIds.length === 0 || !canRemoveClusters}
-                  >
-                    删除
-                  </button>
-                </>
-              )}
-            </div>
-          )}
+            )}
+            {clusters.length > 0 && canRemoveClusters && (
+              <>
+                <span className="selection-hint">
+                  已选 {selectedFilteredCount} / {filteredClusters.length}
+                </span>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={handleToggleAllClusters}
+                  disabled={!canRemoveClusters}
+                >
+                  {allSelected ? "取消全选" : "全选"}
+                </button>
+                <button
+                  type="button"
+                  className="secondary danger"
+                  onClick={handleDeleteSelectedClusters}
+                  disabled={selectedClusterIds.length === 0 || !canRemoveClusters}
+                >
+                  删除
+                </button>
+              </>
+            )}
+          </div>
         </div>
-        {clusters.length === 0 ? (
-          <p className="placeholder">
-            暂无集群，请在 Agent 端完成注册后刷新本页面。
-          </p>
+      {clusters.length === 0 ? (
+        <p className="placeholder">
+          暂无集群，请在 Agent 端完成注册后刷新本页面。
+        </p>
         ) : filteredClusters.length === 0 ? (
           <p className="placeholder">未找到匹配的集群。</p>
         ) : (
@@ -10026,6 +10141,23 @@ const RunDetailView = ({
           </div>
         )}
       </section>
+      <AgentQuickCreate
+        clusters={clusters}
+        agents={agents}
+        canCreateAgents={canCreateAgents}
+        createDisabledReason={createAgentDisabledReason}
+        submitting={agentSubmitting}
+        notice={agentNotice}
+        error={agentError}
+        generatedCommand={generatedAgentCommand}
+        isOpen={isCreateClusterOpen}
+        onClose={() => {
+          setIsCreateClusterOpen(false);
+          onClearAgentCommand();
+        }}
+        onCreate={onCreateAgent}
+        onClearCommand={onClearAgentCommand}
+      />
     </>
   );
 };
@@ -11897,11 +12029,11 @@ const App = () => {
       }
       const normalizedName = payload.name.trim();
       if (!normalizedName) {
-        setAgentError("Agent 名称不能为空。");
+        setAgentError("集群名称不能为空。");
         return;
       }
       if (agents.some((agent) => agent.name.trim() === normalizedName)) {
-        setAgentError(`Agent 名称 ${normalizedName} 已存在，请更换其他名称。`);
+        setAgentError(`集群名称 ${normalizedName} 已存在，请更换其他名称。`);
         return;
       }
       const { backend_url, ...requestPayload } = payload;
@@ -11937,12 +12069,12 @@ const App = () => {
           })
         );
         setAgentNotice(
-          `Agent ${response.name} 创建成功，请在目标节点执行注册命令。`
+          `集群 ${response.name} 添加成功，请在目标节点执行注册命令。`
         );
         await Promise.all([refreshAgents(), refreshClusters()]);
       } catch (err) {
         const message =
-          err instanceof Error ? err.message : "创建 Agent 失败";
+          err instanceof Error ? err.message : "添加集群失败";
         setAgentError(message);
         throw err instanceof Error ? err : new Error(message);
       } finally {

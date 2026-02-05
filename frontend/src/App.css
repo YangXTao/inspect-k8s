@@ -3160,6 +3160,101 @@ th {
   flex-direction: column;
 }
 
+.modal.compact.cluster-create-modal {
+  width: min(760px, 92vw);
+  max-width: 760px;
+  max-height: calc(100vh - 120px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.cluster-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cluster-form-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.cluster-form-row.two-cols {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cluster-create-form label {
+  font-size: 14px;
+  gap: 6px;
+}
+
+.cluster-create-form input,
+.cluster-create-form select,
+.cluster-create-form textarea {
+  padding: 8px 10px;
+  font-size: 14px;
+  width: 100%;
+}
+
+.cluster-create-form .field-short {
+  max-width: 240px;
+}
+
+.cluster-hint {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.cluster-hint-block {
+  font-size: 12px;
+  color: #64748b;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cluster-hint-block code {
+  display: inline-block;
+  background: #f1f5f9;
+  padding: 4px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #0f172a;
+}
+
+.cluster-command-box {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cluster-command-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cluster-command-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cluster-command-box pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  color: #0f172a;
+}
+
 .template-modal .settings-form.template-form {
   flex: 1 1 auto;
   min-height: 0;
