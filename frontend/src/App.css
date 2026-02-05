@@ -2360,33 +2360,38 @@ th {
   flex-wrap: wrap;
 }
 
+.template-modal {
+  --template-field-width: 300px;
+  --template-select-width: 200px;
+}
+
 .template-modal .template-form-toolbar {
-  display: grid;
-  grid-template-columns: minmax(200px, 1fr) 120px auto;
+  display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: nowrap;
 }
 
 .template-modal .template-form-toolbar .inspection-items-filter {
-  width: 100%;
-  min-width: 0;
+  width: var(--template-field-width);
+  max-width: 100%;
+  flex: 0 0 var(--template-field-width);
 }
 
 .template-modal .template-form-toolbar .inspection-template-select {
-  width: 120px;
-  max-width: 120px;
-  justify-self: start;
+  width: var(--template-select-width);
+  max-width: 100%;
+  flex: 0 0 var(--template-select-width);
 }
 
 .template-modal .template-form-toolbar .selection-hint {
-  justify-self: end;
+  margin-left: auto;
   white-space: nowrap;
 }
 
 .template-modal .template-name-input {
-  width: 45%;
-  max-width: 320px;
+  width: var(--template-field-width);
+  max-width: 100%;
 }
 
 .template-item-list {
