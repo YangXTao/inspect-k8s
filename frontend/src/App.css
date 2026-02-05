@@ -2362,14 +2362,14 @@ th {
 
 .template-modal {
   --template-field-width: 300px;
-  --template-select-width: 200px;
+  --template-select-width: 180px;
 }
 
 .template-modal .template-form-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
 }
 
 .template-modal .template-form-toolbar .inspection-items-filter {
@@ -2382,6 +2382,12 @@ th {
   width: var(--template-select-width);
   max-width: 100%;
   flex: 0 0 var(--template-select-width);
+}
+
+.template-modal .template-form-toolbar .template-select-all {
+  padding: 8px 10px;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .template-modal .template-form-toolbar .selection-hint {
@@ -4533,19 +4539,6 @@ th {
   outline: none;
   border-color: #2563eb;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
-}
-
-.template-picker-toggle {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  border: 1px solid #cbd5f5;
-  background: #f8fafc;
-  color: #1e293b;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .template-picker-dropdown {

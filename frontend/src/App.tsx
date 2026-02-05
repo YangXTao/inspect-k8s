@@ -3502,7 +3502,7 @@ const HistoryView = ({
               type="text"
               value={historyKeyword}
               onChange={handleKeywordFilterChange}
-              placeholder="按巡检编号 / 集群 / 巡检人搜索"
+              placeholder="按巡检编号 / 集群 / 巡检模板搜索"
             />
             {historyKeyword && (
               <button
@@ -3608,7 +3608,7 @@ const HistoryView = ({
               <tr>
                 <th>巡检编号</th>
                 <th>集群</th>
-                <th>巡检人</th>
+                <th>巡检模板</th>
                 <th>状态</th>
                 <th>Agent 状态</th>
                 <th>开始时间</th>
@@ -4105,7 +4105,8 @@ interface ClusterDetailViewProps {
   onStartInspection: (
     clusterId: number,
     prometheusVersion: string,
-    itemIds: number[]
+    itemIds: number[],
+    operatorName?: string
   ) => Promise<void>;
   onDeleteRun: (run: InspectionRunListItem) => Promise<void>;
   onDeleteRunsBulk: (runIds: number[]) => Promise<void>;
@@ -4467,16 +4468,22 @@ const ClusterDetailView = ({
     if (!canRunInspections) {
       return;
     }
+    const templateLabel = selectedTemplates
+      .map((template) => template.name)
+      .filter(Boolean)
+      .join("、");
     void onStartInspection(
       cluster.id,
       normalizePrometheusVersion(prometheusVersion, prometheusVersionOptions),
-      selectedTemplateItemIds
+      selectedTemplateItemIds,
+      templateLabel || undefined
     );
   }, [
     cluster,
     onStartInspection,
     prometheusVersion,
     prometheusVersionOptions,
+    selectedTemplates,
     selectedTemplateItemIds,
     canRunInspections,
   ]);
@@ -4658,14 +4665,6 @@ const ClusterDetailView = ({
                     placeholder="输入模板名称或关键字搜索"
                     disabled={!canRunInspections}
                   />
-                  <button
-                    type="button"
-                    className="template-picker-toggle"
-                    onClick={() => setTemplatePickerOpen((prev) => !prev)}
-                    disabled={!canRunInspections}
-                  >
-                    ▾
-                  </button>
                 </div>
                 {templatePickerOpen && (
                   <div className="template-picker-dropdown">
@@ -4791,7 +4790,7 @@ const ClusterDetailView = ({
               <thead>
                 <tr>
                   <th>巡检编号</th>
-                  <th>巡检人</th>
+                  <th>巡检模板</th>
                   <th>状态</th>
                   <th>Agent 状态</th>
                   <th>开始时间</th>
@@ -6197,6 +6196,28 @@ const InspectionTemplateSettingsPanel = ({
     });
   }, [items, templateKeyword, templatePromVersion, prometheusVersionOptions]);
 
+  const allFilteredTemplateItemsSelected =
+    filteredItems.length > 0 &&
+    filteredItems.every((item) => templateItemIds.includes(item.id));
+
+  const handleToggleAllTemplateItems = useCallback(() => {
+    if (readOnly) {
+      return;
+    }
+    setTemplateItemIds((prev) => {
+      const next = new Set(prev);
+      const allSelected =
+        filteredItems.length > 0 &&
+        filteredItems.every((item) => next.has(item.id));
+      if (allSelected) {
+        filteredItems.forEach((item) => next.delete(item.id));
+      } else {
+        filteredItems.forEach((item) => next.add(item.id));
+      }
+      return Array.from(next);
+    });
+  }, [filteredItems, readOnly]);
+
   const resetForm = () => {
     setEditingTemplate(null);
     setTemplateName("");
@@ -6417,6 +6438,14 @@ const InspectionTemplateSettingsPanel = ({
                     </option>
                   ))}
                 </select>
+                <button
+                  type="button"
+                  className="secondary template-select-all"
+                  onClick={handleToggleAllTemplateItems}
+                  disabled={submitting || readOnly || filteredItems.length === 0}
+                >
+                  {allFilteredTemplateItemsSelected ? "取消全选" : "全选"}
+                </button>
                 <span className="selection-hint">
                   已选 {templateItemIds.length} / {filteredItems.length}
                 </span>
@@ -9761,7 +9790,7 @@ const RunDetailView = ({
             {cluster ? `${cluster.name}（${clusterSlug}）` : clusterSlug}
           </div>
           <div>
-            <strong>巡检人：</strong>
+            <strong>巡检模板：</strong>
             {summaryRun?.operator || "-"}
           </div>
           <div>
@@ -10989,7 +11018,6 @@ const App = () => {
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
 
-  const [operator] = useState("");
   const [prometheusVersionOptions, setPrometheusVersionOptions] = useState<
     string[]
   >(() => loadPrometheusVersionOptions());
@@ -12692,7 +12720,8 @@ const hasManualKubeconfig = useMemo(
     async (
       clusterId: number,
       prometheusVersion: string,
-      itemIds: number[]
+      itemIds: number[],
+      operatorName?: string
     ) => {
       if (!canCreateHistory) {
         setInspectionError("当前账号无历史巡检创建权限。");
@@ -12714,7 +12743,6 @@ const hasManualKubeconfig = useMemo(
       setInspectionNotice(null);
 
       try {
-        const operatorName = operator.trim();
         logWithTimestamp(
           "info",
           "创建巡检: cluster=%s items=%s",
@@ -12724,7 +12752,7 @@ const hasManualKubeconfig = useMemo(
         const run = await createInspectionRun(
           itemIds,
           clusterId,
-          operatorName || undefined,
+          operatorName?.trim() || undefined,
           prometheusVersion
         );
         setInspectionNotice("巡检任务已启动，状态会自动更新。");
@@ -12743,7 +12771,6 @@ const hasManualKubeconfig = useMemo(
       }
     },
     [
-      operator,
       refreshRuns,
       refreshClusters,
       licenseCapabilities,
