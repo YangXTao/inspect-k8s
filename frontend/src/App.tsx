@@ -151,7 +151,6 @@ const CLUSTER_PAGE_SIZE_OPTIONS = [10, 20, 50];
 const DEFAULT_CLUSTER_PAGE_SIZE = CLUSTER_PAGE_SIZE_OPTIONS[0];
 const RUN_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const AUDIT_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
-const CLUSTER_ITEM_PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
 const RESULT_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const SCHEDULE_REFRESH_INTERVAL = 15000;
 const DEFAULT_PROMETHEUS_VERSION = "3.2";
@@ -4102,14 +4101,11 @@ interface ClusterDetailViewProps {
   templates: InspectionItemTemplate[];
   runs: InspectionRunListItem[];
   prometheusVersionOptions: string[];
-  selectedIds: number[];
-  setSelectedIds: (updater: (prev: number[]) => number[]) => void;
-  operator: string;
-  setOperator: (value: string) => void;
   inspectionLoading: boolean;
   onStartInspection: (
     clusterId: number,
-    prometheusVersion: string
+    prometheusVersion: string,
+    itemIds: number[]
   ) => Promise<void>;
   onDeleteRun: (run: InspectionRunListItem) => Promise<void>;
   onDeleteRunsBulk: (runIds: number[]) => Promise<void>;
@@ -4140,10 +4136,6 @@ const ClusterDetailView = ({
   templates,
   runs,
   prometheusVersionOptions,
-  selectedIds,
-  setSelectedIds,
-  operator,
-  setOperator,
   inspectionLoading,
   onStartInspection,
   onDeleteRun,
@@ -4168,21 +4160,18 @@ const ClusterDetailView = ({
   const enableServerConnectionTest = true;
   const { clusterKey } = useParams<{ clusterKey?: string }>();
   const navigate = useNavigate();
-  const operatorInputId = useId();
-  const prometheusVersionInputId = useId();
   const [selectedRunIds, setSelectedRunIds] = useState<number[]>([]);
   const [clusterRunPageSize, setClusterRunPageSize] = useState<number>(
     RUN_PAGE_SIZE_OPTIONS[0]
   );
   const [clusterRunPage, setClusterRunPage] = useState(1);
   const [clusterRunPageInput, setClusterRunPageInput] = useState("");
-  const [itemPageSize, setItemPageSize] = useState<number>(
-    CLUSTER_ITEM_PAGE_SIZE_OPTIONS[0]
-  );
-  const [itemPage, setItemPage] = useState(1);
-  const [itemPageInput, setItemPageInput] = useState("");
-  const [itemKeyword, setItemKeyword] = useState("");
-  const [templateId, setTemplateId] = useState("");
+  const [templateKeyword, setTemplateKeyword] = useState("");
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [selectedTemplateIds, setSelectedTemplateIds] = useState<number[]>([]);
+  const [pendingTemplateRemoval, setPendingTemplateRemoval] =
+    useState<InspectionItemTemplate | null>(null);
+  const templatePickerRef = useRef<HTMLDivElement | null>(null);
   const [prometheusVersion, setPrometheusVersion] = useState(
     DEFAULT_PROMETHEUS_VERSION
   );
@@ -4234,10 +4223,49 @@ const ClusterDetailView = ({
       });
   }, [cluster, runs]);
 
+  const sortedTemplates = useMemo(
+    () => templates.slice().sort((a, b) => (a.name || "").localeCompare(b.name || "")),
+    [templates]
+  );
+
+  const filteredTemplates = useMemo(() => {
+    const keyword = templateKeyword.trim().toLowerCase();
+    if (!keyword) {
+      return sortedTemplates;
+    }
+    return sortedTemplates.filter((template) =>
+      (template.name || "").toLowerCase().includes(keyword)
+    );
+  }, [sortedTemplates, templateKeyword]);
+
+  const selectedTemplates = useMemo(
+    () => sortedTemplates.filter((template) => selectedTemplateIds.includes(template.id)),
+    [sortedTemplates, selectedTemplateIds]
+  );
+
+  const itemIdSet = useMemo(
+    () => new Set(items.map((item) => item.id)),
+    [items]
+  );
+
+  const selectedTemplateItemIds = useMemo(() => {
+    const ids = new Set<number>();
+    selectedTemplates.forEach((template) => {
+      (template.item_ids ?? []).forEach((id) => {
+        if (itemIdSet.has(id)) {
+          ids.add(id);
+        }
+      });
+    });
+    return Array.from(ids);
+  }, [selectedTemplates, itemIdSet]);
+
   useEffect(() => {
-    setSelectedIds(() => []);
     setSelectedRunIds([]);
-  }, [resolvedClusterId, setSelectedIds]);
+    setSelectedTemplateIds([]);
+    setTemplateKeyword("");
+    setTemplatePickerOpen(false);
+  }, [resolvedClusterId]);
 
   useEffect(() => {
     setPrometheusVersion(DEFAULT_PROMETHEUS_VERSION);
@@ -4250,24 +4278,45 @@ const ClusterDetailView = ({
   }, [prometheusVersionOptions, prometheusVersion]);
 
   useEffect(() => {
-    setSelectedIds(() => []);
-  }, [prometheusVersion, setSelectedIds]);
-
-  useEffect(() => {
     setSelectedRunIds((prev) =>
       prev.filter((id) => clusterRuns.some((run) => run.id === id))
     );
   }, [clusterRuns]);
+
+  useEffect(() => {
+    if (!templatePickerOpen) {
+      return;
+    }
+    const handleClick = (event: MouseEvent) => {
+      if (!templatePickerRef.current) {
+        return;
+      }
+      if (!templatePickerRef.current.contains(event.target as Node)) {
+        setTemplatePickerOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+    };
+  }, [templatePickerOpen]);
+
+  useEffect(() => {
+    setSelectedTemplateIds((prev) =>
+      prev.filter((id) => templates.some((template) => template.id === id))
+    );
+  }, [templates]);
+
   useEffect(() => {
     if (!canRunInspections) {
-      setSelectedIds(() => []);
+      setSelectedTemplateIds([]);
       setSelectedRunIds([]);
       return;
     }
     if (!canDeleteHistory) {
       setSelectedRunIds([]);
     }
-  }, [canRunInspections, canDeleteHistory, setSelectedIds, setSelectedRunIds]);
+  }, [canRunInspections, canDeleteHistory]);
 
   const totalClusterRunPages = useMemo(
     () =>
@@ -4294,122 +4343,6 @@ const ClusterDetailView = ({
     return clusterRuns.slice(start, start + clusterRunPageSize);
   }, [clusterRuns, clusterRunPage, clusterRunPageSize]);
 
-  const inspectionKeyword = itemKeyword.trim().toLowerCase();
-  const selectedPrometheusVersion = normalizePrometheusVersion(
-    prometheusVersion,
-    prometheusVersionOptions
-  );
-  const matchesInspectionKeyword = useCallback(
-    (item: InspectionItem) => {
-      if (!inspectionKeyword) {
-        return true;
-      }
-      const name = (item.name ?? "").toLowerCase();
-      const desc = (item.description ?? "").toLowerCase();
-      return name.includes(inspectionKeyword) || desc.includes(inspectionKeyword);
-    },
-    [inspectionKeyword]
-  );
-  const filteredPromqlItems = useMemo(
-    () =>
-      items.filter(
-        (item) =>
-          isPromqlType(item.check_type) &&
-          normalizePrometheusVersion(
-            item.prometheus_version,
-            prometheusVersionOptions
-          ) ===
-            selectedPrometheusVersion &&
-          matchesInspectionKeyword(item)
-      ),
-    [items, matchesInspectionKeyword, selectedPrometheusVersion]
-  );
-  const filteredCommonItems = useMemo(
-    () =>
-      items.filter(
-        (item) =>
-          !isPromqlType(item.check_type) &&
-          !isRancherLocalType(item.check_type) &&
-          matchesInspectionKeyword(item)
-      ),
-    [items, matchesInspectionKeyword]
-  );
-  const filteredInspectionItems = useMemo(
-    () => [...filteredPromqlItems, ...filteredCommonItems],
-    [filteredPromqlItems, filteredCommonItems]
-  );
-  const inspectionItemMap = useMemo(() => {
-    const map = new Map<number, InspectionItem>();
-    items.forEach((item) => map.set(item.id, item));
-    return map;
-  }, [items]);
-  const rancherItemIdSet = useMemo(
-    () =>
-      new Set(
-        items
-          .filter((item) => isRancherLocalType(item.check_type))
-          .map((item) => item.id)
-      ),
-    [items]
-  );
-
-  const totalInspectionPages = useMemo(
-    () =>
-      Math.max(
-        1,
-        Math.ceil(filteredInspectionItems.length / Math.max(itemPageSize, 1))
-      ),
-    [filteredInspectionItems.length, itemPageSize]
-  );
-
-  useEffect(() => {
-    setItemPage(1);
-    setItemPageInput("");
-  }, [itemPageSize, filteredInspectionItems.length, itemKeyword]);
-
-  useEffect(() => {
-    setItemPage((prev) => Math.min(Math.max(prev, 1), totalInspectionPages));
-  }, [totalInspectionPages]);
-
-  useEffect(() => {
-    if (rancherItemIdSet.size === 0) {
-      return;
-    }
-    setSelectedIds((prev) => prev.filter((id) => !rancherItemIdSet.has(id)));
-  }, [rancherItemIdSet, setSelectedIds]);
-
-  const pagedInspectionItems = useMemo(() => {
-    if (filteredInspectionItems.length === 0) {
-      return [];
-    }
-    const start = (itemPage - 1) * itemPageSize;
-    return filteredInspectionItems.slice(start, start + itemPageSize);
-  }, [filteredInspectionItems, itemPage, itemPageSize]);
-  const pagedPromqlItems = useMemo(
-    () => pagedInspectionItems.filter((item) => isPromqlType(item.check_type)),
-    [pagedInspectionItems]
-  );
-  const pagedCommonItems = useMemo(
-    () =>
-      pagedInspectionItems.filter(
-        (item) =>
-          !isPromqlType(item.check_type) &&
-          !isRancherLocalType(item.check_type)
-      ),
-    [pagedInspectionItems]
-  );
-  const versionHint = useMemo(() => {
-    if (filteredPromqlItems.length === 0 && filteredCommonItems.length > 0) {
-      return `当前 Prometheus 版本 ${selectedPrometheusVersion} 暂无 PromQL 巡检项，以下为通用巡检项。`;
-    }
-    return "Prometheus 版本仅影响 PromQL 巡检项，命令行/其他类型始终可用。";
-  }, [
-    filteredCommonItems.length,
-    filteredPromqlItems.length,
-    selectedPrometheusVersion,
-  ]);
-  const promqlCountLabel = `PromQL 巡检项（${selectedPrometheusVersion}）${filteredPromqlItems.length} 条`;
-  const commonCountLabel = `通用巡检项 ${filteredCommonItems.length} 条`;
 
   const statusMeta = useMemo(() => {
     if (!cluster) {
@@ -4435,95 +4368,6 @@ const ClusterDetailView = ({
   const isTesting = enableServerConnectionTest
     ? Boolean(cluster && testingClusterIds[cluster.id])
     : false;
-  const filteredInspectionItemIdSet = useMemo(
-    () => new Set(filteredInspectionItems.map((item) => item.id)),
-    [filteredInspectionItems]
-  );
-  const selectedFilteredItemsCount = useMemo(
-    () => selectedIds.filter((id) => filteredInspectionItemIdSet.has(id)).length,
-    [filteredInspectionItemIdSet, selectedIds]
-  );
-  const allItemsSelected =
-    filteredInspectionItems.length > 0 &&
-    filteredInspectionItems.every((item) => selectedIds.includes(item.id));
-
-  const handleToggleItem = useCallback(
-    (itemId: number) => {
-      if (!canRunInspections) {
-        return;
-      }
-      setSelectedIds((prev) =>
-        prev.includes(itemId)
-          ? prev.filter((id) => id !== itemId)
-          : [...prev, itemId]
-      );
-    },
-    [setSelectedIds, canRunInspections]
-  );
-
-  const handleToggleAllItems = useCallback(() => {
-    setSelectedIds((prev) => {
-      if (!canRunInspections || filteredInspectionItems.length === 0) {
-        return prev;
-      }
-      const next = new Set(prev);
-      const allFilteredSelected = filteredInspectionItems.every((item) =>
-        next.has(item.id)
-      );
-      if (allFilteredSelected) {
-        filteredInspectionItems.forEach((item) => next.delete(item.id));
-        return Array.from(next);
-      }
-      filteredInspectionItems.forEach((item) => next.add(item.id));
-      return Array.from(next);
-    });
-  }, [filteredInspectionItems, setSelectedIds, canRunInspections]);
-
-  const handleApplyTemplate = useCallback(
-    (value: string) => {
-      setTemplateId(value);
-      if (!value) {
-        return;
-      }
-      const template = templates.find(
-        (item) => String(item.id) === value
-      );
-      if (!template) {
-        setTemplateId("");
-        return;
-      }
-      const nextIds = (template.item_ids ?? []).filter((id) => {
-        const item = inspectionItemMap.get(id);
-        if (!item) {
-          return false;
-        }
-        if (rancherItemIdSet.has(id)) {
-          return false;
-        }
-        if (isPromqlType(item.check_type)) {
-          return (
-            normalizePrometheusVersion(
-              item.prometheus_version,
-              prometheusVersionOptions
-            ) === selectedPrometheusVersion
-          );
-        }
-        return true;
-      });
-      setItemKeyword("");
-      setSelectedIds(() => nextIds);
-      setTemplateId("");
-    },
-    [
-      templates,
-      inspectionItemMap,
-      rancherItemIdSet,
-      selectedPrometheusVersion,
-      prometheusVersionOptions,
-      setItemKeyword,
-      setSelectedIds,
-    ]
-  );
 
   const handleToggleRunSelection = useCallback(
     (runId: number) => {
@@ -4538,6 +4382,39 @@ const ClusterDetailView = ({
     },
     [canRunInspections, canDeleteHistory]
   );
+
+  const handleToggleTemplateSelection = useCallback(
+    (templateId: number) => {
+      if (!canRunInspections) {
+        return;
+      }
+      setSelectedTemplateIds((prev) =>
+        prev.includes(templateId)
+          ? prev.filter((id) => id !== templateId)
+          : [...prev, templateId]
+      );
+    },
+    [canRunInspections]
+  );
+
+  const handleRequestTemplateRemoval = useCallback(
+    (template: InspectionItemTemplate) => {
+      if (!canRunInspections) {
+        return;
+      }
+      setPendingTemplateRemoval(template);
+    },
+    [canRunInspections]
+  );
+
+  const handleConfirmTemplateRemoval = useCallback(() => {
+    if (!pendingTemplateRemoval) {
+      return;
+    }
+    const targetId = pendingTemplateRemoval.id;
+    setSelectedTemplateIds((prev) => prev.filter((id) => id !== targetId));
+    setPendingTemplateRemoval(null);
+  }, [pendingTemplateRemoval]);
 
   const handleToggleAllRuns = useCallback(() => {
     setSelectedRunIds((prev) => {
@@ -4592,13 +4469,15 @@ const ClusterDetailView = ({
     }
     void onStartInspection(
       cluster.id,
-      normalizePrometheusVersion(prometheusVersion, prometheusVersionOptions)
+      normalizePrometheusVersion(prometheusVersion, prometheusVersionOptions),
+      selectedTemplateItemIds
     );
   }, [
     cluster,
     onStartInspection,
     prometheusVersion,
     prometheusVersionOptions,
+    selectedTemplateItemIds,
     canRunInspections,
   ]);
 
@@ -4631,34 +4510,6 @@ const ClusterDetailView = ({
     setClusterRunPageInput("");
   }, [clusterRunPageInput, totalClusterRunPages]);
 
-  const handleInspectionPageChange = useCallback(
-    (offset: number) => {
-      setItemPage((prev) => {
-        const next = prev + offset;
-        if (next < 1) {
-          return 1;
-        }
-        if (next > totalInspectionPages) {
-          return totalInspectionPages;
-        }
-        return next;
-      });
-    },
-    [totalInspectionPages]
-  );
-
-  const handleInspectionPageJump = useCallback(() => {
-    const trimmed = itemPageInput.trim();
-    if (!trimmed) {
-      return;
-    }
-    const parsed = Number(trimmed);
-    if (!Number.isNaN(parsed) && Number.isInteger(parsed)) {
-      const target = Math.min(Math.max(parsed, 1), totalInspectionPages);
-      setItemPage(target);
-    }
-    setItemPageInput("");
-  }, [itemPageInput, totalInspectionPages]);
   let detailContent: ReactNode;
 
   if (!clusterKey || resolvedClusterId === null) {
@@ -4794,72 +4645,79 @@ const ClusterDetailView = ({
 
         <div className="detail-card">
           <h2>执行巡检</h2>
-          <label htmlFor={operatorInputId} className="operator-inline">
-            巡检人
-            <input
-              id={operatorInputId}
-              placeholder="输入巡检人姓名（可选）"
-              value={operator}
-              onChange={(event) => setOperator(event.target.value)}
-              disabled={!canRunInspections}
-            />
-          </label>
-          <label
-            htmlFor={prometheusVersionInputId}
-            className="operator-inline"
-          >
-            Prometheus 版本
-            <select
-              id={prometheusVersionInputId}
-              value={prometheusVersion}
-              onChange={(event) => setPrometheusVersion(event.target.value)}
-              disabled={!canRunInspections}
-            >
-              {prometheusVersionOptions.map((version) => (
-                <option key={version} value={version}>
-                  {version}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="inspection-items-toolbar">
-            <span className="selection-hint">
-              已选择 {selectedFilteredItemsCount} / {filteredInspectionItems.length} 个巡检项
-            </span>
-            <div className="inspection-items-toolbar-actions">
-              <input
-                type="text"
-                className="inspection-items-filter"
-                value={itemKeyword}
-                onChange={(event) => setItemKeyword(event.target.value)}
-                placeholder="关键字筛选"
-                disabled={!canRunInspections}
-              />
-              {templates.length > 0 && (
-                <select
-                  className="inspection-items-filter inspection-template-select"
-                  value={templateId}
-                  onChange={(event) => handleApplyTemplate(event.target.value)}
-                  disabled={!canRunInspections}
-                >
-                  <option value="">套用模板</option>
-                  {templates.map((template) => (
-                    <option key={template.id} value={String(template.id)}>
-                      {template.name}
-                    </option>
-                  ))}
-                </select>
+          <div className="inspection-template-panel">
+            <label className="template-picker-label">
+              巡检模板
+              <div className="template-picker" ref={templatePickerRef}>
+                <div className="template-picker-input">
+                  <input
+                    type="text"
+                    value={templateKeyword}
+                    onChange={(event) => setTemplateKeyword(event.target.value)}
+                    onFocus={() => setTemplatePickerOpen(true)}
+                    placeholder="输入模板名称或关键字搜索"
+                    disabled={!canRunInspections}
+                  />
+                  <button
+                    type="button"
+                    className="template-picker-toggle"
+                    onClick={() => setTemplatePickerOpen((prev) => !prev)}
+                    disabled={!canRunInspections}
+                  >
+                    ▾
+                  </button>
+                </div>
+                {templatePickerOpen && (
+                  <div className="template-picker-dropdown">
+                    {filteredTemplates.length === 0 ? (
+                      <div className="placeholder">
+                        暂无匹配模板，请先在设置中创建。
+                      </div>
+                    ) : (
+                      filteredTemplates.map((template) => (
+                        <label key={template.id} className="template-option">
+                          <input
+                            type="checkbox"
+                            checked={selectedTemplateIds.includes(template.id)}
+                            onChange={() =>
+                              handleToggleTemplateSelection(template.id)
+                            }
+                            disabled={!canRunInspections}
+                          />
+                          <span>{template.name}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            </label>
+
+            <div className="template-selected-list">
+              {selectedTemplates.length === 0 ? (
+                <span className="placeholder">暂未选择巡检模板</span>
+              ) : (
+                selectedTemplates.map((template) => (
+                  <span key={template.id} className="template-chip">
+                    {template.name}
+                    <button
+                      type="button"
+                      className="template-chip-remove"
+                      onClick={() => handleRequestTemplateRemoval(template)}
+                      disabled={!canRunInspections}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))
               )}
-              {canCreateHistory && (
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={handleToggleAllItems}
-                  disabled={!canRunInspections}
-                >
-                  {allItemsSelected ? "清除选择" : "全选"}
-                </button>
-              )}
+            </div>
+
+            <div className="template-start-row">
+              <span className="selection-hint">
+                已选择 {selectedTemplates.length} 个模板 · 共{" "}
+                {selectedTemplateItemIds.length} 个巡检项
+              </span>
               {canCreateHistory && (
                 <button
                   type="button"
@@ -4867,7 +4725,7 @@ const ClusterDetailView = ({
                   onClick={handleStart}
                   disabled={
                     inspectionLoading ||
-                    selectedIds.length === 0 ||
+                    selectedTemplateItemIds.length === 0 ||
                     !canRunInspections
                   }
                 >
@@ -4876,155 +4734,6 @@ const ClusterDetailView = ({
               )}
             </div>
           </div>
-          <div className="inspection-version-hint">
-            <span className="inspection-version-hint-text">{versionHint}</span>
-            <span className="inspection-version-counts">
-              {promqlCountLabel} · {commonCountLabel}
-            </span>
-          </div>
-          {items.length === 0 ? (
-            <ul className="item-list">
-              <li className="placeholder">暂无巡检项，请在设置中添加。</li>
-            </ul>
-          ) : filteredInspectionItems.length === 0 ? (
-            <ul className="item-list">
-              <li className="placeholder">未找到匹配的巡检项。</li>
-            </ul>
-          ) : (
-            <>
-              {pagedPromqlItems.length > 0 && (
-                <div className="inspection-item-group">
-                  <div className="inspection-item-group-title">
-                    <span className="inspection-group-title-text">PromQL 巡检项</span>
-                    <span className="group-count">
-                      {filteredPromqlItems.length} 条
-                    </span>
-                  </div>
-                  <ul className="item-list">
-                    {pagedPromqlItems.map((item) => (
-                      <li key={item.id}>
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.includes(item.id)}
-                            onChange={() => handleToggleItem(item.id)}
-                            disabled={!canRunInspections}
-                          />
-                          <div>
-                            <div className="item-title-row">
-                              <div className="item-name">{item.name}</div>
-                              <span className="item-tag promql">
-                                PromQL · {normalizePrometheusVersion(
-                                  item.prometheus_version,
-                                  prometheusVersionOptions
-                                )}
-                              </span>
-                            </div>
-                            <div className="item-desc">
-                              {item.description || "未提供描述"}
-                            </div>
-                          </div>
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {pagedCommonItems.length > 0 && (
-                <div className="inspection-item-group">
-                  <div className="inspection-item-group-title">
-                    <span className="inspection-group-title-text">通用巡检项</span>
-                    <span className="group-count">
-                      {filteredCommonItems.length} 条
-                    </span>
-                  </div>
-                  <ul className="item-list">
-                    {pagedCommonItems.map((item) => (
-                      <li key={item.id}>
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.includes(item.id)}
-                            onChange={() => handleToggleItem(item.id)}
-                            disabled={!canRunInspections}
-                          />
-                          <div>
-                            <div className="item-title-row">
-                              <div className="item-name">{item.name}</div>
-                              <span className="item-tag neutral">通用</span>
-                            </div>
-                            <div className="item-desc">
-                              {item.description || "未提供描述"}
-                            </div>
-                          </div>
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              <div className="history-pagination-controls inspection-items-pagination">
-                <label className="page-size-control">
-                  每页
-                  <select
-                    value={itemPageSize}
-                    onChange={(event) =>
-                      setItemPageSize(Number(event.target.value))
-                    }
-                  >
-                    {CLUSTER_ITEM_PAGE_SIZE_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="history-pagination-buttons">
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => handleInspectionPageChange(-1)}
-                    disabled={itemPage <= 1}
-                  >
-                    上一页
-                  </button>
-                  <span>
-                    第 {itemPage} / {totalInspectionPages} 页
-                  </span>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => handleInspectionPageChange(1)}
-                    disabled={itemPage >= totalInspectionPages}
-                  >
-                    下一页
-                  </button>
-                </div>
-                <label className="history-page-jump">
-                  跳转
-                  <input
-                    type="number"
-                    min={1}
-                    value={itemPageInput}
-                    onChange={(event) => setItemPageInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        handleInspectionPageJump();
-                      }
-                    }}
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={handleInspectionPageJump}
-                >
-                  确定
-                </button>
-              </div>
-            </>
-          )}
           {!license.canRunInspections && (
             <div className="feedback warning">
               {license.reason ?? "当前 License 不支持发起巡检。"}
@@ -5279,6 +4988,18 @@ const ClusterDetailView = ({
           </div>
         )}
       </section>
+      {pendingTemplateRemoval && (
+        <ConfirmationModal
+          state={{
+            title: "移除巡检模板",
+            message: `确认移除模板「${pendingTemplateRemoval.name}」？`,
+            confirmLabel: "移除",
+            variant: "danger",
+            onConfirm: handleConfirmTemplateRemoval,
+          }}
+          onClose={() => setPendingTemplateRemoval(null)}
+        />
+      )}
       </>
     );
   }
@@ -11268,8 +10989,7 @@ const App = () => {
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
 
-  const [selectedItemIds, setSelectedItemIdsState] = useState<number[]>([]);
-  const [operator, setOperator] = useState("");
+  const [operator] = useState("");
   const [prometheusVersionOptions, setPrometheusVersionOptions] = useState<
     string[]
   >(() => loadPrometheusVersionOptions());
@@ -12968,15 +12688,12 @@ const hasManualKubeconfig = useMemo(
     kubeconfigFile,
   ]);
 
-  const setSelectedItemIds = useCallback(
-    (updater: (prev: number[]) => number[]) => {
-      setSelectedItemIdsState((prev) => updater(prev));
-    },
-    []
-  );
-
   const handleStartInspection = useCallback(
-    async (clusterId: number, prometheusVersion: string) => {
+    async (
+      clusterId: number,
+      prometheusVersion: string,
+      itemIds: number[]
+    ) => {
       if (!canCreateHistory) {
         setInspectionError("当前账号无历史巡检创建权限。");
         return;
@@ -12987,8 +12704,8 @@ const hasManualKubeconfig = useMemo(
         );
         return;
       }
-      if (selectedItemIds.length === 0) {
-        setInspectionError("请至少选择一个巡检项");
+      if (itemIds.length === 0) {
+        setInspectionError("请至少选择一个巡检模板");
         return;
       }
 
@@ -13002,16 +12719,15 @@ const hasManualKubeconfig = useMemo(
           "info",
           "创建巡检: cluster=%s items=%s",
           clusterId,
-          selectedItemIds.join(",")
+          itemIds.join(",")
         );
         const run = await createInspectionRun(
-          selectedItemIds,
+          itemIds,
           clusterId,
           operatorName || undefined,
           prometheusVersion
         );
         setInspectionNotice("巡检任务已启动，状态会自动更新。");
-        setSelectedItemIdsState([]);
         await refreshRuns();
         await refreshClusters();
         if (run?.id) {
@@ -13023,18 +12739,17 @@ const hasManualKubeconfig = useMemo(
         logWithTimestamp("error", "创建巡检失败: %s", message);
         setInspectionError(message);
       } finally {
-      setInspectionLoading(false);
-    }
-  },
-  [
-    selectedItemIds,
-    operator,
-    refreshRuns,
-    refreshClusters,
-    licenseCapabilities,
-    canCreateHistory,
-  ]
-);
+        setInspectionLoading(false);
+      }
+    },
+    [
+      operator,
+      refreshRuns,
+      refreshClusters,
+      licenseCapabilities,
+      canCreateHistory,
+    ]
+  );
 
   const handleDeleteClustersBulk = useCallback(
     (clusterIds: number[]): Promise<void> => {
@@ -15008,10 +14723,6 @@ const hasManualKubeconfig = useMemo(
                 templates={inspectionTemplates}
                 runs={runs}
                 prometheusVersionOptions={prometheusVersionOptions}
-                selectedIds={selectedItemIds}
-                setSelectedIds={setSelectedItemIds}
-                operator={operator}
-                setOperator={setOperator}
                 inspectionLoading={inspectionLoading}
                 onStartInspection={handleStartInspection}
                 onDeleteRun={handleDeleteRun}

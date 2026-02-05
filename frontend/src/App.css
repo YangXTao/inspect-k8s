@@ -4495,6 +4495,141 @@ th {
   color: #0f172a;
 }
 
+.inspection-template-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.template-picker-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.template-picker {
+  position: relative;
+  max-width: 520px;
+}
+
+.template-picker-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.template-picker-input input {
+  flex: 1 1 auto;
+  border-radius: 12px;
+  border: 1px solid #cbd5f5;
+  padding: 10px 12px;
+  font-size: 14px;
+  background: #ffffff;
+}
+
+.template-picker-input input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+}
+
+.template-picker-toggle {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid #cbd5f5;
+  background: #f8fafc;
+  color: #1e293b;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.template-picker-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 16px 28px rgba(15, 23, 42, 0.12);
+  padding: 6px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.template-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.template-option:hover {
+  background: #f1f5f9;
+}
+
+.template-option input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.template-selected-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.template-chip {
+  position: relative;
+  padding: 6px 22px 6px 12px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.template-chip-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid #cbd5f5;
+  background: #ffffff;
+  color: #1d4ed8;
+  font-size: 12px;
+  padding: 0;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.template-start-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.template-start-row .selection-hint {
+  color: #475569;
+  font-size: 13px;
+}
+
 .nodes-card {
   gap: 12px;
 }
