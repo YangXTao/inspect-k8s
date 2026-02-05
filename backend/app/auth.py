@@ -74,6 +74,8 @@ KNOWN_PERMISSIONS = {
     "report.read",
     "report.delete",
     "audit.read",
+    "system.read",
+    "system.update",
 }
 
 READ_ONLY_PERMISSIONS = {

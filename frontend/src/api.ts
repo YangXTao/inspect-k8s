@@ -12,6 +12,8 @@ import {
   InspectionRunListItem,
   InspectionSchedule,
   LicenseStatus,
+  GeneralSettings,
+  GeneralSettingsInput,
   AuthRole,
   AuthLoginChallenge,
   AuthUser,
@@ -680,5 +682,18 @@ export function uploadLicenseText(content: string): Promise<LicenseStatus> {
   return request<LicenseStatus>("/license/import-text", {
     method: "POST",
     body: JSON.stringify({ content }),
+  });
+}
+
+export function getGeneralSettings(): Promise<GeneralSettings> {
+  return request<GeneralSettings>("/settings/general");
+}
+
+export function updateGeneralSettings(
+  payload: GeneralSettingsInput
+): Promise<GeneralSettings> {
+  return request<GeneralSettings>("/settings/general", {
+    method: "PUT",
+    body: JSON.stringify(payload),
   });
 }

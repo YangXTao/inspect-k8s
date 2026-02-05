@@ -392,3 +392,18 @@ class AuthSession(Base):
     expires_at = Column(DateTime, nullable=False)
 
     user = relationship("AuthUser", back_populates="sessions")
+
+
+class SystemSettings(Base):
+    __tablename__ = "system_settings"
+    __table_args__ = {
+        "mysql_charset": "utf8mb4",
+        "mysql_collate": "utf8mb4_unicode_ci",
+    }
+
+    id = Column(Integer, primary_key=True, index=True)
+    base_url = Column(String(255), nullable=True)
+    report_retention_days = Column(Integer, nullable=False, default=30)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )

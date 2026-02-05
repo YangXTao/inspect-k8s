@@ -595,6 +595,16 @@ class InspectionItemsExportOut(BaseModel):
     items: List[InspectionItemOut]
 
 
+class GeneralSettingsOut(BaseModel):
+    base_url: Optional[str] = None
+    report_retention_days: int = Field(..., ge=1)
+
+
+class GeneralSettingsIn(BaseModel):
+    base_url: str = Field(..., min_length=1, max_length=255)
+    report_retention_days: int = Field(..., ge=1, le=3650)
+
+
 class LicenseStatusOut(BaseModel):
     valid: bool
     reason: Optional[str] = None

@@ -235,6 +235,16 @@ export type LicenseStatus = {
   features: string[];
 };
 
+export type GeneralSettings = {
+  base_url?: string | null;
+  report_retention_days: number;
+};
+
+export type GeneralSettingsInput = {
+  base_url: string;
+  report_retention_days: number;
+};
+
 export type InspectionAgent = {
   id: number;
   name: string;

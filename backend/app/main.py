@@ -398,6 +398,29 @@ def _expire_stuck_runs(db: Session) -> int:
     return expired
 
 
+def _cleanup_expired_reports(db: Session, retention_days: int) -> int:
+    if retention_days <= 0:
+        return 0
+    cutoff = datetime.utcnow() - timedelta(days=retention_days)
+    runs = (
+        db.query(models.InspectionRun)
+        .filter(
+            models.InspectionRun.completed_at.isnot(None),
+            models.InspectionRun.completed_at < cutoff,
+        )
+        .all()
+    )
+    if not runs:
+        return 0
+    report_paths = [run.report_path for run in runs if run.report_path]
+    run_ids = [run.id for run in runs]
+    if run_ids:
+        crud.delete_inspection_runs_bulk(db, run_ids, enable_audit=False)
+    for report_path in report_paths:
+        _remove_file_safely(report_path)
+    return len(run_ids)
+
+
 def _normalise_cluster_name(name: str | None) -> str:
     if not name:
         return "cluster"
@@ -2011,6 +2034,57 @@ def upload_license_text(
         username=current_user.username,
     )
     return schemas.LicenseStatusOut(**status)
+
+
+@app.get("/settings/general", response_model=schemas.GeneralSettingsOut)
+def get_general_settings(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "system.read", "通用设置查看")
+    settings = crud.get_system_settings(db)
+    base_url = (settings.base_url or "").strip()
+    if not base_url:
+        base_url = str(request.base_url).rstrip("/")
+    retention_days = settings.report_retention_days or crud.DEFAULT_REPORT_RETENTION_DAYS
+    return schemas.GeneralSettingsOut(
+        base_url=base_url,
+        report_retention_days=retention_days,
+    )
+
+
+@app.put("/settings/general", response_model=schemas.GeneralSettingsOut)
+def update_general_settings(
+    payload: schemas.GeneralSettingsIn,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "system.update", "通用设置编辑")
+    base_url = payload.base_url.strip().rstrip("/")
+    if not base_url:
+        raise HTTPException(status_code=400, detail="BaseURL 不能为空")
+    if not re.match(r"^https?://", base_url):
+        raise HTTPException(
+            status_code=400,
+            detail="BaseURL 需以 http:// 或 https:// 开头",
+        )
+    retention_days = int(payload.report_retention_days)
+    if retention_days <= 0:
+        raise HTTPException(status_code=400, detail="巡检报告保存时长需为正整数")
+    settings = crud.update_system_settings(
+        db,
+        base_url=base_url,
+        report_retention_days=retention_days,
+    )
+    try:
+        _cleanup_expired_reports(db, retention_days)
+    except Exception:
+        logger.exception("清理过期巡检报告失败。")
+    return schemas.GeneralSettingsOut(
+        base_url=settings.base_url or base_url,
+        report_retention_days=settings.report_retention_days,
+    )
 
 
 def require_license_dependency(*features: str) -> Callable[[], None]:

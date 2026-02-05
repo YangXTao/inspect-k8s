@@ -57,6 +57,8 @@ import {
   getOverviewMetrics,
   uploadLicense,
   uploadLicenseText,
+  getGeneralSettings,
+  updateGeneralSettings,
   updateInspectionItem as apiUpdateInspectionItem,
   createRole,
   updateRole,
@@ -416,10 +418,23 @@ const SETTINGS_TAB_IDS = [
   "prometheus-version",
   "users",
 ] as const;
-const GENERAL_BASE_URL_STORAGE_KEY = "k8s-inspection.baseUrl";
-const GENERAL_RETENTION_DAYS_STORAGE_KEY = "k8s-inspection.reportRetentionDays";
 const DEFAULT_REPORT_RETENTION_DAYS = 30;
 const CONNECTION_TEST_OPERATOR = "__system_connection_test__";
+
+const resolveDefaultBaseUrl = () => {
+  if (typeof window === "undefined") {
+    return appConfig.apiBaseUrl;
+  }
+  const apiBase = appConfig.apiBaseUrl?.trim() ?? "";
+  let resolved =
+    apiBase.length === 0
+      ? window.location.origin
+      : apiBase.startsWith("/")
+        ? `${window.location.origin}${apiBase}`
+        : apiBase;
+  resolved = resolved.replace(/\/api\/?$/i, "");
+  return resolved || window.location.origin;
+};
 
 const BEIJING_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Shanghai",
@@ -6088,38 +6103,18 @@ const InspectionSettingsPanel = ({
               className="settings-form inspection-form inspection-form-grid"
               onSubmit={handleSubmit}
             >
-              <label className="field-span-2 field-compact">
-                名称
-                <input
-                  type="text"
-                  value={formName}
-                  onChange={(event) => setFormName(event.target.value)}
-                  disabled={submitting}
-                  placeholder="例如：etcd-health"
-                />
-              </label>
               <div className="field-row field-span-full inspection-form-row-two">
-                {formTypeMode === "promql" ? (
-                  <label>
-                    Prometheus 版本
-                    <select
-                      value={prometheusVersion}
-                      onChange={(event) =>
-                        setPrometheusVersion(event.target.value)
-                      }
-                      disabled={submitting}
-                    >
-                      {prometheusVersionOptions.map((version) => (
-                        <option key={version} value={version}>
-                          {version}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : (
-                  <div className="field-placeholder" aria-hidden="true" />
-                )}
-                <label>
+                <label className="field-compact">
+                  名称
+                  <input
+                    type="text"
+                    value={formName}
+                    onChange={(event) => setFormName(event.target.value)}
+                    disabled={submitting}
+                    placeholder="例如：etcd-health"
+                  />
+                </label>
+                <label className="field-narrow">
                   类型
                   <select
                     value={formTypeMode}
@@ -6135,6 +6130,27 @@ const InspectionSettingsPanel = ({
                   </select>
                 </label>
               </div>
+              {formTypeMode === "promql" && (
+                <div className="field-row field-span-full inspection-form-row-two">
+                  <label className="field-narrow">
+                    Prometheus 版本
+                    <select
+                      value={prometheusVersion}
+                      onChange={(event) =>
+                        setPrometheusVersion(event.target.value)
+                      }
+                      disabled={submitting}
+                    >
+                      {prometheusVersionOptions.map((version) => (
+                        <option key={version} value={version}>
+                          {version}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="field-placeholder" aria-hidden="true" />
+                </div>
+              )}
               <label className="field-span-2">
                 描述
                 <input
@@ -8598,40 +8614,14 @@ const GeneralSettingsPanel = ({
   const [localNotice, setLocalNotice] = useState<string | null>(null);
   const [generalNotice, setGeneralNotice] = useState<string | null>(null);
   const [generalError, setGeneralError] = useState<string | null>(null);
-  const [baseUrl, setBaseUrl] = useState(() => {
-    if (typeof window === "undefined") {
-      return appConfig.apiBaseUrl;
-    }
-    const stored = window.localStorage.getItem(
-      GENERAL_BASE_URL_STORAGE_KEY
-    );
-    if (stored && stored.trim()) {
-      return stored;
-    }
-    const apiBase = appConfig.apiBaseUrl?.trim() ?? "";
-    let resolved =
-      apiBase.length === 0
-        ? window.location.origin
-        : apiBase.startsWith("/")
-          ? `${window.location.origin}${apiBase}`
-          : apiBase;
-    resolved = resolved.replace(/\/api\/?$/i, "");
-    return resolved || window.location.origin;
-  });
-  const [retentionDays, setRetentionDays] = useState(() => {
-    if (typeof window === "undefined") {
-      return String(DEFAULT_REPORT_RETENTION_DAYS);
-    }
-    const stored = window.localStorage.getItem(
-      GENERAL_RETENTION_DAYS_STORAGE_KEY
-    );
-    if (stored && stored.trim()) {
-      return stored;
-    }
-    return String(DEFAULT_REPORT_RETENTION_DAYS);
-  });
+  const [baseUrl, setBaseUrl] = useState(() => resolveDefaultBaseUrl());
+  const [retentionDays, setRetentionDays] = useState(() =>
+    String(DEFAULT_REPORT_RETENTION_DAYS)
+  );
+  const [generalLoading, setGeneralLoading] = useState(false);
+  const [generalSaving, setGeneralSaving] = useState(false);
 
-  const handleSaveGeneral = () => {
+  const handleSaveGeneral = async () => {
     const trimmedBaseUrl = baseUrl.trim();
     if (!trimmedBaseUrl) {
       setGeneralError("BaseURL 不能为空");
@@ -8649,19 +8639,57 @@ const GeneralSettingsPanel = ({
       setGeneralNotice(null);
       return;
     }
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(
-        GENERAL_BASE_URL_STORAGE_KEY,
-        trimmedBaseUrl
-      );
-      window.localStorage.setItem(
-        GENERAL_RETENTION_DAYS_STORAGE_KEY,
-        String(Math.floor(parsedDays))
-      );
+    setGeneralSaving(true);
+    try {
+      const settings = await updateGeneralSettings({
+        base_url: trimmedBaseUrl,
+        report_retention_days: Math.floor(parsedDays),
+      });
+      setBaseUrl(settings.base_url || trimmedBaseUrl);
+      setRetentionDays(String(settings.report_retention_days));
+      setGeneralError(null);
+      setGeneralNotice("已保存通用设置");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "保存通用设置失败";
+      setGeneralError(message);
+      setGeneralNotice(null);
+    } finally {
+      setGeneralSaving(false);
     }
-    setGeneralError(null);
-    setGeneralNotice("已保存通用设置");
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchSettings = async () => {
+      setGeneralLoading(true);
+      try {
+        const settings = await getGeneralSettings();
+        if (cancelled) {
+          return;
+        }
+        const resolvedBaseUrl = (settings.base_url || "").trim();
+        setBaseUrl(resolvedBaseUrl || resolveDefaultBaseUrl());
+        setRetentionDays(String(settings.report_retention_days));
+        setGeneralError(null);
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+        const message =
+          err instanceof Error ? err.message : "获取通用设置失败";
+        setGeneralError(message);
+      } finally {
+        if (!cancelled) {
+          setGeneralLoading(false);
+        }
+      }
+    };
+    void fetchSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleFileChange = async (
     event: ChangeEvent<HTMLInputElement>
@@ -8749,6 +8777,7 @@ const GeneralSettingsPanel = ({
             value={baseUrl}
             onChange={(event) => setBaseUrl(event.target.value)}
             placeholder="例如：http://backend:8000"
+            disabled={generalSaving || generalLoading}
           />
         </div>
         <div className="general-settings-row">
@@ -8767,19 +8796,25 @@ const GeneralSettingsPanel = ({
               value={retentionDays}
               onChange={(event) => setRetentionDays(event.target.value)}
               placeholder="30"
+              disabled={generalSaving || generalLoading}
             />
             <span className="general-settings-unit">天</span>
           </div>
         </div>
         <div className="general-settings-actions">
-          <button type="button" className="primary" onClick={handleSaveGeneral}>
-            保存
+          <button
+            type="button"
+            className="primary"
+            onClick={handleSaveGeneral}
+            disabled={generalSaving || generalLoading}
+          >
+            {generalSaving ? "保存中..." : "保存"}
           </button>
         </div>
       </div>
       <section className="general-license-section">
         <div className="general-license-header">
-          <h3>License 管理</h3>
+          <h3>License</h3>
         </div>
         {localNotice && <div className="feedback success">{localNotice}</div>}
         {status.reason && !status.valid && (

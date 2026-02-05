@@ -2179,8 +2179,8 @@ th {
 
 .general-settings-label {
   font-weight: 600;
-  color: #1e293b;
-  font-size: 13px;
+  color: #0f172a;
+  font-size: 14px;
 }
 
 .general-settings-inline {
@@ -2201,7 +2201,7 @@ th {
   font-size: 13px;
   background: #fff;
   width: 100%;
-  max-width: 560px;
+  max-width: 320px;
   box-sizing: border-box;
 }
 
@@ -3060,13 +3060,14 @@ th {
   background: transparent;
 }
 
-.inspection-form-grid .field-compact input {
-  max-width: 480px;
+.inspection-form-grid .field-compact input,
+.inspection-form-grid .field-compact select {
+  max-width: 360px;
 }
 
 .inspection-form-grid .field-narrow input,
 .inspection-form-grid .field-narrow select {
-  max-width: 140px;
+  max-width: 220px;
 }
 
 .inspection-form-grid .settings-actions {

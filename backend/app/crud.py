@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import os
 from datetime import datetime
 from typing import Iterable, List, Optional, Any
 
@@ -12,6 +13,7 @@ from .audit import get_audit_actor
 UNSET = object()
 CONNECTION_TEST_OPERATOR = "__system_connection_test__"
 SCHEDULED_AUDIT_SUFFIX = "（定时巡检）"
+DEFAULT_REPORT_RETENTION_DAYS = int(os.getenv("REPORT_RETENTION_DAYS", "30"))
 
 
 def _hash_string(value: str) -> int:
@@ -93,6 +95,40 @@ def describe_inspection_run(
 
 def get_cluster_display_id(cluster: models.ClusterConfig) -> str:
     return _build_cluster_display_id(cluster.id, cluster.name)
+
+
+def get_system_settings(db: Session) -> models.SystemSettings:
+    settings = (
+        db.query(models.SystemSettings)
+        .order_by(models.SystemSettings.id.asc())
+        .first()
+    )
+    if settings:
+        return settings
+    settings = models.SystemSettings(
+        base_url=None,
+        report_retention_days=DEFAULT_REPORT_RETENTION_DAYS,
+    )
+    db.add(settings)
+    db.commit()
+    db.refresh(settings)
+    return settings
+
+
+def update_system_settings(
+    db: Session,
+    *,
+    base_url: str,
+    report_retention_days: int,
+) -> models.SystemSettings:
+    settings = get_system_settings(db)
+    settings.base_url = base_url.strip()
+    settings.report_retention_days = int(report_retention_days)
+    settings.updated_at = datetime.utcnow()
+    db.add(settings)
+    db.commit()
+    db.refresh(settings)
+    return settings
 
 
 def _should_log_run(run: models.InspectionRun) -> bool:
@@ -916,6 +952,7 @@ def delete_inspection_runs_bulk(
     run_ids: Iterable[int],
     *,
     log_description: Optional[str] = None,
+    enable_audit: bool = True,
 ) -> int:
     """
     批量删除巡检记录及其结果，减少逐条提交带来的性能开销。
@@ -932,7 +969,7 @@ def delete_inspection_runs_bulk(
     if not runs:
         return 0
 
-    should_log = any(_should_log_run(run) for run in runs)
+    should_log = enable_audit and any(_should_log_run(run) for run in runs)
 
     # 先删除结果，再删除巡检记录，统一提交一次
     db.query(models.InspectionResult).filter(
