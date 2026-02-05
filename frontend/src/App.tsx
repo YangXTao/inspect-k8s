@@ -6667,6 +6667,7 @@ const InspectionTemplateSettingsPanel = ({
                 模板名称
                 <input
                   type="text"
+                  className="template-name-input"
                   value={templateName}
                   onChange={(event) => setTemplateName(event.target.value)}
                   disabled={submitting}

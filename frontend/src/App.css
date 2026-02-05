@@ -2360,6 +2360,35 @@ th {
   flex-wrap: wrap;
 }
 
+.template-modal .template-form-toolbar {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) 120px auto;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.template-modal .template-form-toolbar .inspection-items-filter {
+  width: 100%;
+  min-width: 0;
+}
+
+.template-modal .template-form-toolbar .inspection-template-select {
+  width: 120px;
+  max-width: 120px;
+  justify-self: start;
+}
+
+.template-modal .template-form-toolbar .selection-hint {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.template-modal .template-name-input {
+  width: 45%;
+  max-width: 320px;
+}
+
 .template-item-list {
   border: 1px dashed #e2e8f0;
   border-radius: 12px;
@@ -3110,8 +3139,8 @@ th {
 }
 
 .modal.compact.template-modal {
-  width: min(920px, 92vw);
-  max-width: 920px;
+  width: min(620px, 92vw);
+  max-width: 620px;
   max-height: calc(100vh - 88px);
   overflow: hidden;
   display: flex;
