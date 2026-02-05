@@ -3031,7 +3031,7 @@ th {
   max-width: 1200px;
   max-height: calc(100vh - 96px);
   overflow: hidden;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .modal.compact.inspection-item-modal .modal-header {
@@ -3043,15 +3043,15 @@ th {
 }
 
 .modal.compact.inspection-item-modal .inspection-form label {
-  font-size: 12px;
-  gap: 4px;
+  font-size: 13px;
+  gap: 5px;
 }
 
 .modal.compact.inspection-item-modal .inspection-form input,
 .modal.compact.inspection-item-modal .inspection-form select,
 .modal.compact.inspection-item-modal .inspection-form textarea {
-  padding: 6px 8px;
-  font-size: 12px;
+  padding: 7px 9px;
+  font-size: 13px;
 }
 
 .settings-pagination {
@@ -3104,7 +3104,14 @@ th {
 }
 
 .inspection-form-grid .inspection-form-row-tight {
-  gap: 6px;
+  display: flex;
+  gap: 2px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.inspection-form-grid .inspection-form-row-tight label {
+  flex: 0 0 auto;
 }
 
 .inspection-form-grid .field-placeholder {
@@ -3141,6 +3148,11 @@ th {
 .inspection-form-grid .field-alert-level input,
 .inspection-form-grid .field-alert-level select {
   max-width: 160px;
+}
+
+.inspection-form-grid .field-alert-severity input,
+.inspection-form-grid .field-alert-severity select {
+  max-width: 110px;
 }
 
 .inspection-form-grid .settings-actions {

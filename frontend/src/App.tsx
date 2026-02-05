@@ -6284,7 +6284,7 @@ const InspectionSettingsPanel = ({
                     />
                   </label>
                   <div className="field-row field-span-full inspection-form-row-tight">
-                    <label className="field-narrow field-tiny field-alert-level">
+                    <label className="field-narrow field-tiny field-alert-level field-alert-severity">
                       严重程度
                       <select
                         value={promqlSeverity}
@@ -6473,40 +6473,6 @@ const InspectionTemplateSettingsPanel = ({
     setFormOpen(false);
     resetForm();
   };
-
-  const handleApplyTemplate = useCallback(
-    (value: string) => {
-      setSelectedTemplateId(value);
-      if (!value) {
-        return;
-      }
-      const template = templates.find(
-        (item) => String(item.id) === value
-      );
-      if (!template) {
-        setSelectedTemplateId("");
-        return;
-      }
-      const nextIds = (template.item_ids ?? []).filter((id) => {
-        const item = scheduleItemMap.get(id);
-        if (!item) {
-          return false;
-        }
-        return !isRancherLocalType(item.check_type);
-      });
-      setItemKeyword("");
-      setItemVersionFilter("all");
-      setSelectedItemIds(nextIds);
-      setSelectedTemplateId("");
-    },
-    [
-      templates,
-      scheduleItemMap,
-      setItemKeyword,
-      setItemVersionFilter,
-      setSelectedItemIds,
-    ]
-  );
 
   const handleToggleItem = (itemId: number) => {
     if (readOnly) {
