@@ -6706,16 +6706,25 @@ const InspectionTemplateSettingsPanel = ({
                   <ul className="item-list">
                     {filteredItems.map((item) => (
                       <li key={item.id}>
-                        <label>
+                        <label className="template-item-row">
                           <input
                             type="checkbox"
                             checked={templateItemIds.includes(item.id)}
                             onChange={() => handleToggleItem(item.id)}
                             disabled={submitting || readOnly}
                           />
-                          <div>
+                          <div className="template-item-content">
                             <div className="item-title-row">
                               <div className="item-name">{item.name}</div>
+                              {isPromqlType(item.check_type) && (
+                                <span className="item-tag promql">
+                                  PromQL ·{" "}
+                                  {normalizePrometheusVersion(
+                                    item.prometheus_version,
+                                    prometheusVersionOptions
+                                  )}
+                                </span>
+                              )}
                             </div>
                           </div>
                         </label>

@@ -2366,37 +2366,56 @@ th {
   padding: 8px 10px;
   max-height: 420px;
   overflow: auto;
+  overflow-x: hidden;
   background: #f8fafc;
 }
 
 .template-modal .item-list {
   margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .template-modal .item-list li {
-  padding: 8px 12px;
+  padding: 6px 10px;
 }
 
 .template-modal .item-list li:hover {
   transform: none;
 }
 
-.template-modal .item-list label {
-  display: flex;
-  flex-direction: row;
+.template-modal .item-list label.template-item-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 0;
+  column-gap: 6px;
   align-items: center;
-  justify-content: flex-start;
-  gap: 2px;
   width: 100%;
 }
 
-.template-modal .item-list input[type="checkbox"] {
+.template-modal .item-list label.template-item-row input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
   margin: 0;
-  flex: 0 0 auto;
 }
 
-.template-modal .item-list label > div {
-  flex: 1 1 auto;
+.template-modal .template-item-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.template-modal .template-item-content .item-title-row {
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.template-modal .template-item-content .item-tag {
+  font-size: 11px;
+  padding: 1px 6px;
 }
 
 .template-modal .item-desc {
@@ -3091,8 +3110,8 @@ th {
 }
 
 .modal.compact.template-modal {
-  width: min(980px, 92vw);
-  max-width: 980px;
+  width: min(920px, 92vw);
+  max-width: 920px;
   max-height: calc(100vh - 88px);
   overflow: hidden;
   display: flex;
