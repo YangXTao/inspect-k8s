@@ -104,6 +104,56 @@ class InspectionItem(Base):
     results = relationship("InspectionResult", back_populates="item")
 
 
+class InspectionItemTemplate(Base):
+    __tablename__ = "inspection_item_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    item_ids_json = Column(Text, nullable=False, default="[]")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    @property
+    def item_ids(self) -> list[int]:
+        if not self.item_ids_json:
+            return []
+        try:
+            import json
+
+            raw = json.loads(self.item_ids_json)
+        except Exception:
+            return []
+        if not isinstance(raw, list):
+            return []
+        result: list[int] = []
+        for value in raw:
+            try:
+                parsed = int(value)
+            except Exception:
+                continue
+            if parsed > 0:
+                result.append(parsed)
+        return result
+
+    def set_item_ids(self, value: Iterable[int]) -> None:
+        import json
+
+        cleaned: list[int] = []
+        seen: set[int] = set()
+        for item_id in value:
+            try:
+                parsed = int(item_id)
+            except Exception:
+                continue
+            if parsed <= 0 or parsed in seen:
+                continue
+            seen.add(parsed)
+            cleaned.append(parsed)
+        self.item_ids_json = json.dumps(cleaned, ensure_ascii=True)
+
+
 class InspectionRun(Base):
     __tablename__ = "inspection_runs"
 

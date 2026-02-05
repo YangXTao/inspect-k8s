@@ -231,6 +231,28 @@ class InspectionItemOut(InspectionItemBase):
     updated_at: datetime
 
 
+class InspectionItemTemplateBase(BaseModel):
+    name: str = Field(..., max_length=100)
+    item_ids: List[int] = Field(..., min_length=1)
+
+
+class InspectionItemTemplateCreate(InspectionItemTemplateBase):
+    pass
+
+
+class InspectionItemTemplateUpdate(BaseModel):
+    name: Optional[str] = Field(None, max_length=100)
+    item_ids: Optional[List[int]] = Field(None, min_length=1)
+
+
+class InspectionItemTemplateOut(InspectionItemTemplateBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+
 class InspectionResultOut(BaseModel):
     id: int
     item_id: Optional[int]

@@ -2343,6 +2343,36 @@ th {
   overflow: hidden;
 }
 
+.template-settings-panel .settings-list .table-wrapper {
+  max-height: calc(100vh - var(--top-nav-height, 64px) - 240px);
+}
+
+.template-items-cell {
+  color: #475569;
+  font-size: 12px;
+}
+
+.template-form-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.template-item-list {
+  border: 1px dashed #e2e8f0;
+  border-radius: 12px;
+  padding: 8px 10px;
+  max-height: 320px;
+  overflow: auto;
+  background: #f8fafc;
+}
+
+.template-modal .item-list {
+  margin: 0;
+}
+
 .inspection-settings-body {
   display: flex;
   flex-direction: column;
@@ -3001,6 +3031,27 @@ th {
   max-width: 1200px;
   max-height: calc(100vh - 96px);
   overflow: hidden;
+  font-size: 13px;
+}
+
+.modal.compact.inspection-item-modal .modal-header {
+  margin-bottom: 6px;
+}
+
+.modal.compact.inspection-item-modal .inspection-form-grid {
+  gap: 10px 12px;
+}
+
+.modal.compact.inspection-item-modal .inspection-form label {
+  font-size: 12px;
+  gap: 4px;
+}
+
+.modal.compact.inspection-item-modal .inspection-form input,
+.modal.compact.inspection-item-modal .inspection-form select,
+.modal.compact.inspection-item-modal .inspection-form textarea {
+  padding: 6px 8px;
+  font-size: 12px;
 }
 
 .settings-pagination {
@@ -3021,11 +3072,11 @@ th {
 }
 
 .inspection-form {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  padding: 12px;
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
 }
 
 .inspection-form-grid {
@@ -3050,6 +3101,10 @@ th {
 
 .inspection-form-grid .inspection-form-row-two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.inspection-form-grid .inspection-form-row-tight {
+  gap: 6px;
 }
 
 .inspection-form-grid .field-placeholder {
@@ -3081,6 +3136,11 @@ th {
 .inspection-form-grid .field-tiny input,
 .inspection-form-grid .field-tiny select {
   max-width: 80px;
+}
+
+.inspection-form-grid .field-alert-level input,
+.inspection-form-grid .field-alert-level select {
+  max-width: 160px;
 }
 
 .inspection-form-grid .settings-actions {

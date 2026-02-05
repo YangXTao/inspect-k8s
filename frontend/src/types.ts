@@ -203,6 +203,24 @@ export type InspectionSchedule = {
   updated_at: string;
 };
 
+export type InspectionItemTemplate = {
+  id: number;
+  name: string;
+  item_ids: number[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type InspectionItemTemplateInput = {
+  name: string;
+  item_ids: number[];
+};
+
+export type InspectionItemTemplateUpdate = {
+  name?: string;
+  item_ids?: number[];
+};
+
 export type InspectionItemsExportPayload = {
   exported_at: string;
   items: InspectionItem[];

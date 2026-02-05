@@ -525,6 +525,87 @@ def delete_inspection_item(db: Session, item: models.InspectionItem) -> None:
     )
 
 
+def list_inspection_item_templates(
+    db: Session,
+) -> List[models.InspectionItemTemplate]:
+    return (
+        db.query(models.InspectionItemTemplate)
+        .order_by(models.InspectionItemTemplate.updated_at.desc())
+        .all()
+    )
+
+
+def get_inspection_item_template(
+    db: Session, template_id: int
+) -> Optional[models.InspectionItemTemplate]:
+    return (
+        db.query(models.InspectionItemTemplate)
+        .filter(models.InspectionItemTemplate.id == template_id)
+        .first()
+    )
+
+
+def create_inspection_item_template(
+    db: Session, template_in: schemas.InspectionItemTemplateCreate
+) -> models.InspectionItemTemplate:
+    data = template_in.model_dump()
+    item_ids = data.pop("item_ids", [])
+    template = models.InspectionItemTemplate(**data)
+    template.set_item_ids(item_ids)
+    db.add(template)
+    db.commit()
+    db.refresh(template)
+    log_action(
+        db,
+        action="create",
+        entity_type="inspection_item_template",
+        entity_id=template.id,
+        description=f"Created inspection item template '{template.name}'",
+    )
+    return template
+
+
+def update_inspection_item_template(
+    db: Session,
+    template: models.InspectionItemTemplate,
+    template_in: schemas.InspectionItemTemplateUpdate,
+) -> models.InspectionItemTemplate:
+    data = template_in.model_dump(exclude_unset=True)
+    item_ids = data.pop("item_ids", None)
+    for key, value in data.items():
+        setattr(template, key, value)
+    if item_ids is not None:
+        template.set_item_ids(item_ids)
+    template.updated_at = datetime.utcnow()
+    db.add(template)
+    db.commit()
+    db.refresh(template)
+    log_action(
+        db,
+        action="update",
+        entity_type="inspection_item_template",
+        entity_id=template.id,
+        description=f"Updated inspection item template '{template.name}'",
+    )
+    return template
+
+
+def delete_inspection_item_template(
+    db: Session, template: models.InspectionItemTemplate
+) -> None:
+    template_id = template.id
+    template_name = template.name
+    db.delete(template)
+    db.commit()
+    log_action(
+        db,
+        action="delete",
+        entity_type="inspection_item_template",
+        entity_id=template_id,
+        description=f"Deleted inspection item template '{template_name}'",
+    )
+
+
 def get_items_by_ids(
     db: Session, item_ids: Iterable[int]
 ) -> List[models.InspectionItem]:

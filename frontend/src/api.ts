@@ -8,6 +8,9 @@ import {
   InspectionItem,
   InspectionItemsExportPayload,
   InspectionItemsImportResult,
+  InspectionItemTemplate,
+  InspectionItemTemplateInput,
+  InspectionItemTemplateUpdate,
   InspectionRun,
   InspectionRunListItem,
   InspectionSchedule,
@@ -541,6 +544,35 @@ export function updateInspectionItem(
 
 export function deleteInspectionItem(itemId: number): Promise<void> {
   return request<void>(`/inspection-items/${itemId}`, {
+    method: "DELETE",
+  });
+}
+
+export function getInspectionItemTemplates(): Promise<InspectionItemTemplate[]> {
+  return request<InspectionItemTemplate[]>("/inspection-item-templates");
+}
+
+export function createInspectionItemTemplate(
+  payload: InspectionItemTemplateInput
+): Promise<InspectionItemTemplate> {
+  return request<InspectionItemTemplate>("/inspection-item-templates", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateInspectionItemTemplate(
+  templateId: number,
+  payload: InspectionItemTemplateUpdate
+): Promise<InspectionItemTemplate> {
+  return request<InspectionItemTemplate>(`/inspection-item-templates/${templateId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteInspectionItemTemplate(templateId: number): Promise<void> {
+  return request<void>(`/inspection-item-templates/${templateId}`, {
     method: "DELETE",
   });
 }

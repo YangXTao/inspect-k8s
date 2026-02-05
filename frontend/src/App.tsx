@@ -22,6 +22,7 @@ import {
   createInspectionRun,
   deleteCluster as apiDeleteCluster,
   deleteInspectionItem as apiDeleteInspectionItem,
+  deleteInspectionItemTemplate as apiDeleteInspectionItemTemplate,
   deleteInspectionRun as apiDeleteInspectionRun,
   deleteInspectionRunsBulk as apiDeleteInspectionRunsBulk,
   deleteInspectionSchedule as apiDeleteInspectionSchedule,
@@ -31,6 +32,7 @@ import {
   getClusters,
   getClusterNodes,
   getInspectionItems,
+  getInspectionItemTemplates,
   getInspectionRun,
   getInspectionRuns,
   getInspectionSchedules,
@@ -60,6 +62,7 @@ import {
   getGeneralSettings,
   updateGeneralSettings,
   updateInspectionItem as apiUpdateInspectionItem,
+  updateInspectionItemTemplate as apiUpdateInspectionItemTemplate,
   createRole,
   updateRole,
   deleteRole,
@@ -67,6 +70,7 @@ import {
   createUser,
   updateUser,
   deleteUser,
+  createInspectionItemTemplate as apiCreateInspectionItemTemplate,
 } from "./api";
 import { appConfig } from "./config";
 import TopNavigation from "./components/TopNavigation";
@@ -80,6 +84,7 @@ import type {
   InspectionAgent,
   InspectionAgentStatus,
   InspectionItem,
+  InspectionItemTemplate,
   InspectionResult,
   InspectionResultStatus,
   InspectionRun,
@@ -409,12 +414,14 @@ const AUDIT_ENTITY_OPTIONS = [
   { value: "inspection_schedule", label: "定时巡检" },
   { value: "inspection_run", label: "巡检记录" },
   { value: "inspection_item", label: "巡检项" },
+  { value: "inspection_item_template", label: "巡检项模板" },
   { value: "prometheus_version", label: "Prometheus版本" },
 ];
 const SETTINGS_BASE_PATH = "/setting";
 const SETTINGS_TAB_IDS = [
   "general",
   "inspection",
+  "inspection-templates",
   "prometheus-version",
   "users",
 ] as const;
@@ -4092,6 +4099,7 @@ const AuditView = () => {
 interface ClusterDetailViewProps {
   clusters: ClusterConfig[];
   items: InspectionItem[];
+  templates: InspectionItemTemplate[];
   runs: InspectionRunListItem[];
   prometheusVersionOptions: string[];
   selectedIds: number[];
@@ -4129,6 +4137,7 @@ interface ClusterDetailViewProps {
 const ClusterDetailView = ({
   clusters,
   items,
+  templates,
   runs,
   prometheusVersionOptions,
   selectedIds,
@@ -4173,6 +4182,7 @@ const ClusterDetailView = ({
   const [itemPage, setItemPage] = useState(1);
   const [itemPageInput, setItemPageInput] = useState("");
   const [itemKeyword, setItemKeyword] = useState("");
+  const [templateId, setTemplateId] = useState("");
   const [prometheusVersion, setPrometheusVersion] = useState(
     DEFAULT_PROMETHEUS_VERSION
   );
@@ -4328,6 +4338,11 @@ const ClusterDetailView = ({
     () => [...filteredPromqlItems, ...filteredCommonItems],
     [filteredPromqlItems, filteredCommonItems]
   );
+  const inspectionItemMap = useMemo(() => {
+    const map = new Map<number, InspectionItem>();
+    items.forEach((item) => map.set(item.id, item));
+    return map;
+  }, [items]);
   const rancherItemIdSet = useMemo(
     () =>
       new Set(
@@ -4463,6 +4478,52 @@ const ClusterDetailView = ({
       return Array.from(next);
     });
   }, [filteredInspectionItems, setSelectedIds, canRunInspections]);
+
+  const handleApplyTemplate = useCallback(
+    (value: string) => {
+      setTemplateId(value);
+      if (!value) {
+        return;
+      }
+      const template = templates.find(
+        (item) => String(item.id) === value
+      );
+      if (!template) {
+        setTemplateId("");
+        return;
+      }
+      const nextIds = (template.item_ids ?? []).filter((id) => {
+        const item = inspectionItemMap.get(id);
+        if (!item) {
+          return false;
+        }
+        if (rancherItemIdSet.has(id)) {
+          return false;
+        }
+        if (isPromqlType(item.check_type)) {
+          return (
+            normalizePrometheusVersion(
+              item.prometheus_version,
+              prometheusVersionOptions
+            ) === selectedPrometheusVersion
+          );
+        }
+        return true;
+      });
+      setItemKeyword("");
+      setSelectedIds(() => nextIds);
+      setTemplateId("");
+    },
+    [
+      templates,
+      inspectionItemMap,
+      rancherItemIdSet,
+      selectedPrometheusVersion,
+      prometheusVersionOptions,
+      setItemKeyword,
+      setSelectedIds,
+    ]
+  );
 
   const handleToggleRunSelection = useCallback(
     (runId: number) => {
@@ -4774,6 +4835,21 @@ const ClusterDetailView = ({
                 placeholder="关键字筛选"
                 disabled={!canRunInspections}
               />
+              {templates.length > 0 && (
+                <select
+                  className="inspection-items-filter inspection-template-select"
+                  value={templateId}
+                  onChange={(event) => handleApplyTemplate(event.target.value)}
+                  disabled={!canRunInspections}
+                >
+                  <option value="">套用模板</option>
+                  {templates.map((template) => (
+                    <option key={template.id} value={String(template.id)}>
+                      {template.name}
+                    </option>
+                  ))}
+                </select>
+              )}
               {canCreateHistory && (
                 <button
                   type="button"
@@ -6130,7 +6206,7 @@ const InspectionSettingsPanel = ({
                   </select>
                 </label>
               </div>
-              {formTypeMode === "promql" && (
+              {formTypeMode === "promql" ? (
                 <div className="field-row field-span-full inspection-form-row-two">
                   <label className="field-narrow field-prom-version">
                     Prometheus 版本
@@ -6148,19 +6224,29 @@ const InspectionSettingsPanel = ({
                       ))}
                     </select>
                   </label>
-                  <div className="field-placeholder" aria-hidden="true" />
+                  <label className="field-compact field-desc">
+                    描述
+                    <input
+                      type="text"
+                      value={formDescription}
+                      onChange={(event) => setFormDescription(event.target.value)}
+                      disabled={submitting}
+                      placeholder="可选"
+                    />
+                  </label>
                 </div>
+              ) : (
+                <label className="field-span-2">
+                  描述
+                  <input
+                    type="text"
+                    value={formDescription}
+                    onChange={(event) => setFormDescription(event.target.value)}
+                    disabled={submitting}
+                    placeholder="可选"
+                  />
+                </label>
               )}
-              <label className="field-span-2">
-                描述
-                <input
-                  type="text"
-                  value={formDescription}
-                  onChange={(event) => setFormDescription(event.target.value)}
-                  disabled={submitting}
-                  placeholder="可选"
-                />
-              </label>
               {formTypeMode === "command" && (
                 <label className="field-span-full">
                   命令
@@ -6197,8 +6283,8 @@ const InspectionSettingsPanel = ({
                       placeholder="例如：sum(rate(container_cpu_usage_seconds_total[5m]))"
                     />
                   </label>
-                  <div className="field-row field-span-full">
-                    <label className="field-narrow field-tiny">
+                  <div className="field-row field-span-full inspection-form-row-tight">
+                    <label className="field-narrow field-tiny field-alert-level">
                       严重程度
                       <select
                         value={promqlSeverity}
@@ -6236,7 +6322,7 @@ const InspectionSettingsPanel = ({
                         ))}
                       </select>
                     </label>
-                    <label className="field-narrow field-tiny">
+                    <label className="field-narrow field-tiny field-alert-level">
                       {promqlSeverityLabel}阈值
                       <input
                         type="number"
@@ -6283,6 +6369,367 @@ const InspectionSettingsPanel = ({
                   disabled={submitting}
                 >
                   {editingItem ? "保存修改" : "添加"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface InspectionTemplateSettingsPanelProps {
+  templates: InspectionItemTemplate[];
+  items: InspectionItem[];
+  prometheusVersionOptions: string[];
+  submitting: boolean;
+  notice: string | null;
+  error: string | null;
+  license: LicenseCapabilities;
+  canManage: boolean;
+  onSave: (payload: {
+    id?: number;
+    name: string;
+    itemIds: number[];
+  }) => Promise<void>;
+  onDelete: (template: InspectionItemTemplate) => void;
+}
+
+const InspectionTemplateSettingsPanel = ({
+  templates,
+  items,
+  prometheusVersionOptions,
+  submitting,
+  notice,
+  error,
+  license,
+  canManage,
+  onSave,
+  onDelete,
+}: InspectionTemplateSettingsPanelProps) => {
+  const readOnly = !license.canRunInspections || !canManage;
+  const readOnlyMessage = !license.canRunInspections
+    ? license.reason ?? "当前 License 不支持巡检项模板。"
+    : "当前账号无巡检项模板管理权限。";
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingTemplate, setEditingTemplate] =
+    useState<InspectionItemTemplate | null>(null);
+  const [templateName, setTemplateName] = useState("");
+  const [templateItemIds, setTemplateItemIds] = useState<number[]>([]);
+  const [templateKeyword, setTemplateKeyword] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const itemNameMap = useMemo(() => {
+    const map = new Map<number, string>();
+    items.forEach((item) => map.set(item.id, item.name));
+    return map;
+  }, [items]);
+
+  useEffect(() => {
+    setTemplateItemIds((prev) =>
+      prev.filter((id) => itemNameMap.has(id))
+    );
+  }, [itemNameMap]);
+
+  const filteredItems = useMemo(() => {
+    const keyword = templateKeyword.trim().toLowerCase();
+    const list = items
+      .slice()
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    if (!keyword) {
+      return list;
+    }
+    return list.filter((item) => {
+      const name = (item.name || "").toLowerCase();
+      const desc = (item.description || "").toLowerCase();
+      return name.includes(keyword) || desc.includes(keyword);
+    });
+  }, [items, templateKeyword]);
+
+  const resetForm = () => {
+    setEditingTemplate(null);
+    setTemplateName("");
+    setTemplateItemIds([]);
+    setTemplateKeyword("");
+    setFormError(null);
+  };
+
+  const handleOpenCreate = () => {
+    resetForm();
+    setFormOpen(true);
+  };
+
+  const handleOpenEdit = (template: InspectionItemTemplate) => {
+    setEditingTemplate(template);
+    setTemplateName(template.name);
+    setTemplateItemIds(template.item_ids ?? []);
+    setTemplateKeyword("");
+    setFormError(null);
+    setFormOpen(true);
+  };
+
+  const handleCloseForm = () => {
+    setFormOpen(false);
+    resetForm();
+  };
+
+  const handleApplyTemplate = useCallback(
+    (value: string) => {
+      setSelectedTemplateId(value);
+      if (!value) {
+        return;
+      }
+      const template = templates.find(
+        (item) => String(item.id) === value
+      );
+      if (!template) {
+        setSelectedTemplateId("");
+        return;
+      }
+      const nextIds = (template.item_ids ?? []).filter((id) => {
+        const item = scheduleItemMap.get(id);
+        if (!item) {
+          return false;
+        }
+        return !isRancherLocalType(item.check_type);
+      });
+      setItemKeyword("");
+      setItemVersionFilter("all");
+      setSelectedItemIds(nextIds);
+      setSelectedTemplateId("");
+    },
+    [
+      templates,
+      scheduleItemMap,
+      setItemKeyword,
+      setItemVersionFilter,
+      setSelectedItemIds,
+    ]
+  );
+
+  const handleToggleItem = (itemId: number) => {
+    if (readOnly) {
+      return;
+    }
+    setTemplateItemIds((prev) =>
+      prev.includes(itemId)
+        ? prev.filter((id) => id !== itemId)
+        : [...prev, itemId]
+    );
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (readOnly) {
+      setFormError(readOnlyMessage);
+      return;
+    }
+    if (!templateName.trim()) {
+      setFormError("模板名称不能为空");
+      return;
+    }
+    if (templateItemIds.length === 0) {
+      setFormError("请至少选择一个巡检项");
+      return;
+    }
+    setFormError(null);
+    try {
+      await onSave({
+        id: editingTemplate?.id,
+        name: templateName,
+        itemIds: templateItemIds,
+      });
+      handleCloseForm();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "保存巡检项模板失败";
+      setFormError(message);
+    }
+  };
+
+  return (
+    <div className="inspection-settings-panel template-settings-panel">
+      <div className="settings-header">
+        <div>
+          <h3>巡检项模板</h3>
+        </div>
+        <div className="settings-actions">
+          {!readOnly && (
+            <button
+              type="button"
+              className="primary"
+              onClick={handleOpenCreate}
+              disabled={submitting}
+            >
+              新增模板
+            </button>
+          )}
+        </div>
+      </div>
+      {notice && <div className="feedback success">{notice}</div>}
+      {error && <div className="feedback error">{error}</div>}
+      {readOnly && (
+        <div className="feedback warning">{readOnlyMessage}</div>
+      )}
+      <div className="settings-list full">
+        <div className="settings-list-header">
+          <span className="settings-list-count">
+            共 {templates.length} 条
+          </span>
+        </div>
+        <div className="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>模板名称</th>
+                <th>包含巡检项</th>
+                <th className="th-nowrap">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {templates.length === 0 ? (
+                <tr>
+                  <td colSpan={3}>暂无模板</td>
+                </tr>
+              ) : (
+                templates.map((template) => {
+                  const names = (template.item_ids ?? [])
+                    .map((id) => itemNameMap.get(id) || `#${id}`)
+                    .filter(Boolean);
+                  let summary = "-";
+                  if (names.length > 0) {
+                    summary =
+                      names.length > 3
+                        ? `${names.slice(0, 3).join("、")} 等 ${names.length} 项`
+                        : names.join("、");
+                  }
+                  return (
+                    <tr key={template.id}>
+                      <td>{template.name}</td>
+                      <td className="template-items-cell">{summary}</td>
+                      <td>
+                        {!readOnly ? (
+                          <div className="table-actions">
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={() => handleOpenEdit(template)}
+                            >
+                              编辑
+                            </button>
+                            <button
+                              type="button"
+                              className="link-button danger"
+                              onClick={() => onDelete(template)}
+                            >
+                              删除
+                            </button>
+                          </div>
+                        ) : (
+                          <span>-</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {formOpen && (
+        <div className="modal-backdrop fullscreen">
+          <div className="modal compact template-modal">
+            <div className="modal-header">
+              <h3>{editingTemplate ? "编辑模板" : "新增模板"}</h3>
+              <button
+                type="button"
+                className="link-button modal-close"
+                onClick={handleCloseForm}
+              >
+                关闭
+              </button>
+            </div>
+            {formError && <div className="feedback error">{formError}</div>}
+            <form className="settings-form template-form" onSubmit={handleSubmit}>
+              <label>
+                模板名称
+                <input
+                  type="text"
+                  value={templateName}
+                  onChange={(event) => setTemplateName(event.target.value)}
+                  disabled={submitting}
+                  placeholder="例如：生产环境巡检"
+                />
+              </label>
+              <div className="template-form-toolbar">
+                <input
+                  type="text"
+                  className="inspection-items-filter"
+                  value={templateKeyword}
+                  onChange={(event) => setTemplateKeyword(event.target.value)}
+                  placeholder="搜索巡检项"
+                  disabled={submitting}
+                />
+                <span className="selection-hint">
+                  已选 {templateItemIds.length} / {filteredItems.length}
+                </span>
+              </div>
+              <div className="template-item-list">
+                {filteredItems.length === 0 ? (
+                  <div className="placeholder">未找到巡检项</div>
+                ) : (
+                  <ul className="item-list">
+                    {filteredItems.map((item) => (
+                      <li key={item.id}>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={templateItemIds.includes(item.id)}
+                            onChange={() => handleToggleItem(item.id)}
+                            disabled={submitting || readOnly}
+                          />
+                          <div>
+                            <div className="item-title-row">
+                              <div className="item-name">{item.name}</div>
+                              {isPromqlType(item.check_type) ? (
+                                <span className="item-tag promql">
+                                  PromQL ·{" "}
+                                  {normalizePrometheusVersion(
+                                    item.prometheus_version,
+                                    prometheusVersionOptions
+                                  )}
+                                </span>
+                              ) : (
+                                <span className="item-tag neutral">通用</span>
+                              )}
+                            </div>
+                            <div className="item-desc">
+                              {item.description || "未提供描述"}
+                            </div>
+                          </div>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div className="settings-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={handleCloseForm}
+                  disabled={submitting}
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="primary"
+                  disabled={submitting || readOnly}
+                >
+                  {submitting ? "保存中..." : "保存"}
                 </button>
               </div>
             </form>
@@ -6493,6 +6940,7 @@ interface ScheduleSettingsPanelProps {
   clusters: ClusterConfig[];
   clusterDisplayIds: Record<number, string>;
   items: InspectionItem[];
+  templates: InspectionItemTemplate[];
   prometheusVersionOptions: string[];
   submitting: boolean;
   notice: string | null;
@@ -6517,6 +6965,7 @@ const ScheduleSettingsPanel = ({
   clusters,
   clusterDisplayIds,
   items,
+  templates,
   prometheusVersionOptions,
   submitting,
   notice,
@@ -6547,6 +6996,7 @@ const ScheduleSettingsPanel = ({
   const [clusterKeyword, setClusterKeyword] = useState("");
   const [itemKeyword, setItemKeyword] = useState("");
   const [itemVersionFilter, setItemVersionFilter] = useState("all");
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const scheduleFormErrorRef = useRef<HTMLDivElement | null>(null);
   const [scheduleKeyword, setScheduleKeyword] = useState("");
@@ -6595,6 +7045,7 @@ const ScheduleSettingsPanel = ({
     setClusterKeyword("");
     setItemKeyword("");
     setItemVersionFilter("all");
+    setSelectedTemplateId("");
     setFormError(null);
   }, []);
 
@@ -6615,6 +7066,7 @@ const ScheduleSettingsPanel = ({
     setFormEnabled(editingSchedule.is_enabled);
     setSelectedClusterIds(editingSchedule.cluster_ids ?? []);
     setSelectedItemIds(editingSchedule.item_ids ?? []);
+    setSelectedTemplateId("");
     setFormError(null);
   }, [editingSchedule, resetForm]);
 
@@ -7570,6 +8022,26 @@ const ScheduleSettingsPanel = ({
                       placeholder="关键字筛选"
                       disabled={submitting || readOnly}
                     />
+                    {templates.length > 0 && (
+                      <select
+                        className="inspection-items-filter inspection-template-select"
+                        value={selectedTemplateId}
+                        onChange={(event) =>
+                          handleApplyTemplate(event.target.value)
+                        }
+                        disabled={submitting || readOnly}
+                      >
+                        <option value="">套用模板</option>
+                        {templates.map((template) => (
+                          <option
+                            key={template.id}
+                            value={String(template.id)}
+                          >
+                            {template.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     <select
                       className="inspection-items-filter"
                       value={itemVersionFilter}
@@ -7724,6 +8196,7 @@ interface SchedulePageProps {
   clusters: ClusterConfig[];
   clusterDisplayIds: Record<number, string>;
   items: InspectionItem[];
+  templates: InspectionItemTemplate[];
   prometheusVersionOptions: string[];
   submitting: boolean;
   notice: string | null;
@@ -7748,6 +8221,7 @@ const SchedulePage = ({
   clusters,
   clusterDisplayIds,
   items,
+  templates,
   prometheusVersionOptions,
   submitting,
   notice,
@@ -7765,6 +8239,7 @@ const SchedulePage = ({
       clusters={clusters}
       clusterDisplayIds={clusterDisplayIds}
       items={items}
+      templates={templates}
       prometheusVersionOptions={prometheusVersionOptions}
       submitting={submitting}
       notice={notice}
@@ -8763,6 +9238,11 @@ const GeneralSettingsPanel = ({
 
   return (
     <div className="settings-content settings-content-stack general-settings-panel">
+      <div className="settings-header">
+        <div>
+          <h3>通用设置</h3>
+        </div>
+      </div>
       {generalNotice && <div className="feedback success">{generalNotice}</div>}
       {generalError && <div className="feedback error">{generalError}</div>}
       <div className="general-settings-grid">
@@ -10513,6 +10993,9 @@ const App = () => {
   const [agents, setAgents] = useState<InspectionAgent[]>([]);
   const [runs, setRuns] = useState<InspectionRunListItem[]>([]);
   const [items, setItems] = useState<InspectionItem[]>([]);
+  const [inspectionTemplates, setInspectionTemplates] = useState<
+    InspectionItemTemplate[]
+  >([]);
   const [schedules, setSchedules] = useState<InspectionSchedule[]>([]);
   const [overviewSummary, setOverviewSummary] = useState<OverviewSummary | null>(
     null
@@ -10682,6 +11165,7 @@ const App = () => {
       setAgents([]);
       setRuns([]);
       setItems([]);
+      setInspectionTemplates([]);
       setSchedules([]);
       setRoles([]);
       setUsers([]);
@@ -10758,6 +11242,9 @@ const App = () => {
   const [inspectionNotice, setInspectionNotice] = useState<string | null>(null);
   const [inspectionError, setInspectionError] = useState<string | null>(null);
   const [inspectionLoading, setInspectionLoading] = useState(false);
+  const [templateNotice, setTemplateNotice] = useState<string | null>(null);
+  const [templateError, setTemplateError] = useState<string | null>(null);
+  const [templateSubmitting, setTemplateSubmitting] = useState(false);
   const [scheduleNotice, setScheduleNotice] = useState<string | null>(null);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
@@ -10818,6 +11305,7 @@ const App = () => {
   useAutoClearError(passwordError, setPasswordError);
   useAutoClearError(clusterError, setClusterError);
   useAutoClearError(inspectionError, setInspectionError);
+  useAutoClearError(templateError, setTemplateError);
   useAutoClearError(scheduleError, setScheduleError);
   useAutoClearError(clusterEditError, setClusterEditError);
   useAutoClearError(agentError, setAgentError);
@@ -11349,6 +11837,20 @@ const App = () => {
   }, [settingsNotice]);
 
   useEffect(() => {
+    if (!templateNotice || typeof window === "undefined") {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setTemplateNotice(null);
+    }, 5000);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [templateNotice]);
+
+  useEffect(() => {
     if (!scheduleNotice || typeof window === "undefined") {
       return;
     }
@@ -11750,6 +12252,26 @@ const App = () => {
     }
   }, [canViewInspectionItems]);
 
+  const refreshTemplates = useCallback(async () => {
+    if (!canViewInspectionItems) {
+      setInspectionTemplates([]);
+      setTemplateError(null);
+      return;
+    }
+    try {
+      logWithTimestamp("info", "开始获取巡检项模板");
+      const data = await getInspectionItemTemplates();
+      setInspectionTemplates(data);
+      setTemplateError(null);
+      logWithTimestamp("info", "巡检项模板获取成功,数量: %d", data.length);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "获取巡检项模板失败";
+      logWithTimestamp("error", "获取巡检项模板失败: %s", message);
+      setTemplateError(message);
+    }
+  }, [canViewInspectionItems]);
+
   const refreshSchedules = useCallback(async () => {
     if (!canViewSchedule) {
       setSchedules([]);
@@ -12063,6 +12585,7 @@ const App = () => {
     void refreshOverviewSummary();
     void refreshOverviewMetrics();
     void refreshItems();
+    void refreshTemplates();
     void refreshSchedules();
     void refreshRoles();
     void refreshUsers();
@@ -12073,6 +12596,7 @@ const App = () => {
     refreshOverviewSummary,
     refreshOverviewMetrics,
     refreshItems,
+    refreshTemplates,
     refreshSchedules,
     refreshRoles,
     refreshUsers,
@@ -13463,6 +13987,119 @@ const hasManualKubeconfig = useMemo(
     [items, deleteInspectionItemsBatch, licenseCapabilities, canManageInspectionItems]
   );
 
+  const handleSaveInspectionTemplate = useCallback(
+    async (payload: {
+      id?: number;
+      name: string;
+      itemIds: number[];
+    }) => {
+      if (!canManageInspectionItems) {
+        setTemplateError("当前账号无巡检项模板管理权限。");
+        setTemplateNotice(null);
+        return;
+      }
+      if (!licenseCapabilities.canRunInspections) {
+        setTemplateError(
+          licenseCapabilities.reason ?? "当前 License 不支持巡检项模板管理。"
+        );
+        setTemplateNotice(null);
+        return;
+      }
+      const trimmedName = payload.name.trim();
+      if (!trimmedName) {
+        setTemplateError("模板名称不能为空。");
+        setTemplateNotice(null);
+        return;
+      }
+      if (payload.itemIds.length === 0) {
+        setTemplateError("请至少选择一个巡检项。");
+        setTemplateNotice(null);
+        return;
+      }
+      setTemplateSubmitting(true);
+      try {
+        if (payload.id) {
+          logWithTimestamp("info", "更新巡检项模板: %s", payload.id);
+          await apiUpdateInspectionItemTemplate(payload.id, {
+            name: trimmedName,
+            item_ids: payload.itemIds,
+          });
+          setTemplateNotice("巡检项模板已更新");
+        } else {
+          logWithTimestamp("info", "创建巡检项模板: %s", trimmedName);
+          await apiCreateInspectionItemTemplate({
+            name: trimmedName,
+            item_ids: payload.itemIds,
+          });
+          setTemplateNotice("巡检项模板已创建");
+        }
+        await refreshTemplates();
+        setTemplateError(null);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "保存巡检项模板失败";
+        logWithTimestamp("error", "保存巡检项模板失败: %s", message);
+        setTemplateError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setTemplateSubmitting(false);
+      }
+    },
+    [refreshTemplates, licenseCapabilities, canManageInspectionItems]
+  );
+
+  const performDeleteInspectionTemplate = useCallback(
+    async (template: InspectionItemTemplate) => {
+      setTemplateSubmitting(true);
+      try {
+        logWithTimestamp("info", "删除巡检项模板: %s", template.id);
+        await apiDeleteInspectionItemTemplate(template.id);
+        await refreshTemplates();
+        setTemplateNotice("巡检项模板已删除");
+        setTemplateError(null);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "删除巡检项模板失败";
+        logWithTimestamp("error", "删除巡检项模板失败: %s", message);
+        setTemplateError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setTemplateSubmitting(false);
+      }
+    },
+    [refreshTemplates]
+  );
+
+  const handleDeleteInspectionTemplate = useCallback(
+    (template: InspectionItemTemplate) => {
+      if (!canManageInspectionItems) {
+        setTemplateError("当前账号无巡检项模板管理权限。");
+        setTemplateNotice(null);
+        return;
+      }
+      if (!licenseCapabilities.canRunInspections) {
+        setTemplateError(
+          licenseCapabilities.reason ?? "当前 License 不支持巡检项模板管理。"
+        );
+        setTemplateNotice(null);
+        return;
+      }
+      setConfirmState({
+        title: "删除巡检项模板",
+        message: `确认删除模板(${template.name})？该操作不可恢复。`,
+        confirmLabel: "删除",
+        variant: "danger",
+        scope: "settings",
+        onConfirm: () => performDeleteInspectionTemplate(template),
+      });
+    },
+    [
+      performDeleteInspectionTemplate,
+      licenseCapabilities,
+      canManageInspectionItems,
+    ]
+  );
+
   const handleExportInspectionItems = useCallback(async (format: "json" | "yaml") => {
     if (!canViewInspectionItems) {
       setSettingsError("当前账号无巡检项查看权限。");
@@ -13841,6 +14478,24 @@ const hasManualKubeconfig = useMemo(
           ),
         },
         {
+          id: "inspection-templates",
+          label: "巡检项模板",
+          render: () => (
+            <InspectionTemplateSettingsPanel
+              templates={inspectionTemplates}
+              items={sortedItems}
+              prometheusVersionOptions={prometheusVersionOptions}
+              submitting={templateSubmitting}
+              notice={templateNotice}
+              error={templateError}
+              license={licenseCapabilities}
+              canManage={canManageInspectionItems}
+              onSave={handleSaveInspectionTemplate}
+              onDelete={handleDeleteInspectionTemplate}
+            />
+          ),
+        },
+        {
           id: "prometheus-version",
           label: "Prometheus 版本",
           render: () => (
@@ -13882,6 +14537,9 @@ const hasManualKubeconfig = useMemo(
         if (tab.id === "inspection") {
           return canViewInspectionItems;
         }
+        if (tab.id === "inspection-templates") {
+          return canViewInspectionItems;
+        }
         if (tab.id === "prometheus-version") {
           return canViewPrometheusVersions;
         }
@@ -13901,6 +14559,12 @@ const hasManualKubeconfig = useMemo(
       handleDeleteInspectionItemsBulk,
       handleExportInspectionItems,
       handleImportInspectionItems,
+      inspectionTemplates,
+      templateSubmitting,
+      templateNotice,
+      templateError,
+      handleSaveInspectionTemplate,
+      handleDeleteInspectionTemplate,
       prometheusVersionOptions,
       handleAddPrometheusVersion,
       handleDeletePrometheusVersion,
@@ -14299,6 +14963,7 @@ const hasManualKubeconfig = useMemo(
                   clusters={clusters}
                   clusterDisplayIds={clusterDisplayIds}
                   items={sortedItems}
+                  templates={inspectionTemplates}
                   prometheusVersionOptions={prometheusVersionOptions}
                   submitting={scheduleSubmitting}
                   notice={scheduleNotice}
@@ -14321,6 +14986,7 @@ const hasManualKubeconfig = useMemo(
               <ClusterDetailView
                 clusters={clusters}
                 items={sortedItems}
+                templates={inspectionTemplates}
                 runs={runs}
                 prometheusVersionOptions={prometheusVersionOptions}
                 selectedIds={selectedItemIds}

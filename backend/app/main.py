@@ -3611,6 +3611,92 @@ def delete_inspection_item(
 
 
 @app.get(
+    "/inspection-item-templates",
+    response_model=List[schemas.InspectionItemTemplateOut],
+)
+def list_inspection_item_templates(
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "inspectionItem.read", "巡检项模板查看")
+    templates = crud.list_inspection_item_templates(db)
+    return [
+        schemas.InspectionItemTemplateOut.model_validate(template)
+        for template in templates
+    ]
+
+
+@app.post(
+    "/inspection-item-templates",
+    response_model=schemas.InspectionItemTemplateOut,
+    status_code=201,
+)
+def create_inspection_item_template(
+    payload: schemas.InspectionItemTemplateCreate,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
+):
+    _require_permission(db, current_user, "inspectionItem.create", "巡检项模板创建")
+    trimmed_name = (payload.name or "").strip()
+    if not trimmed_name:
+        raise HTTPException(status_code=400, detail="模板名称不能为空。")
+    item_ids = _normalize_id_list(payload.item_ids)
+    _validate_schedule_items(db, item_ids)
+    sanitized = schemas.InspectionItemTemplateCreate(
+        name=trimmed_name,
+        item_ids=item_ids,
+    )
+    template = crud.create_inspection_item_template(db, sanitized)
+    return schemas.InspectionItemTemplateOut.model_validate(template)
+
+
+@app.put(
+    "/inspection-item-templates/{template_id}",
+    response_model=schemas.InspectionItemTemplateOut,
+)
+def update_inspection_item_template(
+    template_id: int,
+    payload: schemas.InspectionItemTemplateUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
+):
+    _require_permission(db, current_user, "inspectionItem.update", "巡检项模板更新")
+    template = crud.get_inspection_item_template(db, template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Inspection template not found.")
+    update_payload = payload.model_dump(exclude_unset=True)
+    if "name" in update_payload:
+        trimmed_name = (update_payload.get("name") or "").strip()
+        if not trimmed_name:
+            raise HTTPException(status_code=400, detail="模板名称不能为空。")
+        update_payload["name"] = trimmed_name
+    if "item_ids" in update_payload:
+        item_ids = _normalize_id_list(update_payload.get("item_ids") or [])
+        _validate_schedule_items(db, item_ids)
+        update_payload["item_ids"] = item_ids
+    sanitized = schemas.InspectionItemTemplateUpdate.model_validate(update_payload)
+    updated = crud.update_inspection_item_template(db, template, sanitized)
+    return schemas.InspectionItemTemplateOut.model_validate(updated)
+
+
+@app.delete("/inspection-item-templates/{template_id}", status_code=204)
+def delete_inspection_item_template(
+    template_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
+):
+    _require_permission(db, current_user, "inspectionItem.delete", "巡检项模板删除")
+    template = crud.get_inspection_item_template(db, template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Inspection template not found.")
+    crud.delete_inspection_item_template(db, template)
+    return {}
+
+
+@app.get(
     "/inspection-schedules",
     response_model=List[schemas.InspectionScheduleOut],
 )
