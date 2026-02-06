@@ -2476,17 +2476,19 @@ const AgentQuickCreate = ({
             )}
           </div>
 
-          <label className="checkbox-row switch-row">
-            <span>Rancher Local 集群</span>
-            <input
-              className="switch-input"
-              type="checkbox"
-              checked={isRancherLocal}
-              onChange={(event) => setIsRancherLocal(event.target.checked)}
-              disabled={submitting || !canCreateAgents}
-            />
-            <span className="switch-slider" aria-hidden />
-          </label>
+          <div className="cluster-form-row">
+            <label className="switch-row">
+              <span>Rancher Local 集群</span>
+              <input
+                className="switch-input"
+                type="checkbox"
+                checked={isRancherLocal}
+                onChange={(event) => setIsRancherLocal(event.target.checked)}
+                disabled={submitting || !canCreateAgents}
+              />
+              <span className="switch-slider" aria-hidden />
+            </label>
+          </div>
 
           {isRancherLocal && (
             <div className="cluster-form-row">
@@ -8777,7 +8779,7 @@ const UserSettingsPanel = ({
         <div className="settings-list-header">
           <div className="settings-list-count">共 {sortedUsers.length} 个用户</div>
         </div>
-        <div className="table-wrapper">
+        <div className="table-wrapper user-table-scroll">
           <table>
             <thead>
               <tr>

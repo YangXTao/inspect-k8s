@@ -1738,6 +1738,51 @@ th {
   margin-top: 8px;
 }
 
+.user-table-scroll {
+  max-height: calc(100vh - var(--top-nav-height, 64px) - 320px);
+  overflow: auto;
+}
+
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.settings-list .table-wrapper {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.settings-pagination {
+  margin-top: auto;
+}
+
+.card.cluster-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - var(--top-nav-height, 64px) - 150px);
+}
+
+.card.cluster-panel .pagination {
+  margin-top: auto;
+}
+
+.history-page .card,
+.audit-page .card,
+.schedule-page .card {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - var(--top-nav-height, 64px) - 170px);
+}
+
+.history-page .card .pagination,
+.audit-page .card .pagination,
+.schedule-page .card .pagination {
+  margin-top: auto;
+}
+
 .history-page .card-header {
   align-items: center;
 }
@@ -2201,12 +2246,12 @@ th {
   font-size: 13px;
   background: #fff;
   width: 100%;
-  max-width: 190px;
+  max-width: 193px;
   box-sizing: border-box;
 }
 
 .general-settings-input.short {
-  max-width: 52px;
+  max-width: 55px;
 }
 
 .general-settings-actions {
