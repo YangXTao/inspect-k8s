@@ -18,21 +18,32 @@ CHECK_STATUS_FAILED = "failed"
 class PrometheusClient:
     """轻量 Prometheus HTTP API 客户端（本地备份实现）。"""
 
-    def __init__(self, base_url: str, timeout: float = 5.0, verify_ssl: bool = True):
+    def __init__(
+        self,
+        base_url: str,
+        timeout: float = 5.0,
+        verify_ssl: bool = True,
+        bearer_token: Optional[str] = None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.verify_ssl = verify_ssl
+        self.bearer_token = bearer_token
 
     def query(self, expression: str):
         if not self.base_url:
             return False, [], "Prometheus base URL is empty."
         url = f"{self.base_url}/api/v1/query"
         try:
+            headers = None
+            if self.bearer_token:
+                headers = {"Authorization": f"Bearer {self.bearer_token}"}
             resp = requests.get(
                 url,
                 params={"query": expression},
                 timeout=self.timeout,
                 verify=self.verify_ssl,
+                headers=headers,
             )
         except requests.RequestException as exc:
             return False, [], f"Prometheus request error: {exc}"

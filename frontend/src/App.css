@@ -3202,6 +3202,51 @@ th {
   max-width: 240px;
 }
 
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.switch-row .switch-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch-row .switch-slider {
+  width: 36px;
+  height: 20px;
+  background: #e2e8f0;
+  border-radius: 999px;
+  position: relative;
+  transition: background 0.2s ease;
+}
+
+.switch-row .switch-slider::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2);
+  transition: transform 0.2s ease;
+}
+
+.switch-row .switch-input:checked + .switch-slider {
+  background: #2563eb;
+}
+
+.switch-row .switch-input:checked + .switch-slider::after {
+  transform: translateX(16px);
+}
+
 .cluster-hint {
   font-size: 12px;
   color: #64748b;

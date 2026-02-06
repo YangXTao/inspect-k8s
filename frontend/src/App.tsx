@@ -2245,7 +2245,6 @@ const AgentQuickCreate = ({
   const [clusterType, setClusterType] = useState<"rke" | "rke2" | "general">(
     "rke2"
   );
-  const [prometheusToken, setPrometheusToken] = useState("");
   const [baseUrl, setBaseUrl] = useState(() => resolveDefaultBaseUrl());
   const [isRancherLocal, setIsRancherLocal] = useState(false);
   const [rancherUrl, setRancherUrl] = useState("");
@@ -2255,7 +2254,6 @@ const AgentQuickCreate = ({
 
   const trimmedName = name.trim();
   const trimmedPrometheusUrl = prometheusUrl.trim();
-  const trimmedPrometheusToken = prometheusToken.trim();
   const trimmedRancherUrl = rancherUrl.trim();
   const trimmedRancherApiKey = rancherApiKey.trim();
   const invalidPrometheusUrl =
@@ -2307,10 +2305,7 @@ const AgentQuickCreate = ({
     if (clusterType !== "general" && prometheusUrl) {
       setPrometheusUrl("");
     }
-    if (clusterType !== "rke" && prometheusToken) {
-      setPrometheusToken("");
-    }
-  }, [clusterType, prometheusUrl, prometheusToken]);
+  }, [clusterType, prometheusUrl]);
 
   useEffect(() => {
     if (isOpen) {
@@ -2389,7 +2384,6 @@ const AgentQuickCreate = ({
       setName("");
       setDescription("");
       setPrometheusUrl("");
-      setPrometheusToken("");
       setClusterType("rke2");
       setIsRancherLocal(false);
       setRancherUrl("");
@@ -2416,17 +2410,6 @@ const AgentQuickCreate = ({
       setCopyNotice("复制失败，请手动选择复制");
     }
   };
-
-  const resolvedPrometheusUrl =
-    clusterType === "general"
-      ? trimmedPrometheusUrl
-      : clusterType === "rke"
-        ? DEFAULT_RKE_PROM_URL
-        : DEFAULT_RKE2_PROM_URL;
-  const promTokenCommand =
-    clusterType === "rke" && trimmedPrometheusToken
-      ? `curl -H \"Authorization: Bearer ${trimmedPrometheusToken}\" ${DEFAULT_RKE_PROM_URL}`
-      : `curl -H \"Authorization: Bearer $TOKEN\" ${DEFAULT_RKE_PROM_URL}`;
 
   return (
     <div className="modal-backdrop fullscreen">
@@ -2493,45 +2476,20 @@ const AgentQuickCreate = ({
             )}
           </div>
 
-          {clusterType !== "general" && (
-            <div className="cluster-hint">
-              Prometheus 默认地址：{resolvedPrometheusUrl}
-            </div>
-          )}
-
-          {clusterType === "rke" && (
-            <div className="cluster-form-row two-cols">
-              <label className="field-short">
-                Token
-                <input
-                  type="text"
-                  value={prometheusToken}
-                  onChange={(event) => setPrometheusToken(event.target.value)}
-                  placeholder="Prometheus Token"
-                  disabled={submitting || !canCreateAgents}
-                />
-              </label>
-              <div className="cluster-hint-block">
-                请到 Prometheus 服务中查看
-                <code>/var/run/secrets/kubernetes.io/serviceaccount/token</code>
-                ，巡检时使用：
-                <code>{promTokenCommand}</code>
-              </div>
-            </div>
-          )}
-
-          <label className="checkbox-row">
+          <label className="checkbox-row switch-row">
+            <span>Rancher Local 集群</span>
             <input
+              className="switch-input"
               type="checkbox"
               checked={isRancherLocal}
               onChange={(event) => setIsRancherLocal(event.target.checked)}
               disabled={submitting || !canCreateAgents}
             />
-            <span>Rancher Local 集群</span>
+            <span className="switch-slider" aria-hidden />
           </label>
 
           {isRancherLocal && (
-            <div className="cluster-form-row two-cols">
+            <div className="cluster-form-row">
               <label>
                 Rancher 地址
                 <input
