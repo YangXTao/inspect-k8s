@@ -374,12 +374,12 @@ body.settings-lock {
 
 .app-shell {
   width: calc(100% - 20px);
-  margin: 6px auto 1px;
+  margin: 4px auto 1px;
   padding: 0 0 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-height: auto;
+  min-height: calc(100vh - var(--top-nav-height, 64px) - 12px);
 }
 
 .app-header {
@@ -1762,25 +1762,44 @@ th {
 .card.cluster-panel {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - var(--top-nav-height, 64px) - 150px);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.card.cluster-panel .cluster-list {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .card.cluster-panel .pagination {
   margin-top: auto;
 }
 
+.history-page,
+.schedule-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .history-page .card,
-.audit-page .card,
 .schedule-page .card {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - var(--top-nav-height, 64px) - 170px);
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .history-page .card .pagination,
-.audit-page .card .pagination,
 .schedule-page .card .pagination {
   margin-top: auto;
+}
+
+.history-page .table-wrapper,
+.schedule-page .table-wrapper {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .history-page .card-header {
@@ -2181,6 +2200,7 @@ th {
   min-width: 0;
   padding: 0;
   max-height: 100%;
+  height: 100%;
   overflow: visible;
   display: flex;
   flex-direction: column;
@@ -2197,9 +2217,19 @@ th {
   border-radius: 0;
   padding: 14px 20px;
   background: transparent;
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   overflow: visible;
+}
+
+.settings-modal-main > .settings-content,
+.settings-modal-main > .settings-content-stack,
+.settings-modal-main > .inspection-settings-panel,
+.settings-modal-main > .general-settings-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .general-settings-panel {
@@ -2208,6 +2238,8 @@ th {
   gap: 12px;
   font-size: 13px;
   color: #1e293b;
+  flex: 1;
+  min-height: 0;
 }
 
 .general-settings-grid {
@@ -2265,6 +2297,8 @@ th {
   gap: 10px;
   padding-top: 6px;
   border-top: 1px solid #e2e8f0;
+  flex: 1;
+  min-height: 0;
 }
 
 .general-license-header h3 {
@@ -2516,6 +2550,13 @@ th {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+.inspection-settings-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .inspection-section {
@@ -3014,12 +3055,16 @@ th {
   display: flex;
   gap: 18px;
   flex-wrap: wrap;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .settings-content-stack {
   flex-direction: column;
   flex-wrap: nowrap;
   align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .settings-content-stack .settings-header {
@@ -3083,6 +3128,7 @@ th {
 }
 .settings-list.full {
   flex: 1 1 auto;
+  min-height: 0;
 }
 .settings-list.full .table-wrapper {
   max-height: calc(100vh - var(--top-nav-height, 64px) - 200px);
@@ -3250,9 +3296,17 @@ th {
 .switch-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-weight: 600;
   color: #1e293b;
+}
+
+.cluster-form-row .switch-row {
+  justify-self: start;
+}
+
+.cluster-upload {
+  display: none;
 }
 
 .switch-row .switch-input {

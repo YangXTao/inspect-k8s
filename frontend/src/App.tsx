@@ -2491,28 +2491,32 @@ const AgentQuickCreate = ({
           </div>
 
           {isRancherLocal && (
-            <div className="cluster-form-row">
-              <label>
-                Rancher 地址
-                <input
-                  type="text"
-                  value={rancherUrl}
-                  onChange={(event) => setRancherUrl(event.target.value)}
-                  placeholder="例如：http://rancher.example.com"
-                  disabled={submitting || !canCreateAgents}
-                />
-              </label>
-              <label>
-                Rancher API 密钥
-                <input
-                  type="text"
-                  value={rancherApiKey}
-                  onChange={(event) => setRancherApiKey(event.target.value)}
-                  placeholder="Token-xxxxx"
-                  disabled={submitting || !canCreateAgents}
-                />
-              </label>
-            </div>
+            <>
+              <div className="cluster-form-row">
+                <label className="field-short">
+                  Rancher 地址
+                  <input
+                    type="text"
+                    value={rancherUrl}
+                    onChange={(event) => setRancherUrl(event.target.value)}
+                    placeholder="例如：http://rancher.example.com"
+                    disabled={submitting || !canCreateAgents}
+                  />
+                </label>
+              </div>
+              <div className="cluster-form-row">
+                <label className="field-short">
+                  Rancher API 密钥
+                  <input
+                    type="text"
+                    value={rancherApiKey}
+                    onChange={(event) => setRancherApiKey(event.target.value)}
+                    placeholder="Token-xxxxx"
+                    disabled={submitting || !canCreateAgents}
+                  />
+                </label>
+              </div>
+            </>
           )}
 
           {(formError || error) && (
@@ -2928,8 +2932,11 @@ const OverviewView = ({
               type="button"
               className="primary"
               onClick={() => {
-                onClearAgentCommand();
-                setIsCreateClusterOpen(true);
+                try {
+                  onClearAgentCommand();
+                } finally {
+                  setIsCreateClusterOpen(true);
+                }
               }}
             >
               添加集群
