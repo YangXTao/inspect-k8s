@@ -914,6 +914,7 @@ body.settings-lock {
   color: #0f172a;
   position: relative;
   overflow: hidden;
+  min-height: 326px;
 }
 
 .cluster-card:hover {
@@ -1045,8 +1046,8 @@ body.settings-lock {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  min-width: 92px;
-  padding: 6px;
+  min-width: 64px;
+  padding: 4px;
   border-radius: 10px;
   border: 1px solid #dbeafe;
   background: #fff;
@@ -1061,10 +1062,11 @@ body.settings-lock {
   background: transparent;
   color: #1e293b;
   text-align: left;
-  padding: 6px 8px;
+  padding: 5px 6px;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 12px;
+  line-height: 1.2;
 }
 
 .cluster-action-menu-item:hover {
