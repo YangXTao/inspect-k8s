@@ -184,6 +184,11 @@ class InspectionRun(Base):
         ForeignKey("inspection_agents.id", ondelete="SET NULL"),
         nullable=True,
     )
+    schedule_id = Column(
+        Integer,
+        ForeignKey("inspection_schedules.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     results = relationship(
         "InspectionResult", back_populates="run", cascade="all, delete-orphan"
@@ -201,6 +206,7 @@ class InspectionSchedule(Base):
     cluster_ids_json = Column(Text, nullable=False)
     cluster_names_json = Column(Text, nullable=True)
     item_ids_json = Column(Text, nullable=False)
+    report_retention_count = Column(Integer, nullable=False, default=10)
     is_enabled = Column(Boolean, nullable=False, default=True)
     last_run_at = Column(DateTime, nullable=True)
     created_by_user_id = Column(Integer, nullable=True)
@@ -453,7 +459,7 @@ class SystemSettings(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     base_url = Column(String(255), nullable=True)
-    report_retention_days = Column(Integer, nullable=False, default=30)
+    report_retention_days = Column(Integer, nullable=False, default=10)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )

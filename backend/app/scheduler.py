@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import threading
+from datetime import date as date_type
 from datetime import datetime, timedelta
 from typing import Iterable, Optional
 
@@ -185,6 +186,7 @@ def _dispatch_schedule_runs(
             executor="agent",
             agent_status="queued",
             agent_id=agent.id,
+            schedule_id=schedule.id,
             created_by_user_id=created_by_user_id,
             created_by_username=created_by_username,
         )
@@ -215,6 +217,7 @@ class InspectionScheduler:
             1, int(report_cleanup_interval_hours)
         )
         self._last_report_cleanup_at: Optional[datetime] = None
+        self._last_report_cleanup_date: Optional[date_type] = None
         self._stop_event = threading.Event()
         self._thread = threading.Thread(
             target=self._run_loop,
@@ -305,21 +308,26 @@ class InspectionScheduler:
             )
 
     def _cleanup_reports(self, db: Session, now: datetime) -> None:
-        settings = crud.get_system_settings(db)
-        retention_days = int(settings.report_retention_days or 0)
-        if retention_days <= 0:
+        if now.hour != 1:
             return
-        if self._last_report_cleanup_at is not None:
-            elapsed = (now - self._last_report_cleanup_at).total_seconds()
-            if elapsed < self._report_cleanup_interval_hours * 3600:
-                return
+        if self._last_report_cleanup_date == now.date():
+            return
+        settings = crud.get_system_settings(db)
+        retention_count = int(settings.report_retention_days or 0)
+        if retention_count <= 0:
+            self._last_report_cleanup_date = now.date()
+            return
         try:
-            from .main import _cleanup_expired_reports
+            from .main import _cleanup_report_runs_by_count
 
-            deleted = _cleanup_expired_reports(db, retention_days)
+            deleted = _cleanup_report_runs_by_count(
+                db,
+                manual_retention_count=retention_count,
+            )
         except Exception:
-            logger.exception("清理巡检报告失败。")
+            logger.exception("Failed to clean inspection reports.")
             return
         self._last_report_cleanup_at = now
+        self._last_report_cleanup_date = now.date()
         if deleted:
-            logger.info("已清理 %s 条过期巡检报告记录。", deleted)
+            logger.info("Cleaned %s inspection report records.", deleted)

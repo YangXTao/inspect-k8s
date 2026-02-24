@@ -493,6 +493,11 @@ def _ensure_inspection_runs_schema() -> None:
         statements.append(
             f"ALTER TABLE inspection_runs ADD COLUMN agent_id {column_type} NULL"
         )
+    if "schedule_id" not in existing_columns:
+        column_type = "INTEGER" if dialect == "sqlite" else "INT"
+        statements.append(
+            f"ALTER TABLE inspection_runs ADD COLUMN schedule_id {column_type} NULL"
+        )
     if "last_progress_at" not in existing_columns:
         column_type = "DATETIME" if dialect != "sqlite" else "DATETIME"
         statements.append(
@@ -753,6 +758,11 @@ def _ensure_inspection_schedules_schema() -> None:
         column_type = "TEXT"
         statements.append(
             f"ALTER TABLE inspection_schedules ADD COLUMN item_ids_json {column_type} NOT NULL DEFAULT '[]'"
+        )
+    if "report_retention_count" not in existing_columns:
+        column_type = "INTEGER" if dialect == "sqlite" else "INT"
+        statements.append(
+            f"ALTER TABLE inspection_schedules ADD COLUMN report_retention_count {column_type} NOT NULL DEFAULT 10"
         )
     if "is_enabled" not in existing_columns:
         if dialect == "sqlite":

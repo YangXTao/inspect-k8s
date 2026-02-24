@@ -197,6 +197,7 @@ export type InspectionSchedule = {
   cluster_ids: number[];
   cluster_name_map?: Record<string, string>;
   item_ids: number[];
+  report_retention_count: number;
   is_enabled: boolean;
   last_run_at?: string | null;
   created_at: string;

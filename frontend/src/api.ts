@@ -586,6 +586,7 @@ export function createInspectionSchedule(payload: {
   cron: string;
   cluster_ids: number[];
   item_ids: number[];
+  report_retention_count?: number;
   is_enabled?: boolean;
 }): Promise<InspectionSchedule> {
   return request<InspectionSchedule>("/inspection-schedules", {
@@ -601,6 +602,7 @@ export function updateInspectionSchedule(
     cron?: string;
     cluster_ids?: number[];
     item_ids?: number[];
+    report_retention_count?: number;
     is_enabled?: boolean;
   }
 ): Promise<InspectionSchedule> {

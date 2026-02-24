@@ -13,7 +13,7 @@ from .audit import get_audit_actor
 UNSET = object()
 CONNECTION_TEST_OPERATOR = "__system_connection_test__"
 SCHEDULED_AUDIT_SUFFIX = "（定时巡检）"
-DEFAULT_REPORT_RETENTION_DAYS = int(os.getenv("REPORT_RETENTION_DAYS", "30"))
+DEFAULT_REPORT_RETENTION_DAYS = int(os.getenv("REPORT_RETENTION_DAYS", "10"))
 
 
 def _hash_string(value: str) -> int:
@@ -647,6 +647,7 @@ def create_inspection_run(
     executor: str = "server",
     agent_status: Optional[str] = None,
     agent_id: Optional[int] = None,
+    schedule_id: Optional[int] = None,
     log_audit: bool = True,
     created_by_user_id: Optional[int] = None,
     created_by_username: Optional[str] = None,
@@ -664,6 +665,7 @@ def create_inspection_run(
         executor=executor,
         agent_status=agent_status,
         agent_id=agent_id,
+        schedule_id=schedule_id,
         last_progress_at=None,
     )
     db.add(run)

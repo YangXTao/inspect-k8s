@@ -398,27 +398,104 @@ def _expire_stuck_runs(db: Session) -> int:
     return expired
 
 
-def _cleanup_expired_reports(db: Session, retention_days: int) -> int:
-    if retention_days <= 0:
-        return 0
-    cutoff = datetime.utcnow() - timedelta(days=retention_days)
-    runs = (
-        db.query(models.InspectionRun)
-        .filter(
-            models.InspectionRun.completed_at.isnot(None),
-            models.InspectionRun.completed_at < cutoff,
-        )
-        .all()
-    )
+def _is_scheduled_run(run: models.InspectionRun) -> bool:
+    operator = (run.operator or "").strip()
+    if not operator or operator == CONNECTION_TEST_OPERATOR:
+        return False
+    if getattr(run, "schedule_id", None):
+        return True
+    return operator.endswith(crud.SCHEDULED_AUDIT_SUFFIX)
+
+
+def _is_manual_run(run: models.InspectionRun) -> bool:
+    operator = (run.operator or "").strip()
+    if operator == CONNECTION_TEST_OPERATOR:
+        return False
+    return not _is_scheduled_run(run)
+
+
+def _delete_runs_without_audit(
+    db: Session,
+    runs: list[models.InspectionRun],
+) -> int:
     if not runs:
         return 0
     report_paths = [run.report_path for run in runs if run.report_path]
     run_ids = [run.id for run in runs]
-    if run_ids:
-        crud.delete_inspection_runs_bulk(db, run_ids, enable_audit=False)
+    deleted = crud.delete_inspection_runs_bulk(db, run_ids, enable_audit=False)
     for report_path in report_paths:
         _remove_file_safely(report_path)
-    return len(run_ids)
+    return deleted
+
+
+def _cleanup_report_runs_by_count(
+    db: Session,
+    *,
+    manual_retention_count: int,
+) -> int:
+    deleted_total = 0
+    if manual_retention_count < 0:
+        manual_retention_count = 0
+
+    completed_runs = (
+        db.query(models.InspectionRun)
+        .filter(models.InspectionRun.completed_at.isnot(None))
+        .order_by(
+            models.InspectionRun.cluster_id.asc(),
+            models.InspectionRun.completed_at.desc(),
+            models.InspectionRun.id.desc(),
+        )
+        .all()
+    )
+    if not completed_runs:
+        return 0
+
+    manual_groups: dict[int, list[models.InspectionRun]] = {}
+    for run in completed_runs:
+        if _is_manual_run(run):
+            manual_groups.setdefault(run.cluster_id, []).append(run)
+    for cluster_id, runs in manual_groups.items():
+        keep = max(0, int(manual_retention_count))
+        if len(runs) <= keep:
+            continue
+        deleted_total += _delete_runs_without_audit(db, runs[keep:])
+
+    schedules = crud.list_inspection_schedules(db)
+    schedule_keep_map = {
+        schedule.id: max(1, int(getattr(schedule, "report_retention_count", 10) or 10))
+        for schedule in schedules
+    }
+
+    scheduled_groups: dict[tuple[object, int], list[models.InspectionRun]] = {}
+    for run in completed_runs:
+        if not _is_scheduled_run(run):
+            continue
+        schedule_id = getattr(run, "schedule_id", None)
+        if schedule_id and schedule_id in schedule_keep_map:
+            key: tuple[object, int] = (int(schedule_id), int(run.cluster_id))
+        else:
+            operator = (run.operator or "").strip()
+            key = (f"legacy:{operator}", int(run.cluster_id))
+        scheduled_groups.setdefault(key, []).append(run)
+
+    for key, runs in scheduled_groups.items():
+        if isinstance(key[0], int):
+            keep = schedule_keep_map.get(key[0], 10)
+        else:
+            keep = 10
+        if len(runs) <= keep:
+            continue
+        deleted_total += _delete_runs_without_audit(db, runs[keep:])
+
+    return deleted_total
+
+
+def _cleanup_expired_reports(db: Session, retention_days: int) -> int:
+    # 兼容旧调用方：参数名保留，但语义已改为“按份数保留”
+    return _cleanup_report_runs_by_count(
+        db,
+        manual_retention_count=max(0, int(retention_days)),
+    )
 
 
 def _normalise_cluster_name(name: str | None) -> str:
@@ -2088,16 +2165,12 @@ def update_general_settings(
         )
     retention_days = int(payload.report_retention_days)
     if retention_days <= 0:
-        raise HTTPException(status_code=400, detail="巡检报告保存时长需为正整数")
+        raise HTTPException(status_code=400, detail="巡检报告保存份数需为正整数")
     settings = crud.update_system_settings(
         db,
         base_url=base_url,
         report_retention_days=retention_days,
     )
-    try:
-        _cleanup_expired_reports(db, retention_days)
-    except Exception:
-        logger.exception("清理过期巡检报告失败。")
     return schemas.GeneralSettingsOut(
         base_url=settings.base_url or base_url,
         report_retention_days=settings.report_retention_days,
@@ -3769,6 +3842,7 @@ def create_inspection_schedule(
         cron=cron,
         cluster_ids=cluster_ids,
         item_ids=item_ids,
+        report_retention_count=int(payload.report_retention_count),
         is_enabled=payload.is_enabled,
     )
     schedule = crud.create_inspection_schedule(
@@ -3821,6 +3895,10 @@ def update_inspection_schedule(
         item_ids = _normalize_id_list(update_payload["item_ids"] or [])
         _validate_schedule_items(db, item_ids)
         update_payload["item_ids"] = item_ids
+    if "report_retention_count" in update_payload:
+        update_payload["report_retention_count"] = int(
+            update_payload["report_retention_count"]
+        )
     sanitized = schemas.InspectionScheduleUpdate.model_validate(update_payload)
     updated = crud.update_inspection_schedule(db, schedule, sanitized)
     return schemas.InspectionScheduleOut.model_validate(updated)
