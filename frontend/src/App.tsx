@@ -2168,6 +2168,22 @@ const logWithTimestamp = (
 
 const normalizeBackendUrl = (value: string) => value.trim().replace(/\/+$/, "");
 
+const resolveAgentInstallUrl = (backendUrl: string) => {
+  const baseUrl = normalizeBackendUrl(backendUrl);
+  const apiBase = appConfig.apiBaseUrl?.trim() || "/api";
+  let apiPath = apiBase;
+  if (/^https?:\/\//i.test(apiBase)) {
+    try {
+      apiPath = new URL(apiBase).pathname || "/";
+    } catch {
+      apiPath = "/api";
+    }
+  }
+  const normalizedPath = apiPath.startsWith("/") ? apiPath : `/${apiPath}`;
+  const trimmedPath = normalizedPath.replace(/\/+$/, "");
+  return `${baseUrl}${trimmedPath}/system-agent-install.sh`;
+};
+
 const buildAgentRegisterCommand = ({
   backendUrl,
   token,
@@ -2180,8 +2196,9 @@ const buildAgentRegisterCommand = ({
   prometheusUrl?: string | null;
 }) => {
   const baseUrl = normalizeBackendUrl(backendUrl);
+  const agentInstallUrl = resolveAgentInstallUrl(backendUrl);
   const commandLines = [
-    `curl -fL ${baseUrl}/system-agent-install.sh | sh -s -`,
+    `curl -fL ${agentInstallUrl} | sh -s -`,
     `  --server ${baseUrl}`,
     `  --token ${token}`,
     `  --cluster-name ${clusterName}`,
@@ -2403,11 +2420,36 @@ const AgentQuickCreate = ({
     if (!generatedCommand) {
       return;
     }
+    const fallbackCopy = (value: string) => {
+      try {
+        const textarea = document.createElement("textarea");
+        textarea.value = value;
+        textarea.setAttribute("readonly", "true");
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        textarea.style.pointerEvents = "none";
+        textarea.style.top = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        textarea.setSelectionRange(0, value.length);
+        const ok = document.execCommand("copy");
+        document.body.removeChild(textarea);
+        return ok;
+      } catch {
+        return false;
+      }
+    };
     try {
-      await navigator.clipboard.writeText(generatedCommand);
-      setCopyNotice("已复制注册命令");
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(generatedCommand);
+        setCopyNotice("已复制注册命令");
+        return;
+      }
+      const ok = fallbackCopy(generatedCommand);
+      setCopyNotice(ok ? "已复制注册命令" : "复制失败，请手动选择复制");
     } catch {
-      setCopyNotice("复制失败，请手动选择复制");
+      const ok = fallbackCopy(generatedCommand);
+      setCopyNotice(ok ? "已复制注册命令" : "复制失败，请手动选择复制");
     }
   };
 
