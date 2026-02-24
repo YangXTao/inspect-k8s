@@ -914,7 +914,7 @@ body.settings-lock {
   color: #0f172a;
   position: relative;
   overflow: hidden;
-  min-height: 322px;
+  min-height: 318px;
 }
 
 .cluster-card:hover {
@@ -1154,8 +1154,10 @@ body.settings-lock {
 }
 
 .cluster-health-message {
-  display: block;
-  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
   padding: 2px 8px;
   border-radius: 999px;
   background: #fee2e2;
@@ -1166,6 +1168,11 @@ body.settings-lock {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.cluster-card .cluster-health-message {
+  display: block;
+  width: 100%;
 }
 
 .cluster-agent-description {
