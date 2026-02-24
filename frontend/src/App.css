@@ -1069,6 +1069,13 @@ body.settings-lock {
   line-height: 1.2;
 }
 
+.cluster-card .cluster-test-button,
+.cluster-card .status-chip,
+.cluster-card .cluster-health-message,
+.cluster-card .cluster-action-menu-item {
+  font-family: "Microsoft YaHei", sans-serif;
+}
+
 .cluster-action-menu-item:hover {
   background: #eff6ff;
   color: #1d4ed8;
