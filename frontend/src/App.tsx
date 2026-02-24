@@ -108,14 +108,19 @@ import type {
 } from "./types-ui";
 
 type ConfirmVariant = "primary" | "danger";
-type NoticeScope = "overview" | "clusterDetail" | "history" | "runDetail";
+type NoticeScope =
+  | "overview"
+  | "clusterDetail"
+  | "history"
+  | "runDetail"
+  | "settings";
 type GlobalNotice = {
   key: string;
   type: Exclude<NoticeType, null>;
   message: string;
 };
 
-const ERROR_AUTO_DISMISS_MS = 15000;
+const ERROR_AUTO_DISMISS_MS = 5000;
 
 const useAutoClearError = (
   error: string | null,
@@ -769,6 +774,9 @@ const getClusterStatusMeta = (status: string) =>
 const resolveNoticeScope = (pathname: string): NoticeScope => {
   if (pathname.startsWith("/history")) {
     return "history";
+  }
+  if (pathname.startsWith("/setting")) {
+    return "settings";
   }
   if (pathname.startsWith("/clusters/")) {
     return pathname.includes("/runs/") ? "runDetail" : "clusterDetail";
@@ -6727,6 +6735,8 @@ const PrometheusVersionSettingsPanel = ({
   const [error, setError] = useState<string | null>(null);
   const [showDeleteControls, setShowDeleteControls] = useState(false);
 
+  useAutoClearError(error, setError);
+
   const usageMap = useMemo(() => {
     const counts = new Map<string, number>();
     items.forEach((item) => {
@@ -9407,6 +9417,8 @@ const RunDetailView = ({
   const canManageHistoryActions = canUpdateHistory;
   const canRemoveHistory = canDeleteHistory;
 
+  useAutoClearError(error, setError);
+
   const resolvedClusterId = useMemo(
     () =>
       resolveClusterIdFromRouteKey(clusterKey, clusterDisplayIds, clusters),
@@ -10504,6 +10516,8 @@ const ClusterNodesView = ({
   const refreshRequestRef = useRef(0);
   const refreshNoticeTimerRef = useRef<number | null>(null);
   const canManageClusters = license.canManageClusters;
+
+  useAutoClearError(error, setError);
 
   const resolvedClusterId = useMemo(
     () =>
@@ -11757,7 +11771,6 @@ const App = () => {
     if (
       !clusterNotice ||
       !clusterNoticeType ||
-      clusterNoticeType === "error" ||
       typeof window === "undefined"
     ) {
       return;
@@ -11765,7 +11778,7 @@ const App = () => {
 
     const timeout = window.setTimeout(() => {
       clearClusterNotice();
-    }, 5000);
+    }, ERROR_AUTO_DISMISS_MS);
 
     return () => {
       window.clearTimeout(timeout);
