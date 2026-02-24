@@ -732,7 +732,12 @@ def _derive_agent_image_from_backend_image(
 
 def _build_system_agent_install_script() -> str:
     backend_image = os.getenv("INSPECT_BACKEND_IMAGE") or os.getenv("BACKEND_IMAGE") or ""
-    agent_image_default = _derive_agent_image_from_backend_image(backend_image) or ""
+    explicit_agent_image = (
+        os.getenv("INSPECT_AGENT_IMAGE") or os.getenv("AGENT_IMAGE") or ""
+    ).strip()
+    agent_image_default = explicit_agent_image or (
+        _derive_agent_image_from_backend_image(backend_image) or ""
+    )
     lines = [
         "#!/bin/sh",
         "set -eu",

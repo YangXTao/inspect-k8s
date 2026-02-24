@@ -2701,6 +2701,9 @@ const OverviewView = ({
   >("all");
   const [clusterKeyword, setClusterKeyword] = useState("");
   const [isCreateClusterOpen, setIsCreateClusterOpen] = useState(false);
+  const [openClusterActionMenuId, setOpenClusterActionMenuId] = useState<
+    number | null
+  >(null);
   const enabledAgents = useMemo(
     () => agents.filter((agent) => agent.is_enabled),
     [agents]
@@ -2782,10 +2785,38 @@ const OverviewView = ({
     updatePage(1);
   }, [clusterFilterStatus, clusterKeyword, updatePage]);
 
+  useEffect(() => {
+    if (openClusterActionMenuId === null) {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest(".cluster-action-menu")) {
+        return;
+      }
+      setOpenClusterActionMenuId(null);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenClusterActionMenuId(null);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [openClusterActionMenuId]);
+
   const effectivePage = useMemo(
     () => Math.min(Math.max(currentPage, 1), totalPages),
     [currentPage, totalPages]
   );
+
+  useEffect(() => {
+    setOpenClusterActionMenuId(null);
+  }, [effectivePage, clusterFilterStatus, clusterKeyword]);
 
   useEffect(() => {
     if (currentPage !== effectivePage) {
@@ -3006,29 +3037,6 @@ const OverviewView = ({
                 />
               </div>
             )}
-            {clusters.length > 0 && canRemoveClusters && (
-              <>
-                <span className="selection-hint">
-                  已选 {selectedFilteredCount} / {filteredClusters.length}
-                </span>
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={handleToggleAllClusters}
-                  disabled={!canRemoveClusters}
-                >
-                  {allSelected ? "取消全选" : "全选"}
-                </button>
-                <button
-                  type="button"
-                  className="secondary danger"
-                  onClick={handleDeleteSelectedClusters}
-                  disabled={selectedClusterIds.length === 0 || !canRemoveClusters}
-                >
-                  删除
-                </button>
-              </>
-            )}
           </div>
         </div>
       {clusters.length === 0 ? (
@@ -3050,7 +3058,6 @@ const OverviewView = ({
                   cluster
                 );
                 const isTesting = Boolean(testingClusterIds[cluster.id]);
-                const isSelected = selectedClusterIds.includes(cluster.id);
                 const detailPath = `/clusters/${displayId}`;
                 const versionLabel =
                   cluster.kubernetes_version &&
@@ -3077,7 +3084,7 @@ const OverviewView = ({
                 return (
                   <div
                     key={cluster.id}
-                    className={`cluster-card${isSelected ? " selected" : ""}`}
+                    className="cluster-card"
                   >
                     <Link
                       to={detailPath}
@@ -3087,43 +3094,69 @@ const OverviewView = ({
                     <div className="cluster-card-content">
                     <div className="cluster-card-top">
                       <div className="cluster-name-row">
-                        {canRemoveClusters && (
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={(event) => {
-                              event.stopPropagation();
-                              handleToggleCluster(cluster.id);
-                            }}
-                            onClick={(event) => event.stopPropagation()}
-                            disabled={!canRemoveClusters}
-                          />
-                        )}
                         <span className="cluster-id-badge">{displayId}</span>
-                        <div className="cluster-name">{cluster.name}</div>
+                        <div className="cluster-name" title={cluster.name}>
+                          {cluster.name}
+                        </div>
                       </div>
                       <div className="cluster-actions">
-                        {canEditClusters && (
-                          <button
-                            className="link-button small"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onEditCluster(cluster);
-                            }}
-                          >
-                            编辑
-                          </button>
-                        )}
-                        {canRemoveClusters && (
-                          <button
-                            className="link-button small danger"
-                            onClick={async (event) => {
-                              event.stopPropagation();
-                              await onDeleteCluster(cluster);
-                            }}
-                          >
-                            删除
-                          </button>
+                        {(canEditClusters || canRemoveClusters) && (
+                          <div className="cluster-action-menu">
+                            <button
+                              type="button"
+                              className="cluster-action-menu-trigger"
+                              aria-label="更多操作"
+                              title="更多操作"
+                              aria-haspopup="menu"
+                              aria-expanded={
+                                openClusterActionMenuId === cluster.id
+                              }
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setOpenClusterActionMenuId((prev) =>
+                                  prev === cluster.id ? null : cluster.id
+                                );
+                              }}
+                            >
+                              <span>⋮</span>
+                            </button>
+                            {openClusterActionMenuId === cluster.id && (
+                              <div
+                                className="cluster-action-menu-dropdown"
+                                role="menu"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                {canEditClusters && (
+                                  <button
+                                    type="button"
+                                    className="cluster-action-menu-item"
+                                    role="menuitem"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setOpenClusterActionMenuId(null);
+                                      onEditCluster(cluster);
+                                    }}
+                                  >
+                                    编辑
+                                  </button>
+                                )}
+                                {canRemoveClusters && (
+                                  <button
+                                    type="button"
+                                    className="cluster-action-menu-item danger"
+                                    role="menuitem"
+                                    onClick={async (event) => {
+                                      event.stopPropagation();
+                                      setOpenClusterActionMenuId(null);
+                                      await onDeleteCluster(cluster);
+                                    }}
+                                  >
+                                    删除
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
@@ -3148,7 +3181,10 @@ const OverviewView = ({
                       </span>
                     </div>
                     {healthMessage && (
-                      <div className="cluster-health-message">
+                      <div
+                        className="cluster-health-message"
+                        title={healthMessage}
+                      >
                         {healthMessage}
                       </div>
                     )}
