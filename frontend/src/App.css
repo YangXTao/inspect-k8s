@@ -991,7 +991,7 @@ body.settings-lock {
   color: #fff;
   padding: 2px 8px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1065,7 +1065,7 @@ body.settings-lock {
   padding: 5px 6px;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.2;
 }
 
@@ -1118,7 +1118,7 @@ body.settings-lock {
   align-items: center;
   padding: 4px 10px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   text-transform: none;
 }
@@ -1211,7 +1211,7 @@ body.settings-lock {
 }
 
 .cluster-name {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   min-width: 0;
   overflow-wrap: anywhere;
