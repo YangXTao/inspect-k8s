@@ -3076,13 +3076,19 @@ const OverviewView = ({
                   typeof cluster.node_count === "number"
                     ? String(cluster.node_count)
                     : null;
+                const isRancherLocalCluster =
+                  resolveClusterRancherLocal(cluster);
                 const healthMessage =
                   cluster.agent_health_message?.trim() || null;
                 const summaryText =
                   versionLabel || nodeCountLabel
-                    ? `版本 ${versionLabel ?? "未知"} · 节点数 ${nodeCountLabel ?? "未知"}`
+                    ? `版本 ${versionLabel ?? "未知"} · 节点数 ${nodeCountLabel ?? "未知"}${
+                        isRancherLocalCluster ? " · 类型 local" : ""
+                      }`
                     : healthMessage
-                      ? "版本 未知 · 节点数 未知"
+                      ? `版本 未知 · 节点数 未知${
+                          isRancherLocalCluster ? " · 类型 local" : ""
+                        }`
                       : cluster.connection_message || "未校验";
                 const descriptionText =
                   (cluster.description && cluster.description.trim()) ||
@@ -4398,6 +4404,7 @@ const ClusterDetailView = ({
     }
     return clusters.find((item) => item.id === resolvedClusterId) ?? null;
   }, [clusters, resolvedClusterId]);
+  const clusterIsRancherLocal = resolveClusterRancherLocal(cluster);
 
   const handleBackToPreviousPage = useCallback(() => {
     if (window.history.length > 1) {
@@ -4840,6 +4847,12 @@ const ClusterDetailView = ({
                 ? cluster.node_count
                 : "未知"}
             </div>
+            {clusterIsRancherLocal && (
+              <div>
+                <strong>类型：</strong>
+                local
+              </div>
+            )}
             <div>
               <strong>创建时间：</strong>
               {formatDate(cluster.created_at)}
