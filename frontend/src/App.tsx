@@ -161,6 +161,7 @@ const SCHEDULE_REFRESH_INTERVAL = 15000;
 const DEFAULT_PROMETHEUS_VERSION = "3.2";
 const DEFAULT_PROMETHEUS_VERSION_OPTIONS = [
   "1.8",
+  "2.50",
   "2.55",
   ...Array.from({ length: 10 }, (_, index) => `3.${index}`),
 ];
@@ -4428,15 +4429,6 @@ const AuditView = () => {
             <pre className="audit-yaml-content">
               {buildAuditYaml(yamlEntry)}
             </pre>
-            <div className="modal-actions">
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => setYamlEntry(null)}
-              >
-                关闭
-              </button>
-            </div>
           </div>
         </div>
       )}
