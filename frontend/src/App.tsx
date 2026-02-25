@@ -498,14 +498,10 @@ const parseCronStepValue = (token: string) => {
     const step = Number(direct[1]);
     return Number.isFinite(step) && step > 0 ? step : null;
   }
-  // 兼容用户常见输入“30/*”的预览显示（保存时仍由后端校验 Cron 合法性）
-  const reversed = normalized.match(/^(\d+)\/\*$/);
-  if (reversed) {
-    const step = Number(reversed[1]);
-    return Number.isFinite(step) && step > 0 ? step : null;
-  }
   return null;
 };
+
+const hasObviousInvalidCronToken = (token: string) => /^\d+\/\*$/.test(token.trim());
 
 const describeScheduleCron = (
   minute: string,
@@ -521,6 +517,9 @@ const describeScheduleCron = (
   const w = week.trim();
   if (![m, h, d, mo, w].every(Boolean)) {
     return "请完整填写分/时/日/月/周";
+  }
+  if ([m, h, d, mo, w].some(hasObviousInvalidCronToken)) {
+    return "运行时间：Cron 表达式无效";
   }
   const allDay = d === "*" && mo === "*" && w === "*";
   const minuteNum = /^\d+$/.test(m) ? Number(m) : null;
@@ -7080,6 +7079,7 @@ interface ScheduleSettingsPanelProps {
     name?: string;
     cron: string;
     clusterIds: number[];
+    templateIds: number[];
     itemIds: number[];
     reportRetentionCount: number;
     isEnabled: boolean;
@@ -7213,38 +7213,57 @@ const ScheduleSettingsPanel = ({
         : []
     );
     setSelectedItemIds(editingSchedule.item_ids ?? []);
-    const scheduleItemIdSet = new Set(editingSchedule.item_ids ?? []);
-    const templateCandidates = templates
-      .map((template) => {
-        const normalizedItemIds = Array.from(
-          new Set(
-            (template.item_ids ?? []).filter((itemId) => scheduleItemIdSet.has(itemId))
+    const persistedTemplateIds = Array.isArray(editingSchedule.template_ids)
+      ? editingSchedule.template_ids
+          .map((value) => Number(value))
+          .filter(
+            (value, index, list) =>
+              Number.isInteger(value) &&
+              value > 0 &&
+              list.indexOf(value) === index &&
+              templates.some((template) => template.id === value)
           )
+      : [];
+    if (persistedTemplateIds.length > 0) {
+      setSelectedTemplateIds(persistedTemplateIds);
+    } else {
+      const scheduleItemIdSet = new Set(editingSchedule.item_ids ?? []);
+      const templateCandidates = templates
+        .map((template) => {
+          const normalizedItemIds = Array.from(
+            new Set(
+              (template.item_ids ?? []).filter((itemId) => scheduleItemIdSet.has(itemId))
+            )
+          );
+          return {
+            id: template.id,
+            itemIds: normalizedItemIds,
+          };
+        })
+        .filter((template) => template.itemIds.length > 0)
+        .filter((template) =>
+          template.itemIds.every((itemId) => scheduleItemIdSet.has(itemId))
+        )
+        .sort((a, b) => {
+          if (b.itemIds.length !== a.itemIds.length) {
+            return b.itemIds.length - a.itemIds.length;
+          }
+          return a.id - b.id;
+        });
+      const coveredItemIds = new Set<number>();
+      const matchedTemplateIds: number[] = [];
+      templateCandidates.forEach((candidate) => {
+        const addsNewItem = candidate.itemIds.some(
+          (itemId) => !coveredItemIds.has(itemId)
         );
-        return {
-          id: template.id,
-          itemIds: normalizedItemIds,
-        };
-      })
-      .filter((template) => template.itemIds.length > 0)
-      .filter((template) => template.itemIds.every((itemId) => scheduleItemIdSet.has(itemId)))
-      .sort((a, b) => {
-        if (b.itemIds.length !== a.itemIds.length) {
-          return b.itemIds.length - a.itemIds.length;
+        if (!addsNewItem) {
+          return;
         }
-        return a.id - b.id;
+        matchedTemplateIds.push(candidate.id);
+        candidate.itemIds.forEach((itemId) => coveredItemIds.add(itemId));
       });
-    const coveredItemIds = new Set<number>();
-    const matchedTemplateIds: number[] = [];
-    templateCandidates.forEach((candidate) => {
-      const addsNewItem = candidate.itemIds.some((itemId) => !coveredItemIds.has(itemId));
-      if (!addsNewItem) {
-        return;
-      }
-      matchedTemplateIds.push(candidate.id);
-      candidate.itemIds.forEach((itemId) => coveredItemIds.add(itemId));
-    });
-    setSelectedTemplateIds(matchedTemplateIds);
+      setSelectedTemplateIds(matchedTemplateIds);
+    }
     setTemplateKeyword("");
     setClusterKeyword("");
     setScheduleRetentionCount(
@@ -7429,6 +7448,7 @@ const ScheduleSettingsPanel = ({
         name: finalScheduleName,
         cron: normalizedCron,
         clusterIds: selectedAvailableClusterIds,
+        templateIds: selectedTemplateIds,
         itemIds: resolvedItemIds,
         reportRetentionCount: Math.floor(parsedRetentionCount),
         isEnabled: formEnabled,
@@ -7840,13 +7860,23 @@ const ScheduleSettingsPanel = ({
 
   const getScheduleTemplateSummary = useCallback(
     (schedule: InspectionSchedule) => {
-      const itemIdSet = new Set(schedule.item_ids ?? []);
-      const matchedTemplates = templates.filter((template) => {
-        if (!template.item_ids?.length) {
-          return false;
-        }
-        return template.item_ids.every((itemId) => itemIdSet.has(itemId));
-      });
+      const templateIdSet = new Set(
+        Array.isArray(schedule.template_ids)
+          ? schedule.template_ids
+              .map((value) => Number(value))
+              .filter((value) => Number.isInteger(value) && value > 0)
+          : []
+      );
+      const matchedTemplates =
+        templateIdSet.size > 0
+          ? templates.filter((template) => templateIdSet.has(template.id))
+          : templates.filter((template) => {
+              if (!template.item_ids?.length) {
+                return false;
+              }
+              const itemIdSet = new Set(schedule.item_ids ?? []);
+              return template.item_ids.every((itemId) => itemIdSet.has(itemId));
+            });
       if (matchedTemplates.length === 0) {
         return {
           title: `${schedule.item_ids.length} 项`,
@@ -8443,6 +8473,7 @@ interface SchedulePageProps {
     name?: string;
     cron: string;
     clusterIds: number[];
+    templateIds: number[];
     itemIds: number[];
     reportRetentionCount: number;
     isEnabled: boolean;
@@ -14464,6 +14495,7 @@ const hasManualKubeconfig = useMemo(
       name?: string;
       cron: string;
       clusterIds: number[];
+      templateIds: number[];
       itemIds: number[];
       reportRetentionCount: number;
       isEnabled: boolean;
@@ -14490,6 +14522,7 @@ const hasManualKubeconfig = useMemo(
             name: trimmedName ? trimmedName : null,
             cron: payload.cron,
             cluster_ids: payload.clusterIds,
+            template_ids: payload.templateIds,
             item_ids: payload.itemIds,
             report_retention_count: payload.reportRetentionCount,
             is_enabled: payload.isEnabled,
@@ -14501,6 +14534,7 @@ const hasManualKubeconfig = useMemo(
             name: trimmedName || undefined,
             cron: payload.cron,
             cluster_ids: payload.clusterIds,
+            template_ids: payload.templateIds,
             item_ids: payload.itemIds,
             report_retention_count: payload.reportRetentionCount,
             is_enabled: payload.isEnabled,

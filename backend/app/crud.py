@@ -1296,6 +1296,7 @@ def create_inspection_schedule(
 ) -> models.InspectionSchedule:
     payload = schedule_in.model_dump()
     cluster_ids = payload.pop("cluster_ids", [])
+    template_ids = payload.pop("template_ids", [])
     item_ids = payload.pop("item_ids", [])
     cluster_name_map = {
         cluster.id: cluster.name
@@ -1308,6 +1309,7 @@ def create_inspection_schedule(
     schedule.created_by_username = created_by_username
     schedule.set_cluster_ids(cluster_ids)
     schedule.set_cluster_name_map(cluster_name_map)
+    schedule.set_template_ids(template_ids)
     schedule.set_item_ids(item_ids)
     db.add(schedule)
     db.commit()
@@ -1344,6 +1346,8 @@ def update_inspection_schedule(
         schedule.set_cluster_name_map(current_name_map)
     if "item_ids" in payload:
         schedule.set_item_ids(payload.pop("item_ids") or [])
+    if "template_ids" in payload:
+        schedule.set_template_ids(payload.pop("template_ids") or [])
     for key, value in payload.items():
         setattr(schedule, key, value)
     schedule.updated_at = datetime.utcnow()

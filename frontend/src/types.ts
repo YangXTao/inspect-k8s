@@ -196,6 +196,7 @@ export type InspectionSchedule = {
   cron: string;
   cluster_ids: number[];
   cluster_name_map?: Record<string, string>;
+  template_ids?: number[];
   item_ids: number[];
   report_retention_count: number;
   is_enabled: boolean;

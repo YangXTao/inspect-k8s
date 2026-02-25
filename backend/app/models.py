@@ -205,6 +205,7 @@ class InspectionSchedule(Base):
     cron = Column(String(50), nullable=False)
     cluster_ids_json = Column(Text, nullable=False)
     cluster_names_json = Column(Text, nullable=True)
+    template_ids_json = Column(Text, nullable=False, default="[]")
     item_ids_json = Column(Text, nullable=False)
     report_retention_count = Column(Integer, nullable=False, default=10)
     is_enabled = Column(Boolean, nullable=False, default=True)
@@ -223,6 +224,10 @@ class InspectionSchedule(Base):
     @property
     def item_ids(self) -> list[int]:
         return self._load_ids(self.item_ids_json)
+
+    @property
+    def template_ids(self) -> list[int]:
+        return self._load_ids(self.template_ids_json)
 
     @property
     def cluster_name_map(self) -> dict[int, str]:
@@ -261,6 +266,9 @@ class InspectionSchedule(Base):
 
     def set_item_ids(self, value: Iterable[int]) -> None:
         self.item_ids_json = self._dump_ids(value)
+
+    def set_template_ids(self, value: Iterable[int]) -> None:
+        self.template_ids_json = self._dump_ids(value)
 
     @staticmethod
     def _normalize_ids(values: Iterable[int]) -> list[int]:

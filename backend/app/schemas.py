@@ -405,6 +405,7 @@ class InspectionScheduleBase(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
     cron: str = Field(..., max_length=50)
     cluster_ids: List[int] = Field(..., min_length=1)
+    template_ids: List[int] = Field(default_factory=list)
     item_ids: List[int] = Field(..., min_length=1)
     report_retention_count: int = Field(10, ge=1, le=1000)
     is_enabled: bool = True
@@ -418,6 +419,7 @@ class InspectionScheduleUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
     cron: Optional[str] = Field(None, max_length=50)
     cluster_ids: Optional[List[int]] = Field(None, min_length=1)
+    template_ids: Optional[List[int]] = None
     item_ids: Optional[List[int]] = Field(None, min_length=1)
     report_retention_count: Optional[int] = Field(None, ge=1, le=1000)
     is_enabled: Optional[bool] = None
@@ -431,6 +433,7 @@ class InspectionScheduleOut(BaseModel):
     cron: str
     cluster_ids: List[int]
     cluster_name_map: Dict[int, str] = Field(default_factory=dict)
+    template_ids: List[int] = Field(default_factory=list)
     item_ids: List[int]
     report_retention_count: int
     is_enabled: bool

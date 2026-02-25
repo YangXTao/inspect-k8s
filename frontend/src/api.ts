@@ -585,6 +585,7 @@ export function createInspectionSchedule(payload: {
   name?: string;
   cron: string;
   cluster_ids: number[];
+  template_ids?: number[];
   item_ids: number[];
   report_retention_count?: number;
   is_enabled?: boolean;
@@ -601,6 +602,7 @@ export function updateInspectionSchedule(
     name?: string | null;
     cron?: string;
     cluster_ids?: number[];
+    template_ids?: number[];
     item_ids?: number[];
     report_retention_count?: number;
     is_enabled?: boolean;

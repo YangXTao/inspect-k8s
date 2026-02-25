@@ -1504,6 +1504,24 @@ def _validate_schedule_items(db: Session, item_ids: list[int]) -> None:
             detail=f"包含不存在或已归档的巡检项：{missing_text}",
         )
 
+
+def _validate_schedule_templates(db: Session, template_ids: list[int]) -> None:
+    if not template_ids:
+        return
+    templates = (
+        db.query(models.InspectionItemTemplate)
+        .filter(models.InspectionItemTemplate.id.in_(template_ids))
+        .all()
+    )
+    found_ids = {template.id for template in templates}
+    missing = [template_id for template_id in template_ids if template_id not in found_ids]
+    if missing:
+        missing_text = "、".join(str(value) for value in missing)
+        raise HTTPException(
+            status_code=400,
+            detail=f"包含不存在的巡检模板：{missing_text}",
+        )
+
 def _inspection_item_name_conflict(
     existing_items: Iterable[models.InspectionItem],
     *,
@@ -3868,8 +3886,10 @@ def create_inspection_schedule(
     normalized_name = _normalize_schedule_name(payload.name)
     _ensure_unique_schedule_name(db, normalized_name)
     cluster_ids = _normalize_id_list(payload.cluster_ids)
+    template_ids = _normalize_id_list(getattr(payload, "template_ids", []) or [])
     item_ids = _normalize_id_list(payload.item_ids)
     _validate_schedule_clusters(db, cluster_ids)
+    _validate_schedule_templates(db, template_ids)
     _validate_schedule_items(db, item_ids)
     _ensure_unique_schedule_cluster_cron(
         db,
@@ -3880,6 +3900,7 @@ def create_inspection_schedule(
         name=normalized_name,
         cron=cron,
         cluster_ids=cluster_ids,
+        template_ids=template_ids,
         item_ids=item_ids,
         report_retention_count=int(payload.report_retention_count),
         is_enabled=payload.is_enabled,
@@ -3930,6 +3951,10 @@ def update_inspection_schedule(
         cluster_ids = _normalize_id_list(update_payload["cluster_ids"] or [])
         _validate_schedule_clusters(db, cluster_ids)
         update_payload["cluster_ids"] = cluster_ids
+    if "template_ids" in update_payload:
+        template_ids = _normalize_id_list(update_payload["template_ids"] or [])
+        _validate_schedule_templates(db, template_ids)
+        update_payload["template_ids"] = template_ids
     if "item_ids" in update_payload:
         item_ids = _normalize_id_list(update_payload["item_ids"] or [])
         _validate_schedule_items(db, item_ids)
