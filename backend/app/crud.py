@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import os
 from datetime import datetime
 from typing import Iterable, List, Optional, Any
 
@@ -12,6 +13,7 @@ from .audit import get_audit_actor
 UNSET = object()
 CONNECTION_TEST_OPERATOR = "__system_connection_test__"
 SCHEDULED_AUDIT_SUFFIX = "（定时巡检）"
+DEFAULT_REPORT_RETENTION_DAYS = int(os.getenv("REPORT_RETENTION_DAYS", "10"))
 
 
 def _hash_string(value: str) -> int:
@@ -93,6 +95,40 @@ def describe_inspection_run(
 
 def get_cluster_display_id(cluster: models.ClusterConfig) -> str:
     return _build_cluster_display_id(cluster.id, cluster.name)
+
+
+def get_system_settings(db: Session) -> models.SystemSettings:
+    settings = (
+        db.query(models.SystemSettings)
+        .order_by(models.SystemSettings.id.asc())
+        .first()
+    )
+    if settings:
+        return settings
+    settings = models.SystemSettings(
+        base_url=None,
+        report_retention_days=DEFAULT_REPORT_RETENTION_DAYS,
+    )
+    db.add(settings)
+    db.commit()
+    db.refresh(settings)
+    return settings
+
+
+def update_system_settings(
+    db: Session,
+    *,
+    base_url: str,
+    report_retention_days: int,
+) -> models.SystemSettings:
+    settings = get_system_settings(db)
+    settings.base_url = base_url.strip()
+    settings.report_retention_days = int(report_retention_days)
+    settings.updated_at = datetime.utcnow()
+    db.add(settings)
+    db.commit()
+    db.refresh(settings)
+    return settings
 
 
 def _should_log_run(run: models.InspectionRun) -> bool:
@@ -489,6 +525,87 @@ def delete_inspection_item(db: Session, item: models.InspectionItem) -> None:
     )
 
 
+def list_inspection_item_templates(
+    db: Session,
+) -> List[models.InspectionItemTemplate]:
+    return (
+        db.query(models.InspectionItemTemplate)
+        .order_by(models.InspectionItemTemplate.updated_at.desc())
+        .all()
+    )
+
+
+def get_inspection_item_template(
+    db: Session, template_id: int
+) -> Optional[models.InspectionItemTemplate]:
+    return (
+        db.query(models.InspectionItemTemplate)
+        .filter(models.InspectionItemTemplate.id == template_id)
+        .first()
+    )
+
+
+def create_inspection_item_template(
+    db: Session, template_in: schemas.InspectionItemTemplateCreate
+) -> models.InspectionItemTemplate:
+    data = template_in.model_dump()
+    item_ids = data.pop("item_ids", [])
+    template = models.InspectionItemTemplate(**data)
+    template.set_item_ids(item_ids)
+    db.add(template)
+    db.commit()
+    db.refresh(template)
+    log_action(
+        db,
+        action="create",
+        entity_type="inspection_item_template",
+        entity_id=template.id,
+        description=f"Created inspection item template '{template.name}'",
+    )
+    return template
+
+
+def update_inspection_item_template(
+    db: Session,
+    template: models.InspectionItemTemplate,
+    template_in: schemas.InspectionItemTemplateUpdate,
+) -> models.InspectionItemTemplate:
+    data = template_in.model_dump(exclude_unset=True)
+    item_ids = data.pop("item_ids", None)
+    for key, value in data.items():
+        setattr(template, key, value)
+    if item_ids is not None:
+        template.set_item_ids(item_ids)
+    template.updated_at = datetime.utcnow()
+    db.add(template)
+    db.commit()
+    db.refresh(template)
+    log_action(
+        db,
+        action="update",
+        entity_type="inspection_item_template",
+        entity_id=template.id,
+        description=f"Updated inspection item template '{template.name}'",
+    )
+    return template
+
+
+def delete_inspection_item_template(
+    db: Session, template: models.InspectionItemTemplate
+) -> None:
+    template_id = template.id
+    template_name = template.name
+    db.delete(template)
+    db.commit()
+    log_action(
+        db,
+        action="delete",
+        entity_type="inspection_item_template",
+        entity_id=template_id,
+        description=f"Deleted inspection item template '{template_name}'",
+    )
+
+
 def get_items_by_ids(
     db: Session, item_ids: Iterable[int]
 ) -> List[models.InspectionItem]:
@@ -530,6 +647,7 @@ def create_inspection_run(
     executor: str = "server",
     agent_status: Optional[str] = None,
     agent_id: Optional[int] = None,
+    schedule_id: Optional[int] = None,
     log_audit: bool = True,
     created_by_user_id: Optional[int] = None,
     created_by_username: Optional[str] = None,
@@ -547,6 +665,8 @@ def create_inspection_run(
         executor=executor,
         agent_status=agent_status,
         agent_id=agent_id,
+        schedule_id=schedule_id,
+        last_progress_at=None,
     )
     db.add(run)
     db.commit()
@@ -584,7 +704,9 @@ def finalize_inspection_run(
     if run.total_items:
         processed = min(max(processed, run.total_items), run.total_items)
     run.processed_items = max(processed, run.processed_items or 0)
-    run.completed_at = datetime.utcnow()
+    now = datetime.utcnow()
+    run.completed_at = now
+    run.last_progress_at = now
     db.add(run)
     db.commit()
     db.refresh(run)
@@ -637,7 +759,10 @@ def update_inspection_run_progress(
     run: models.InspectionRun,
     processed_items: int,
 ) -> models.InspectionRun:
-    run.processed_items = max(0, min(processed_items, run.total_items or processed_items))
+    new_processed = max(0, min(processed_items, run.total_items or processed_items))
+    if new_processed > (run.processed_items or 0):
+        run.last_progress_at = datetime.utcnow()
+    run.processed_items = new_processed
     db.add(run)
     db.commit()
     db.refresh(run)
@@ -889,6 +1014,8 @@ def update_inspection_run_agent_state(
     if status is not None:
         run.status = status
     if processed_items is not None:
+        if processed_items > (run.processed_items or 0):
+            run.last_progress_at = datetime.utcnow()
         run.processed_items = processed_items
     db.add(run)
     db.commit()
@@ -908,6 +1035,7 @@ def delete_inspection_runs_bulk(
     run_ids: Iterable[int],
     *,
     log_description: Optional[str] = None,
+    enable_audit: bool = True,
 ) -> int:
     """
     批量删除巡检记录及其结果，减少逐条提交带来的性能开销。
@@ -924,7 +1052,7 @@ def delete_inspection_runs_bulk(
     if not runs:
         return 0
 
-    should_log = any(_should_log_run(run) for run in runs)
+    should_log = enable_audit and any(_should_log_run(run) for run in runs)
 
     # 先删除结果，再删除巡检记录，统一提交一次
     db.query(models.InspectionResult).filter(
@@ -1168,6 +1296,7 @@ def create_inspection_schedule(
 ) -> models.InspectionSchedule:
     payload = schedule_in.model_dump()
     cluster_ids = payload.pop("cluster_ids", [])
+    template_ids = payload.pop("template_ids", [])
     item_ids = payload.pop("item_ids", [])
     cluster_name_map = {
         cluster.id: cluster.name
@@ -1180,6 +1309,7 @@ def create_inspection_schedule(
     schedule.created_by_username = created_by_username
     schedule.set_cluster_ids(cluster_ids)
     schedule.set_cluster_name_map(cluster_name_map)
+    schedule.set_template_ids(template_ids)
     schedule.set_item_ids(item_ids)
     db.add(schedule)
     db.commit()
@@ -1216,6 +1346,8 @@ def update_inspection_schedule(
         schedule.set_cluster_name_map(current_name_map)
     if "item_ids" in payload:
         schedule.set_item_ids(payload.pop("item_ids") or [])
+    if "template_ids" in payload:
+        schedule.set_template_ids(payload.pop("template_ids") or [])
     for key, value in payload.items():
         setattr(schedule, key, value)
     schedule.updated_at = datetime.utcnow()

@@ -49,6 +49,7 @@ from .auth import (
     PASSWORD_ITERATIONS,
     PASSWORD_SALT_BYTES,
     SESSION_TTL_HOURS,
+    SESSION_IDLE_TIMEOUT_SECONDS,
     build_login_challenge,
     create_session,
     ensure_default_admin,
@@ -78,6 +79,9 @@ _DEFAULT_INSPECTIONS_SENTINEL = Path("data/state/default_inspections_seeded.flag
 AGENT_HEARTBEAT_TIMEOUT_MINUTES = 1
 AGENT_HEARTBEAT_TIMEOUT = timedelta(minutes=AGENT_HEARTBEAT_TIMEOUT_MINUTES)
 CONNECTION_TEST_OPERATOR = "__system_connection_test__"
+# 巡检超时相关（可通过环境变量覆盖）
+# 仅针对“运行中但长时间无进度”的任务，不对排队中的任务计时。
+RUN_STUCK_TIMEOUT_SECONDS = int(os.getenv("INSPECTION_RUN_STUCK_SECONDS", "120"))
 MAX_CLUSTER_NAME_LENGTH = 150
 DEFAULT_PROMETHEUS_URL = (
     "http://rancher-monitoring-prometheus.cattle-monitoring-system:9090"
@@ -336,6 +340,164 @@ def _requeue_stale_agent_runs(db: Session) -> int:
     return recovered
 
 
+def _expire_stuck_runs(db: Session) -> int:
+    """
+    将运行中且长时间无进度的巡检任务标记为失败，防止占用队列。
+    仅基于“最后进度更新时间”判断，不强制总耗时。
+    """
+    if RUN_STUCK_TIMEOUT_SECONDS <= 0:
+        return 0
+    candidates = (
+        db.query(models.InspectionRun)
+        .filter(
+            models.InspectionRun.status == "running",
+            models.InspectionRun.completed_at.is_(None),
+        )
+        .all()
+    )
+    now = datetime.utcnow()
+    cutoff = now - timedelta(seconds=RUN_STUCK_TIMEOUT_SECONDS)
+    expired = 0
+    for run in candidates:
+        # 未产生任何进度，不判定超时，避免刚启动或队列切换时被误杀
+        last_progress = run.last_progress_at
+        if last_progress is None:
+            continue
+        if last_progress >= cutoff:
+            continue
+        # 如果已处理完所有项但未标记完成，不视为超时
+        if run.total_items and run.processed_items >= run.total_items:
+            continue
+        run.status = "failed"
+        if run.executor == "agent":
+            run.agent_status = "failed"
+        minutes = max(1, RUN_STUCK_TIMEOUT_SECONDS // 60)
+        note = f"巡检超过 {minutes} 分钟无进度，已自动超时。"
+        if run.summary:
+            if note not in run.summary:
+                run.summary = f"{run.summary}\n{note}"
+        else:
+            run.summary = note
+        run.completed_at = now
+        db.add(run)
+        if crud._should_log_run(run):  # type: ignore[attr-defined]
+            run_label = crud.describe_inspection_run(db, run)
+            audit_override = crud._resolve_run_audit_override(run)  # type: ignore[attr-defined]
+            crud.log_action(
+                db,
+                action="update",
+                entity_type="inspection_run",
+                entity_id=run.id,
+                description=f"巡检超时自动失败：{run_label}",
+                **audit_override,
+            )
+        expired += 1
+    if expired:
+        db.commit()
+        logger.warning("已标记 %s 个运行无进度超时的巡检任务为失败。", expired)
+    return expired
+
+
+def _is_scheduled_run(run: models.InspectionRun) -> bool:
+    operator = (run.operator or "").strip()
+    if not operator or operator == CONNECTION_TEST_OPERATOR:
+        return False
+    if getattr(run, "schedule_id", None):
+        return True
+    return operator.endswith(crud.SCHEDULED_AUDIT_SUFFIX)
+
+
+def _is_manual_run(run: models.InspectionRun) -> bool:
+    operator = (run.operator or "").strip()
+    if operator == CONNECTION_TEST_OPERATOR:
+        return False
+    return not _is_scheduled_run(run)
+
+
+def _delete_runs_without_audit(
+    db: Session,
+    runs: list[models.InspectionRun],
+) -> int:
+    if not runs:
+        return 0
+    report_paths = [run.report_path for run in runs if run.report_path]
+    run_ids = [run.id for run in runs]
+    deleted = crud.delete_inspection_runs_bulk(db, run_ids, enable_audit=False)
+    for report_path in report_paths:
+        _remove_file_safely(report_path)
+    return deleted
+
+
+def _cleanup_report_runs_by_count(
+    db: Session,
+    *,
+    manual_retention_count: int,
+) -> int:
+    deleted_total = 0
+    if manual_retention_count < 0:
+        manual_retention_count = 0
+
+    completed_runs = (
+        db.query(models.InspectionRun)
+        .filter(models.InspectionRun.completed_at.isnot(None))
+        .order_by(
+            models.InspectionRun.cluster_id.asc(),
+            models.InspectionRun.completed_at.desc(),
+            models.InspectionRun.id.desc(),
+        )
+        .all()
+    )
+    if not completed_runs:
+        return 0
+
+    manual_groups: dict[int, list[models.InspectionRun]] = {}
+    for run in completed_runs:
+        if _is_manual_run(run):
+            manual_groups.setdefault(run.cluster_id, []).append(run)
+    for cluster_id, runs in manual_groups.items():
+        keep = max(0, int(manual_retention_count))
+        if len(runs) <= keep:
+            continue
+        deleted_total += _delete_runs_without_audit(db, runs[keep:])
+
+    schedules = crud.list_inspection_schedules(db)
+    schedule_keep_map = {
+        schedule.id: max(1, int(getattr(schedule, "report_retention_count", 10) or 10))
+        for schedule in schedules
+    }
+
+    scheduled_groups: dict[tuple[object, int], list[models.InspectionRun]] = {}
+    for run in completed_runs:
+        if not _is_scheduled_run(run):
+            continue
+        schedule_id = getattr(run, "schedule_id", None)
+        if schedule_id and schedule_id in schedule_keep_map:
+            key: tuple[object, int] = (int(schedule_id), int(run.cluster_id))
+        else:
+            operator = (run.operator or "").strip()
+            key = (f"legacy:{operator}", int(run.cluster_id))
+        scheduled_groups.setdefault(key, []).append(run)
+
+    for key, runs in scheduled_groups.items():
+        if isinstance(key[0], int):
+            keep = schedule_keep_map.get(key[0], 10)
+        else:
+            keep = 10
+        if len(runs) <= keep:
+            continue
+        deleted_total += _delete_runs_without_audit(db, runs[keep:])
+
+    return deleted_total
+
+
+def _cleanup_expired_reports(db: Session, retention_days: int) -> int:
+    # 兼容旧调用方：参数名保留，但语义已改为“按份数保留”
+    return _cleanup_report_runs_by_count(
+        db,
+        manual_retention_count=max(0, int(retention_days)),
+    )
+
+
 def _normalise_cluster_name(name: str | None) -> str:
     if not name:
         return "cluster"
@@ -382,7 +544,7 @@ def _calculate_run_progress(run: models.InspectionRun) -> tuple[int, int, int]:
     status = (run.status or "").lower()
     if total_items > 0:
         processed_items = max(0, min(processed_items, total_items))
-        if status in {"finished", "failed"}:
+        if status in {"finished"}:
             processed_items = max(processed_items, total_items)
         elif status in {"queued"}:
             processed_items = 0
@@ -609,6 +771,7 @@ def _agent_request_dependency(
     try:
         agent = _resolve_agent_from_header(db, authorization)
         _requeue_stale_agent_runs(db)
+        _expire_stuck_runs(db)
         yield AgentRequestContext(db=db, agent=agent)
     finally:
         db.close()
@@ -646,7 +809,12 @@ def _derive_agent_image_from_backend_image(
 
 def _build_system_agent_install_script() -> str:
     backend_image = os.getenv("INSPECT_BACKEND_IMAGE") or os.getenv("BACKEND_IMAGE") or ""
-    agent_image_default = _derive_agent_image_from_backend_image(backend_image) or ""
+    explicit_agent_image = (
+        os.getenv("INSPECT_AGENT_IMAGE") or os.getenv("AGENT_IMAGE") or ""
+    ).strip()
+    agent_image_default = explicit_agent_image or (
+        _derive_agent_image_from_backend_image(backend_image) or ""
+    )
     lines = [
         "#!/bin/sh",
         "set -eu",
@@ -769,9 +937,21 @@ def _build_system_agent_install_script() -> str:
         "  VERIFY_SSL=\"false\"",
         "fi",
         "",
-        "curl $curl_flags \"${SERVER}/agent/bootstrap\" \\",
+        "# Prefer frontend proxy path (/api). If unavailable, fallback to direct backend root.",
+        "API_SERVER=\"${SERVER%/}/api\"",
+        "if ! curl $curl_flags \"${API_SERVER}/agent/bootstrap\" \\",
         "  -H \"Content-Type: application/json\" \\",
-        "  -d \"$payload\"",
+        "  -d \"$payload\"; then",
+        "  if [ \"${API_SERVER}\" != \"${SERVER}\" ]; then",
+        "    echo \"Bootstrap via /api failed, retrying direct server path...\" >&2",
+        "    API_SERVER=\"${SERVER%/}\"",
+        "    curl $curl_flags \"${API_SERVER}/agent/bootstrap\" \\",
+        "      -H \"Content-Type: application/json\" \\",
+        "      -d \"$payload\"",
+        "  else",
+        "    exit 1",
+        "  fi",
+        "fi",
         "echo \"\"",
         "echo \"Agent bootstrap finished.\"",
         "",
@@ -822,7 +1002,7 @@ def _build_system_agent_install_script() -> str:
         "data:",
         "  config.yaml: |",
         "    server:",
-        "      base_url: ${SERVER}",
+        "      base_url: ${API_SERVER}",
         "      token_file: /var/lib/inspect-agent/agent.token",
         "    agent:",
         "      poll_interval: 10",
@@ -927,7 +1107,7 @@ def _build_system_agent_install_script() -> str:
         "data:",
         "  config.yaml: |",
         "    server:",
-        "      base_url: ${SERVER}",
+        "      base_url: ${API_SERVER}",
         "      token_file: /var/lib/inspect-agent/agent.token",
         "    agent:",
         "      poll_interval: 10",
@@ -1209,6 +1389,40 @@ def _ensure_unique_schedule_name(
         raise HTTPException(status_code=400, detail="定时巡检名称已存在，请更换名称。")
 
 
+def _ensure_unique_schedule_cluster_cron(
+    db: Session,
+    *,
+    cluster_ids: list[int],
+    cron: str,
+    schedule_id: Optional[int] = None,
+) -> None:
+    normalized_cron = (cron or "").strip()
+    if not normalized_cron or not cluster_ids:
+        return
+    cluster_id_set = {int(value) for value in cluster_ids if int(value) > 0}
+    if not cluster_id_set:
+        return
+    existing_schedules = crud.list_inspection_schedules(db)
+    for schedule in existing_schedules:
+        if schedule_id is not None and schedule.id == schedule_id:
+            continue
+        if (schedule.cron or "").strip() != normalized_cron:
+            continue
+        existed_cluster_ids = {
+            int(value) for value in (schedule.cluster_ids or []) if int(value) > 0
+        }
+        duplicated_cluster_ids = cluster_id_set & existed_cluster_ids
+        if not duplicated_cluster_ids:
+            continue
+        duplicated_cluster_id = next(iter(duplicated_cluster_ids))
+        cluster = crud.get_cluster(db, duplicated_cluster_id)
+        cluster_name = getattr(cluster, "name", None) or f"集群{duplicated_cluster_id}"
+        raise HTTPException(
+            status_code=400,
+            detail=f"集群“{cluster_name}”已存在相同运行时间（{normalized_cron}）的定时任务。",
+        )
+
+
 def _resolve_schedule_last_run_at(
     db: Session,
     schedule: models.InspectionSchedule,
@@ -1288,6 +1502,24 @@ def _validate_schedule_items(db: Session, item_ids: list[int]) -> None:
         raise HTTPException(
             status_code=400,
             detail=f"包含不存在或已归档的巡检项：{missing_text}",
+        )
+
+
+def _validate_schedule_templates(db: Session, template_ids: list[int]) -> None:
+    if not template_ids:
+        return
+    templates = (
+        db.query(models.InspectionItemTemplate)
+        .filter(models.InspectionItemTemplate.id.in_(template_ids))
+        .all()
+    )
+    found_ids = {template.id for template in templates}
+    missing = [template_id for template_id in template_ids if template_id not in found_ids]
+    if missing:
+        missing_text = "、".join(str(value) for value in missing)
+        raise HTTPException(
+            status_code=400,
+            detail=f"包含不存在的巡检模板：{missing_text}",
         )
 
 def _inspection_item_name_conflict(
@@ -1492,7 +1724,8 @@ def login(
     db.add(user)
     db.add(session)
     db.commit()
-    max_age = SESSION_TTL_HOURS * 3600
+    # 与会话空闲超时保持一致
+    max_age = SESSION_IDLE_TIMEOUT_SECONDS
     cookie_samesite = (
         COOKIE_SAMESITE
         if COOKIE_SAMESITE in {"lax", "strict", "none"}
@@ -1947,6 +2180,53 @@ def upload_license_text(
         username=current_user.username,
     )
     return schemas.LicenseStatusOut(**status)
+
+
+@app.get("/settings/general", response_model=schemas.GeneralSettingsOut)
+def get_general_settings(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "system.read", "通用设置查看")
+    settings = crud.get_system_settings(db)
+    base_url = (settings.base_url or "").strip()
+    if not base_url:
+        base_url = str(request.base_url).rstrip("/")
+    retention_days = settings.report_retention_days or crud.DEFAULT_REPORT_RETENTION_DAYS
+    return schemas.GeneralSettingsOut(
+        base_url=base_url,
+        report_retention_days=retention_days,
+    )
+
+
+@app.put("/settings/general", response_model=schemas.GeneralSettingsOut)
+def update_general_settings(
+    payload: schemas.GeneralSettingsIn,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "system.update", "通用设置编辑")
+    base_url = payload.base_url.strip().rstrip("/")
+    if not base_url:
+        raise HTTPException(status_code=400, detail="BaseURL 不能为空")
+    if not re.match(r"^https?://", base_url):
+        raise HTTPException(
+            status_code=400,
+            detail="BaseURL 需以 http:// 或 https:// 开头",
+        )
+    retention_days = int(payload.report_retention_days)
+    if retention_days <= 0:
+        raise HTTPException(status_code=400, detail="巡检报告保存份数需为正整数")
+    settings = crud.update_system_settings(
+        db,
+        base_url=base_url,
+        report_retention_days=retention_days,
+    )
+    return schemas.GeneralSettingsOut(
+        base_url=settings.base_url or base_url,
+        report_retention_days=settings.report_retention_days,
+    )
 
 
 def require_license_dependency(*features: str) -> Callable[[], None]:
@@ -3473,6 +3753,92 @@ def delete_inspection_item(
 
 
 @app.get(
+    "/inspection-item-templates",
+    response_model=List[schemas.InspectionItemTemplateOut],
+)
+def list_inspection_item_templates(
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "inspectionItem.read", "巡检项模板查看")
+    templates = crud.list_inspection_item_templates(db)
+    return [
+        schemas.InspectionItemTemplateOut.model_validate(template)
+        for template in templates
+    ]
+
+
+@app.post(
+    "/inspection-item-templates",
+    response_model=schemas.InspectionItemTemplateOut,
+    status_code=201,
+)
+def create_inspection_item_template(
+    payload: schemas.InspectionItemTemplateCreate,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
+):
+    _require_permission(db, current_user, "inspectionItem.create", "巡检项模板创建")
+    trimmed_name = (payload.name or "").strip()
+    if not trimmed_name:
+        raise HTTPException(status_code=400, detail="模板名称不能为空。")
+    item_ids = _normalize_id_list(payload.item_ids)
+    _validate_schedule_items(db, item_ids)
+    sanitized = schemas.InspectionItemTemplateCreate(
+        name=trimmed_name,
+        item_ids=item_ids,
+    )
+    template = crud.create_inspection_item_template(db, sanitized)
+    return schemas.InspectionItemTemplateOut.model_validate(template)
+
+
+@app.put(
+    "/inspection-item-templates/{template_id}",
+    response_model=schemas.InspectionItemTemplateOut,
+)
+def update_inspection_item_template(
+    template_id: int,
+    payload: schemas.InspectionItemTemplateUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
+):
+    _require_permission(db, current_user, "inspectionItem.update", "巡检项模板更新")
+    template = crud.get_inspection_item_template(db, template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Inspection template not found.")
+    update_payload = payload.model_dump(exclude_unset=True)
+    if "name" in update_payload:
+        trimmed_name = (update_payload.get("name") or "").strip()
+        if not trimmed_name:
+            raise HTTPException(status_code=400, detail="模板名称不能为空。")
+        update_payload["name"] = trimmed_name
+    if "item_ids" in update_payload:
+        item_ids = _normalize_id_list(update_payload.get("item_ids") or [])
+        _validate_schedule_items(db, item_ids)
+        update_payload["item_ids"] = item_ids
+    sanitized = schemas.InspectionItemTemplateUpdate.model_validate(update_payload)
+    updated = crud.update_inspection_item_template(db, template, sanitized)
+    return schemas.InspectionItemTemplateOut.model_validate(updated)
+
+
+@app.delete("/inspection-item-templates/{template_id}", status_code=204)
+def delete_inspection_item_template(
+    template_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.AuthUser = Depends(get_current_user),
+    _license_guard: None = Depends(require_license_dependency("inspections")),
+):
+    _require_permission(db, current_user, "inspectionItem.delete", "巡检项模板删除")
+    template = crud.get_inspection_item_template(db, template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Inspection template not found.")
+    crud.delete_inspection_item_template(db, template)
+    return {}
+
+
+@app.get(
     "/inspection-schedules",
     response_model=List[schemas.InspectionScheduleOut],
 )
@@ -3520,14 +3886,23 @@ def create_inspection_schedule(
     normalized_name = _normalize_schedule_name(payload.name)
     _ensure_unique_schedule_name(db, normalized_name)
     cluster_ids = _normalize_id_list(payload.cluster_ids)
+    template_ids = _normalize_id_list(getattr(payload, "template_ids", []) or [])
     item_ids = _normalize_id_list(payload.item_ids)
     _validate_schedule_clusters(db, cluster_ids)
+    _validate_schedule_templates(db, template_ids)
     _validate_schedule_items(db, item_ids)
+    _ensure_unique_schedule_cluster_cron(
+        db,
+        cluster_ids=cluster_ids,
+        cron=cron,
+    )
     sanitized = schemas.InspectionScheduleCreate(
         name=normalized_name,
         cron=cron,
         cluster_ids=cluster_ids,
+        template_ids=template_ids,
         item_ids=item_ids,
+        report_retention_count=int(payload.report_retention_count),
         is_enabled=payload.is_enabled,
     )
     schedule = crud.create_inspection_schedule(
@@ -3576,10 +3951,26 @@ def update_inspection_schedule(
         cluster_ids = _normalize_id_list(update_payload["cluster_ids"] or [])
         _validate_schedule_clusters(db, cluster_ids)
         update_payload["cluster_ids"] = cluster_ids
+    if "template_ids" in update_payload:
+        template_ids = _normalize_id_list(update_payload["template_ids"] or [])
+        _validate_schedule_templates(db, template_ids)
+        update_payload["template_ids"] = template_ids
     if "item_ids" in update_payload:
         item_ids = _normalize_id_list(update_payload["item_ids"] or [])
         _validate_schedule_items(db, item_ids)
         update_payload["item_ids"] = item_ids
+    if "report_retention_count" in update_payload:
+        update_payload["report_retention_count"] = int(
+            update_payload["report_retention_count"]
+        )
+    target_cluster_ids = update_payload.get("cluster_ids", schedule.cluster_ids or [])
+    target_cron = update_payload.get("cron", schedule.cron)
+    _ensure_unique_schedule_cluster_cron(
+        db,
+        cluster_ids=list(target_cluster_ids),
+        cron=str(target_cron or ""),
+        schedule_id=schedule.id,
+    )
     sanitized = schemas.InspectionScheduleUpdate.model_validate(update_payload)
     updated = crud.update_inspection_schedule(db, schedule, sanitized)
     return schemas.InspectionScheduleOut.model_validate(updated)
@@ -3951,6 +4342,7 @@ def list_inspection_runs(
         "巡检记录查看",
     )
     _requeue_stale_agent_runs(db)
+    _expire_stuck_runs(db)
     runs = [
         run
         for run in crud.list_inspection_runs(db)
@@ -3972,6 +4364,7 @@ def get_inspection_run(
         "巡检结果查看",
     )
     _requeue_stale_agent_runs(db)
+    _expire_stuck_runs(db)
     run = crud.get_inspection_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Inspection run not found.")

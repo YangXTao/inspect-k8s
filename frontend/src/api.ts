@@ -8,10 +8,15 @@ import {
   InspectionItem,
   InspectionItemsExportPayload,
   InspectionItemsImportResult,
+  InspectionItemTemplate,
+  InspectionItemTemplateInput,
+  InspectionItemTemplateUpdate,
   InspectionRun,
   InspectionRunListItem,
   InspectionSchedule,
   LicenseStatus,
+  GeneralSettings,
+  GeneralSettingsInput,
   AuthRole,
   AuthLoginChallenge,
   AuthUser,
@@ -543,6 +548,35 @@ export function deleteInspectionItem(itemId: number): Promise<void> {
   });
 }
 
+export function getInspectionItemTemplates(): Promise<InspectionItemTemplate[]> {
+  return request<InspectionItemTemplate[]>("/inspection-item-templates");
+}
+
+export function createInspectionItemTemplate(
+  payload: InspectionItemTemplateInput
+): Promise<InspectionItemTemplate> {
+  return request<InspectionItemTemplate>("/inspection-item-templates", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateInspectionItemTemplate(
+  templateId: number,
+  payload: InspectionItemTemplateUpdate
+): Promise<InspectionItemTemplate> {
+  return request<InspectionItemTemplate>(`/inspection-item-templates/${templateId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteInspectionItemTemplate(templateId: number): Promise<void> {
+  return request<void>(`/inspection-item-templates/${templateId}`, {
+    method: "DELETE",
+  });
+}
+
 export function getInspectionSchedules(): Promise<InspectionSchedule[]> {
   return request<InspectionSchedule[]>("/inspection-schedules");
 }
@@ -551,7 +585,9 @@ export function createInspectionSchedule(payload: {
   name?: string;
   cron: string;
   cluster_ids: number[];
+  template_ids?: number[];
   item_ids: number[];
+  report_retention_count?: number;
   is_enabled?: boolean;
 }): Promise<InspectionSchedule> {
   return request<InspectionSchedule>("/inspection-schedules", {
@@ -566,7 +602,9 @@ export function updateInspectionSchedule(
     name?: string | null;
     cron?: string;
     cluster_ids?: number[];
+    template_ids?: number[];
     item_ids?: number[];
+    report_retention_count?: number;
     is_enabled?: boolean;
   }
 ): Promise<InspectionSchedule> {
@@ -680,5 +718,18 @@ export function uploadLicenseText(content: string): Promise<LicenseStatus> {
   return request<LicenseStatus>("/license/import-text", {
     method: "POST",
     body: JSON.stringify({ content }),
+  });
+}
+
+export function getGeneralSettings(): Promise<GeneralSettings> {
+  return request<GeneralSettings>("/settings/general");
+}
+
+export function updateGeneralSettings(
+  payload: GeneralSettingsInput
+): Promise<GeneralSettings> {
+  return request<GeneralSettings>("/settings/general", {
+    method: "PUT",
+    body: JSON.stringify(payload),
   });
 }

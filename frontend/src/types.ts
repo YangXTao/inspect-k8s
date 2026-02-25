@@ -196,11 +196,31 @@ export type InspectionSchedule = {
   cron: string;
   cluster_ids: number[];
   cluster_name_map?: Record<string, string>;
+  template_ids?: number[];
   item_ids: number[];
+  report_retention_count: number;
   is_enabled: boolean;
   last_run_at?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type InspectionItemTemplate = {
+  id: number;
+  name: string;
+  item_ids: number[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type InspectionItemTemplateInput = {
+  name: string;
+  item_ids: number[];
+};
+
+export type InspectionItemTemplateUpdate = {
+  name?: string;
+  item_ids?: number[];
 };
 
 export type InspectionItemsExportPayload = {
@@ -233,6 +253,16 @@ export type LicenseStatus = {
   not_before?: string | null;
   expires_at?: string | null;
   features: string[];
+};
+
+export type GeneralSettings = {
+  base_url?: string | null;
+  report_retention_days: number;
+};
+
+export type GeneralSettingsInput = {
+  base_url: string;
+  report_retention_days: number;
 };
 
 export type InspectionAgent = {

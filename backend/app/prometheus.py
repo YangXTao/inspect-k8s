@@ -8,10 +8,17 @@ import requests
 class PrometheusClient:
     """Minimal Prometheus HTTP API client for instant queries."""
 
-    def __init__(self, base_url: str, timeout: float = 5.0, verify_ssl: bool = True):
+    def __init__(
+        self,
+        base_url: str,
+        timeout: float = 5.0,
+        verify_ssl: bool = True,
+        bearer_token: str | None = None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.verify_ssl = verify_ssl
+        self.bearer_token = bearer_token
 
     def query(self, expression: str) -> Tuple[bool, List[dict], str]:
         """Execute an instant query. Returns (success, results, message)."""
@@ -20,11 +27,15 @@ class PrometheusClient:
 
         url = f"{self.base_url}/api/v1/query"
         try:
+            headers = None
+            if self.bearer_token:
+                headers = {"Authorization": f"Bearer {self.bearer_token}"}
             response = requests.get(
                 url,
                 params={"query": expression},
                 timeout=self.timeout,
                 verify=self.verify_ssl,
+                headers=headers,
             )
         except requests.RequestException as exc:
             return False, [], f"Prometheus request error: {exc}"

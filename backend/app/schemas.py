@@ -231,6 +231,28 @@ class InspectionItemOut(InspectionItemBase):
     updated_at: datetime
 
 
+class InspectionItemTemplateBase(BaseModel):
+    name: str = Field(..., max_length=100)
+    item_ids: List[int] = Field(..., min_length=1)
+
+
+class InspectionItemTemplateCreate(InspectionItemTemplateBase):
+    pass
+
+
+class InspectionItemTemplateUpdate(BaseModel):
+    name: Optional[str] = Field(None, max_length=100)
+    item_ids: Optional[List[int]] = Field(None, min_length=1)
+
+
+class InspectionItemTemplateOut(InspectionItemTemplateBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+
 class InspectionResultOut(BaseModel):
     id: int
     item_id: Optional[int]
@@ -383,7 +405,9 @@ class InspectionScheduleBase(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
     cron: str = Field(..., max_length=50)
     cluster_ids: List[int] = Field(..., min_length=1)
+    template_ids: List[int] = Field(default_factory=list)
     item_ids: List[int] = Field(..., min_length=1)
+    report_retention_count: int = Field(10, ge=1, le=1000)
     is_enabled: bool = True
 
 
@@ -395,7 +419,9 @@ class InspectionScheduleUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
     cron: Optional[str] = Field(None, max_length=50)
     cluster_ids: Optional[List[int]] = Field(None, min_length=1)
+    template_ids: Optional[List[int]] = None
     item_ids: Optional[List[int]] = Field(None, min_length=1)
+    report_retention_count: Optional[int] = Field(None, ge=1, le=1000)
     is_enabled: Optional[bool] = None
 
 
@@ -407,7 +433,9 @@ class InspectionScheduleOut(BaseModel):
     cron: str
     cluster_ids: List[int]
     cluster_name_map: Dict[int, str] = Field(default_factory=dict)
+    template_ids: List[int] = Field(default_factory=list)
     item_ids: List[int]
+    report_retention_count: int
     is_enabled: bool
     last_run_at: Optional[datetime]
     created_at: datetime
@@ -593,6 +621,16 @@ class InspectionItemsImportResult(BaseModel):
 class InspectionItemsExportOut(BaseModel):
     exported_at: datetime
     items: List[InspectionItemOut]
+
+
+class GeneralSettingsOut(BaseModel):
+    base_url: Optional[str] = None
+    report_retention_days: int = Field(..., ge=1)
+
+
+class GeneralSettingsIn(BaseModel):
+    base_url: str = Field(..., min_length=1, max_length=255)
+    report_retention_days: int = Field(..., ge=1, le=10000)
 
 
 class LicenseStatusOut(BaseModel):

@@ -10,19 +10,11 @@
   useMemo,
   useRef,
   useState,
+  lazy,
+  Suspense,
 } from "react";
-import {
-  Link,
-  Navigate,
-  NavLink,
-  Route,
-  Routes,
-  useLocation,
-  useNavigate,
-  useParams,
-} from "react-router-dom";
+import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Helmet } from "react-helmet";
-import type { Location as RouterLocation } from "history";
 import {
   cancelInspectionRun,
   createAgent as apiCreateAgent,
@@ -30,6 +22,7 @@ import {
   createInspectionRun,
   deleteCluster as apiDeleteCluster,
   deleteInspectionItem as apiDeleteInspectionItem,
+  deleteInspectionItemTemplate as apiDeleteInspectionItemTemplate,
   deleteInspectionRun as apiDeleteInspectionRun,
   deleteInspectionRunsBulk as apiDeleteInspectionRunsBulk,
   deleteInspectionSchedule as apiDeleteInspectionSchedule,
@@ -39,6 +32,7 @@ import {
   getClusters,
   getClusterNodes,
   getInspectionItems,
+  getInspectionItemTemplates,
   getInspectionRun,
   getInspectionRuns,
   getInspectionSchedules,
@@ -65,7 +59,10 @@ import {
   getOverviewMetrics,
   uploadLicense,
   uploadLicenseText,
+  getGeneralSettings,
+  updateGeneralSettings,
   updateInspectionItem as apiUpdateInspectionItem,
+  updateInspectionItemTemplate as apiUpdateInspectionItemTemplate,
   createRole,
   updateRole,
   deleteRole,
@@ -73,8 +70,12 @@ import {
   createUser,
   updateUser,
   deleteUser,
+  createInspectionItemTemplate as apiCreateInspectionItemTemplate,
 } from "./api";
 import { appConfig } from "./config";
+import TopNavigation from "./components/TopNavigation";
+import ConfirmationModal from "./ConfirmationModal";
+const LazySettingsPage = lazy(() => import("./components/SettingsPage"));
 import CompanyLogoUrl from "./assets/company-logo.png?url";
 import type {
   AgentRegisterResponse,
@@ -83,6 +84,7 @@ import type {
   InspectionAgent,
   InspectionAgentStatus,
   InspectionItem,
+  InspectionItemTemplate,
   InspectionResult,
   InspectionResultStatus,
   InspectionRun,
@@ -98,15 +100,27 @@ import type {
 } from "./types";
 
 type NoticeType = "success" | "warning" | "error" | null;
+import type {
+  ConfirmDialogState,
+  ConfirmDialogOption,
+  SettingsModalTab,
+  SettingsModalTabRenderContext,
+} from "./types-ui";
+
 type ConfirmVariant = "primary" | "danger";
-type NoticeScope = "overview" | "clusterDetail" | "history" | "runDetail";
+type NoticeScope =
+  | "overview"
+  | "clusterDetail"
+  | "history"
+  | "runDetail"
+  | "settings";
 type GlobalNotice = {
   key: string;
   type: Exclude<NoticeType, null>;
   message: string;
 };
 
-const ERROR_AUTO_DISMISS_MS = 15000;
+const ERROR_AUTO_DISMISS_MS = 5000;
 
 const useAutoClearError = (
   error: string | null,
@@ -137,46 +151,17 @@ type LicenseCapabilities = {
   status: LicenseStatus | null;
 };
 
-interface ConfirmDialogOption {
-  id: string;
-  label: string;
-  description?: string;
-  defaultChecked?: boolean;
-}
-
-interface ConfirmDialogState {
-  title: string;
-  message: string;
-  confirmLabel?: string;
-  cancelLabel?: string;
-  variant?: ConfirmVariant;
-  onConfirm: (options?: Record<string, boolean>) => Promise<void> | void;
-  scope?: "global" | "settings";
-  options?: ConfirmDialogOption[];
-}
-
-interface SettingsModalTabRenderContext {
-  close: () => void;
-  selectTab: (tabId: string) => void;
-}
-
-interface SettingsModalTab {
-  id: string;
-  label: string;
-  render: (context: SettingsModalTabRenderContext) => ReactNode;
-}
-
 const CLUSTER_ID_STORAGE_KEY = "clusterDisplayIdMap.v1";
 const CLUSTER_PAGE_SIZE_OPTIONS = [10, 20, 50];
 const DEFAULT_CLUSTER_PAGE_SIZE = CLUSTER_PAGE_SIZE_OPTIONS[0];
 const RUN_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const AUDIT_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
-const CLUSTER_ITEM_PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
 const RESULT_PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 const SCHEDULE_REFRESH_INTERVAL = 15000;
 const DEFAULT_PROMETHEUS_VERSION = "3.2";
 const DEFAULT_PROMETHEUS_VERSION_OPTIONS = [
   "1.8",
+  "2.50",
   "2.55",
   ...Array.from({ length: 10 }, (_, index) => `3.${index}`),
 ];
@@ -434,17 +419,205 @@ const AUDIT_ENTITY_OPTIONS = [
   { value: "inspection_schedule", label: "定时巡检" },
   { value: "inspection_run", label: "巡检记录" },
   { value: "inspection_item", label: "巡检项" },
+  { value: "inspection_item_template", label: "巡检项模板" },
   { value: "prometheus_version", label: "Prometheus版本" },
 ];
 const SETTINGS_BASE_PATH = "/setting";
 const SETTINGS_TAB_IDS = [
-  "overview",
+  "general",
   "inspection",
+  "inspection-templates",
   "prometheus-version",
   "users",
-  "license",
 ] as const;
+const DEFAULT_REPORT_RETENTION_DAYS = 10;
+const DEFAULT_SCHEDULE_REPORT_RETENTION_COUNT = 10;
 const CONNECTION_TEST_OPERATOR = "__system_connection_test__";
+const SCHEDULE_OPERATOR_SUFFIX = "（定时巡检）";
+
+const resolveRunTypeLabel = (operator?: string | null) => {
+  const trimmed = (operator ?? "").trim();
+  if (!trimmed) {
+    return "手动";
+  }
+  if (trimmed === CONNECTION_TEST_OPERATOR) {
+    return "系统校验";
+  }
+  if (trimmed.endsWith(SCHEDULE_OPERATOR_SUFFIX)) {
+    return "定时";
+  }
+  return "手动";
+};
+
+const resolveTemplateLabel = (operator?: string | null) => {
+  const trimmed = (operator ?? "").trim();
+  if (!trimmed) {
+    return "-";
+  }
+  if (trimmed === CONNECTION_TEST_OPERATOR) {
+    return "系统校验";
+  }
+  if (trimmed.endsWith(SCHEDULE_OPERATOR_SUFFIX)) {
+    return trimmed.slice(0, -SCHEDULE_OPERATOR_SUFFIX.length);
+  }
+  return trimmed;
+};
+
+const resolveDefaultBaseUrl = () => {
+  if (typeof window === "undefined") {
+    return appConfig.apiBaseUrl;
+  }
+  const apiBase = appConfig.apiBaseUrl?.trim() ?? "";
+  let resolved =
+    apiBase.length === 0
+      ? window.location.origin
+      : apiBase.startsWith("/")
+        ? `${window.location.origin}${apiBase}`
+        : apiBase;
+  resolved = resolved.replace(/\/api\/?$/i, "");
+  return resolved || window.location.origin;
+};
+
+const CRON_WEEK_LABELS: Record<string, string> = {
+  "0": "周日",
+  "1": "周一",
+  "2": "周二",
+  "3": "周三",
+  "4": "周四",
+  "5": "周五",
+  "6": "周六",
+  "7": "周日",
+};
+
+const formatTwoDigits = (value: number, max: number) =>
+  String(Math.max(0, Math.min(value, max))).padStart(2, "0");
+
+const parseCronStepValue = (token: string) => {
+  const normalized = token.trim();
+  const direct = normalized.match(/^\*\/(\d+)$/);
+  if (direct) {
+    const step = Number(direct[1]);
+    return Number.isFinite(step) && step > 0 ? step : null;
+  }
+  return null;
+};
+
+const hasObviousInvalidCronToken = (token: string) => /^\d+\/\*$/.test(token.trim());
+
+const describeScheduleCron = (
+  minute: string,
+  hour: string,
+  day: string,
+  month: string,
+  week: string
+) => {
+  const m = minute.trim();
+  const h = hour.trim();
+  const d = day.trim();
+  const mo = month.trim();
+  const w = week.trim();
+  if (![m, h, d, mo, w].every(Boolean)) {
+    return "请完整填写分/时/日/月/周";
+  }
+  if ([m, h, d, mo, w].some(hasObviousInvalidCronToken)) {
+    return "运行时间：Cron 表达式无效";
+  }
+  const allDay = d === "*" && mo === "*" && w === "*";
+  const minuteNum = /^\d+$/.test(m) ? Number(m) : null;
+  const hourNum = /^\d+$/.test(h) ? Number(h) : null;
+  const dayNum = /^\d+$/.test(d) ? Number(d) : null;
+  const monthNum = /^\d+$/.test(mo) ? Number(mo) : null;
+  const minuteStep = parseCronStepValue(m);
+  const hourStep = parseCronStepValue(h);
+  const dayStep = parseCronStepValue(d);
+  const monthStep = parseCronStepValue(mo);
+  const weekLabel = CRON_WEEK_LABELS[w];
+  if (allDay && minuteNum !== null && hourNum !== null) {
+    const hh = formatTwoDigits(hourNum, 23);
+    const mm = formatTwoDigits(minuteNum, 59);
+    return `运行时间：每天 ${hh}:${mm}`;
+  }
+  if (allDay && minuteNum !== null && h === "*") {
+    const mm = formatTwoDigits(minuteNum, 59);
+    return `运行时间：每小时的第 ${mm} 分钟`;
+  }
+  if (allDay && minuteStep !== null && h === "*") {
+    return `运行时间：每 ${minuteStep} 分钟执行一次`;
+  }
+  if (allDay && minuteNum !== null && hourStep !== null) {
+    const mm = formatTwoDigits(minuteNum, 59);
+    return `运行时间：每 ${hourStep} 小时的 ${mm} 分钟`;
+  }
+  if (
+    minuteNum !== null &&
+    hourNum !== null &&
+    dayNum !== null &&
+    mo === "*" &&
+    w === "*"
+  ) {
+    return `运行时间：每月 ${Math.max(1, Math.min(dayNum, 31))} 日 ${formatTwoDigits(
+      hourNum,
+      23
+    )}:${formatTwoDigits(minuteNum, 59)}`;
+  }
+  if (
+    minuteNum !== null &&
+    hourNum !== null &&
+    d === "*" &&
+    mo === "*" &&
+    weekLabel
+  ) {
+    return `运行时间：${weekLabel} ${formatTwoDigits(hourNum, 23)}:${formatTwoDigits(
+      minuteNum,
+      59
+    )}`;
+  }
+  if (
+    minuteNum !== null &&
+    hourNum !== null &&
+    dayNum !== null &&
+    monthNum !== null &&
+    w === "*"
+  ) {
+    return `运行时间：每年 ${Math.max(1, Math.min(monthNum, 12))} 月 ${Math.max(
+      1,
+      Math.min(dayNum, 31)
+    )} 日 ${formatTwoDigits(hourNum, 23)}:${formatTwoDigits(minuteNum, 59)}`;
+  }
+  if (
+    minuteNum !== null &&
+    hourNum !== null &&
+    dayStep !== null &&
+    mo === "*" &&
+    w === "*"
+  ) {
+    return `运行时间：每 ${dayStep} 天 ${formatTwoDigits(hourNum, 23)}:${formatTwoDigits(
+      minuteNum,
+      59
+    )}`;
+  }
+  if (
+    minuteNum !== null &&
+    hourNum !== null &&
+    d === "*" &&
+    monthStep !== null &&
+    w === "*"
+  ) {
+    return `运行时间：每 ${monthStep} 个月 ${formatTwoDigits(hourNum, 23)}:${formatTwoDigits(
+      minuteNum,
+      59
+    )}`;
+  }
+  return `运行时间：Cron ${m} ${h} ${d} ${mo} ${w}`;
+};
+
+const describeCronExpression = (expression: string) => {
+  const parts = (expression || "").trim().split(/\s+/);
+  if (parts.length !== 5) {
+    return `运行时间：${expression || "-"}`;
+  }
+  return describeScheduleCron(parts[0], parts[1], parts[2], parts[3], parts[4]);
+};
 
 const BEIJING_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Shanghai",
@@ -744,6 +917,9 @@ const getClusterStatusMeta = (status: string) =>
 const resolveNoticeScope = (pathname: string): NoticeScope => {
   if (pathname.startsWith("/history")) {
     return "history";
+  }
+  if (pathname.startsWith("/setting")) {
+    return "settings";
   }
   if (pathname.startsWith("/clusters/")) {
     return pathname.includes("/runs/") ? "runDetail" : "clusterDetail";
@@ -1331,6 +1507,19 @@ const DashboardOverviewView = ({
     ],
     []
   );
+
+  const pickColorDeterministic = useCallback(
+    (clusterId: number): string => {
+      // 稳定哈希，避免因序列顺序变化导致颜色抖动
+      let hash = clusterId;
+      hash = (hash ^ (hash << 13)) >>> 0;
+      hash = (hash ^ (hash >> 17)) >>> 0;
+      hash = (hash ^ (hash << 5)) >>> 0;
+      const index = hash % chartColors.length;
+      return chartColors[index];
+    },
+    [chartColors]
+  );
   const [clusterColorMap, setClusterColorMap] = useState<
     Record<number, string>
   >({});
@@ -1364,17 +1553,10 @@ const DashboardOverviewView = ({
           delete next[numericKey];
         }
       });
-      const used = new Set(Object.values(next));
       const assignColor = (clusterId: number) => {
-        if (next[clusterId]) {
-          return;
+        if (!next[clusterId]) {
+          next[clusterId] = pickColorDeterministic(clusterId);
         }
-        let color = chartColors.find((item) => !used.has(item));
-        if (!color) {
-          color = chartColors[clusterId % chartColors.length];
-        }
-        used.add(color);
-        next[clusterId] = color;
       };
       overviewMetrics.series.forEach((series) => {
         assignColor(series.cluster_id);
@@ -1835,9 +2017,6 @@ const DashboardOverviewView = ({
       ) => {
         const candidates = recentRunsByCluster.get(cluster.id) ?? [];
         for (const run of candidates) {
-          if (run.status !== "finished") {
-            continue;
-          }
           const detail = runDetails[run.id];
           if (!detail) {
             continue;
@@ -2137,158 +2316,24 @@ const logWithTimestamp = (
   logger(`[${timestamp}] ${message}`, ...details);
 };
 
-const TopNavigation = ({
-  onOpenSettings,
-  showClusters,
-  showAudit,
-  showSchedule,
-  showHistory,
-}: {
-  onOpenSettings: () => void;
-  showClusters: boolean;
-  showAudit: boolean;
-  showSchedule: boolean;
-  showHistory: boolean;
-}) => {
-  const handleSettingsClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (
-      event.metaKey ||
-      event.ctrlKey ||
-      event.shiftKey ||
-      event.altKey ||
-      event.button !== 0
-    ) {
-      return;
-    }
-    event.preventDefault();
-    onOpenSettings();
-  };
-
-  return (
-    <header className="top-navigation">
-      <Link
-        to="/"
-        className="top-navigation-brand"
-        aria-label="返回首页"
-      >
-        <span className="top-navigation-home-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" focusable="false">
-            <path
-              d="M20.25 9.52 12.6 3.46a.75.75 0 0 0-.93 0L3.75 9.52a.75.75 0 0 0-.27.57V20a.75.75 0 0 0 .75.75h4.5a.75.75 0 0 0 .75-.75v-4.5h4.5V20a.75.75 0 0 0 .75.75h4.5A.75.75 0 0 0 21 20V10.09a.75.75 0 0 0-.27-.57Z"
-              fill="currentColor"
-            />
-          </svg>
-        </span>
-        <span className="top-navigation-title">首页概览</span>
-      </Link>
-      <nav className="top-navigation-links">
-        {showClusters && (
-          <NavLink
-            to="/clusters"
-            className={({ isActive }) =>
-              `top-navigation-link${isActive ? " active" : ""}`
-            }
-          >
-            <span className="top-navigation-link-inner">
-              <span className="top-navigation-link-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" focusable="false">
-                  <path
-                    d="M5.5 4.75h13a1.75 1.75 0 0 1 1.75 1.75v2.25A1.75 1.75 0 0 1 18.5 10.5h-13A1.75 1.75 0 0 1 3.75 8.75V6.5A1.75 1.75 0 0 1 5.5 4.75Zm0 9h13A1.75 1.75 0 0 1 20.25 15.5v2.25A1.75 1.75 0 0 1 18.5 19.5h-13A1.75 1.75 0 0 1 3.75 17.75V15.5A1.75 1.75 0 0 1 5.5 13.75Zm0-7.5a.25.25 0 0 0-.25.25v2.25c0 .14.11.25.25.25h13a.25.25 0 0 0 .25-.25V6.5a.25.25 0 0 0-.25-.25h-13Zm0 9a.25.25 0 0 0-.25.25v2.25c0 .14.11.25.25.25h13a.25.25 0 0 0 .25-.25V15.5a.25.25 0 0 0-.25-.25h-13Z"
-                    fill="currentColor"
-                  />
-                </svg>
-              </span>
-              <span>集群列表</span>
-            </span>
-          </NavLink>
-        )}
-        {showSchedule && (
-          <NavLink
-            to="/schedule"
-            className={({ isActive }) =>
-              `top-navigation-link${isActive ? " active" : ""}`
-            }
-          >
-            <span className="top-navigation-link-inner">
-              <span className="top-navigation-link-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" focusable="false">
-                  <path
-                    d="M7.5 3a.75.75 0 0 1 .75.75V6h7.5V3.75a.75.75 0 0 1 1.5 0V6h1.25A2.5 2.5 0 0 1 21 8.5v10A2.5 2.5 0 0 1 18.5 21h-13A2.5 2.5 0 0 1 3 18.5v-10A2.5 2.5 0 0 1 5.5 6h1.25V3.75A.75.75 0 0 1 7.5 3Zm11 9.5h-13v6a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-6Zm0-1.5v-2.5a1 1 0 0 0-1-1h-11a1 1 0 0 0-1 1V11h13Z"
-                    fill="currentColor"
-                  />
-                </svg>
-              </span>
-              <span>定时巡检</span>
-            </span>
-          </NavLink>
-        )}
-        {showHistory && (
-          <NavLink
-            to="/history"
-            className={({ isActive }) =>
-              `top-navigation-link${isActive ? " active" : ""}`
-            }
-          >
-            <span className="top-navigation-link-inner">
-              <span className="top-navigation-link-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" focusable="false">
-                  <path
-                    d="M12 6a.75.75 0 0 1 .75.75v4.19l3 1.8a.75.75 0 0 1-.75 1.3l-3.37-2.02a.75.75 0 0 1-.38-.65V6.75A.75.75 0 0 1 12 6Z"
-                    fill="currentColor"
-                  />
-                  <path
-                    d="M12 3.25A8.75 8.75 0 1 0 20.75 12 8.76 8.76 0 0 0 12 3.25Zm0 16a7.25 7.25 0 1 1 7.25-7.25A7.26 7.26 0 0 1 12 19.25Z"
-                    fill="currentColor"
-                  />
-                </svg>
-              </span>
-              <span>历史巡检</span>
-            </span>
-          </NavLink>
-        )}
-        {showAudit && (
-          <NavLink
-            to="/audit"
-            className={({ isActive }) =>
-              `top-navigation-link${isActive ? " active" : ""}`
-            }
-          >
-            <span className="top-navigation-link-inner">
-              <span className="top-navigation-link-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" focusable="false">
-                  <path
-                    d="M7 4.75A2.75 2.75 0 0 0 4.25 7.5v9A2.75 2.75 0 0 0 7 19.25h10A2.75 2.75 0 0 0 19.75 16.5v-9A2.75 2.75 0 0 0 17 4.75H7Zm0 1.5h10c.69 0 1.25.56 1.25 1.25v9c0 .69-.56 1.25-1.25 1.25H7c-.69 0-1.25-.56-1.25-1.25v-9c0-.69.56-1.25 1.25-1.25Zm1.5 2.5a.75.75 0 0 0 0 1.5h7a.75.75 0 0 0 0-1.5h-7Zm0 4a.75.75 0 0 0 0 1.5h7a.75.75 0 0 0 0-1.5h-7Z"
-                    fill="currentColor"
-                  />
-                </svg>
-              </span>
-              <span>审计日志</span>
-            </span>
-          </NavLink>
-        )}
-        <Link
-          to={SETTINGS_BASE_PATH}
-          className="top-navigation-link"
-          onClick={handleSettingsClick}
-        >
-          <span className="top-navigation-link-inner">
-            <span className="top-navigation-link-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" focusable="false">
-                <path
-                  d="M12 7.5a4.5 4.5 0 1 0 4.5 4.5A4.51 4.51 0 0 0 12 7.5Zm8.94 3.15-1.81-.26a7 7 0 0 0-.66-1.6l1.06-1.49a1 1 0 0 0-.12-1.29l-1.41-1.41a1 1 0 0 0-1.29-.12l-1.49 1.06a7 7 0 0 0-1.6-.66l-.26-1.81A1 1 0 0 0 12.06 3h-2.12a1 1 0 0 0-1 .87l-.26 1.81a7 7 0 0 0-1.6.66L5.59 5.28a1 1 0 0 0-1.29.12L2.89 6.81a1 1 0 0 0-.12 1.29l1.06 1.49a7 7 0 0 0-.66 1.6l-1.81.26a1 1 0 0 0-.87 1v2.12a1 1 0 0 0 .87 1l1.81.26a7 7 0 0 0 .66 1.6l-1.06 1.49a1 1 0 0 0 .12 1.29l1.41 1.41a1 1 0 0 0 1.29.12l1.49-1.06a7 7 0 0 0 1.6.66l.26 1.81a1 1 0 0 0 1 .87h2.12a1 1 0 0 0 1-.87l.26-1.81a7 7 0 0 0 1.6-.66l1.49 1.06a1 1 0 0 0 1.29-.12l1.41-1.41a1 1 0 0 0 .12-1.29l-1.06-1.49a7 7 0 0 0 .66-1.6l1.81-.26a1 1 0 0 0 .87-1v-2.12a1 1 0 0 0-.87-1Zm-8.94 4.35a3 3 0 1 1 3-3 3 3 0 0 1-3 3Z"
-                  fill="currentColor"
-                />
-              </svg>
-            </span>
-            <span>设置</span>
-          </span>
-        </Link>
-      </nav>
-    </header>
-  );
-};
 
 const normalizeBackendUrl = (value: string) => value.trim().replace(/\/+$/, "");
+
+const resolveAgentInstallUrl = (backendUrl: string) => {
+  const baseUrl = normalizeBackendUrl(backendUrl);
+  const apiBase = appConfig.apiBaseUrl?.trim() || "/api";
+  let apiPath = apiBase;
+  if (/^https?:\/\//i.test(apiBase)) {
+    try {
+      apiPath = new URL(apiBase).pathname || "/";
+    } catch {
+      apiPath = "/api";
+    }
+  }
+  const normalizedPath = apiPath.startsWith("/") ? apiPath : `/${apiPath}`;
+  const trimmedPath = normalizedPath.replace(/\/+$/, "");
+  return `${baseUrl}${trimmedPath}/system-agent-install.sh`;
+};
 
 const buildAgentRegisterCommand = ({
   backendUrl,
@@ -2302,8 +2347,9 @@ const buildAgentRegisterCommand = ({
   prometheusUrl?: string | null;
 }) => {
   const baseUrl = normalizeBackendUrl(backendUrl);
+  const agentInstallUrl = resolveAgentInstallUrl(backendUrl);
   const commandLines = [
-    `curl -fL ${baseUrl}/system-agent-install.sh | sh -s -`,
+    `curl -fL ${agentInstallUrl} | sh -s -`,
     `  --server ${baseUrl}`,
     `  --token ${token}`,
     `  --cluster-name ${clusterName}`,
@@ -2328,6 +2374,8 @@ interface AgentQuickCreateProps {
   notice: string | null;
   error: string | null;
   generatedCommand: string | null;
+  isOpen: boolean;
+  onClose: () => void;
   onCreate: (payload: {
     name: string;
     backend_url: string;
@@ -2340,7 +2388,9 @@ interface AgentQuickCreateProps {
   onClearCommand: () => void;
 }
 
-const DEFAULT_AGENT_PROM_URL =
+const DEFAULT_RKE_PROM_URL =
+  "http://prometheus-operated.cattle-prometheus:9090";
+const DEFAULT_RKE2_PROM_URL =
   "http://rancher-monitoring-prometheus.cattle-monitoring-system:9090";
 
 const AgentQuickCreate = ({
@@ -2352,28 +2402,33 @@ const AgentQuickCreate = ({
   notice,
   error,
   generatedCommand,
+  isOpen,
+  onClose,
   onCreate,
   onClearCommand,
 }: AgentQuickCreateProps) => {
   const [name, setName] = useState("");
-  const [backendUrl, setBackendUrl] = useState("");
   const [description, setDescription] = useState("");
   const [prometheusUrl, setPrometheusUrl] = useState("");
+  const [clusterType, setClusterType] = useState<"rke" | "rke2" | "general">(
+    "rke2"
+  );
+  const [baseUrl, setBaseUrl] = useState(() => resolveDefaultBaseUrl());
   const [isRancherLocal, setIsRancherLocal] = useState(false);
   const [rancherUrl, setRancherUrl] = useState("");
   const [rancherApiKey, setRancherApiKey] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
 
   const trimmedName = name.trim();
-  const trimmedBackendUrl = backendUrl.trim();
   const trimmedPrometheusUrl = prometheusUrl.trim();
   const trimmedRancherUrl = rancherUrl.trim();
   const trimmedRancherApiKey = rancherApiKey.trim();
-  const invalidBackendUrl =
-    trimmedBackendUrl.length > 0 && !/^https?:\/\//i.test(trimmedBackendUrl);
   const invalidPrometheusUrl =
     trimmedPrometheusUrl.length > 0 &&
     !/^https?:\/\//i.test(trimmedPrometheusUrl);
+  const invalidBaseUrl =
+    baseUrl.trim().length > 0 && !/^https?:\/\//i.test(baseUrl.trim());
   const invalidRancherUrl =
     trimmedRancherUrl.length > 0 && !/^https?:\/\//i.test(trimmedRancherUrl);
   const duplicateAgent = useMemo(
@@ -2389,35 +2444,62 @@ const AgentQuickCreate = ({
     [clusters, trimmedName]
   );
 
-  if (!canCreateAgents) {
-    return (
-      <div className="agent-inline-form">
-        <div className="agent-inline-form-header">
-          <strong>快速创建 Agent</strong>
-          {createDisabledReason && (
-            <span className="agent-inline-hint">{createDisabledReason}</span>
-          )}
-        </div>
-        <p className="agent-inline-copy">
-          Agent 名称必须与计划接入的集群名称保持一致，注册后不可修改。Backend 地址用于生成注册命令，请填写 Agent 节点可访问的地址。
-        </p>
-      </div>
-    );
-  }
+  useEffect(() => {
+    let cancelled = false;
+    if (!isOpen) {
+      return;
+    }
+    const loadSettings = async () => {
+      try {
+        const settings = await getGeneralSettings();
+        if (cancelled) {
+          return;
+        }
+        const resolvedBaseUrl = (settings.base_url || "").trim();
+        setBaseUrl(resolvedBaseUrl || resolveDefaultBaseUrl());
+      } catch {
+        if (!cancelled) {
+          setBaseUrl(resolveDefaultBaseUrl());
+        }
+      }
+    };
+    void loadSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (clusterType !== "general" && prometheusUrl) {
+      setPrometheusUrl("");
+    }
+  }, [clusterType, prometheusUrl]);
+
+  useEffect(() => {
+    if (isOpen) {
+      return;
+    }
+    setFormError(null);
+    setCopyNotice(null);
+  }, [isOpen]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const normalizedName = name.trim();
     if (!normalizedName) {
-      setFormError("Agent 名称不能为空");
+      setFormError("集群名称不能为空");
       return;
     }
-    if (!trimmedBackendUrl) {
-      setFormError("Backend 地址不能为空");
+    if (!baseUrl.trim()) {
+      setFormError("通用设置 BaseURL 不能为空，请先配置。");
       return;
     }
-    if (invalidBackendUrl) {
-      setFormError("Backend 地址需以 http:// 或 https:// 开头");
+    if (invalidBaseUrl) {
+      setFormError("通用设置 BaseURL 需以 http:// 或 https:// 开头");
+      return;
+    }
+    if (clusterType === "general" && !trimmedPrometheusUrl) {
+      setFormError("Prometheus 地址不能为空");
       return;
     }
     if (invalidPrometheusUrl) {
@@ -2439,7 +2521,7 @@ const AgentQuickCreate = ({
       }
     }
     if (duplicateAgent) {
-      setFormError("Agent 名称已存在，请更换其他名称");
+      setFormError("集群名称已存在，请更换其他名称");
       return;
     }
     if (duplicateCluster) {
@@ -2449,10 +2531,14 @@ const AgentQuickCreate = ({
     setFormError(null);
     try {
       const resolvedPrometheusUrl =
-        trimmedPrometheusUrl || DEFAULT_AGENT_PROM_URL;
+        clusterType === "general"
+          ? trimmedPrometheusUrl
+          : clusterType === "rke"
+            ? DEFAULT_RKE_PROM_URL
+            : DEFAULT_RKE2_PROM_URL;
       await onCreate({
         name: normalizedName,
-        backend_url: trimmedBackendUrl,
+        backend_url: baseUrl.trim(),
         description: description.trim() || undefined,
         prometheus_url: resolvedPrometheusUrl || undefined,
         ...(isRancherLocal
@@ -2464,105 +2550,205 @@ const AgentQuickCreate = ({
           : {}),
       });
       setName("");
-      setBackendUrl("");
       setDescription("");
       setPrometheusUrl("");
+      setClusterType("rke2");
       setIsRancherLocal(false);
       setRancherUrl("");
       setRancherApiKey("");
+      setCopyNotice(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "创建 Agent 失败";
+      const message = err instanceof Error ? err.message : "添加集群失败";
       setFormError(message);
     }
   };
 
+  if (!isOpen) {
+    return null;
+  }
+
+  const handleCopyCommand = async () => {
+    if (!generatedCommand) {
+      return;
+    }
+    const fallbackCopy = (value: string) => {
+      try {
+        const textarea = document.createElement("textarea");
+        textarea.value = value;
+        textarea.setAttribute("readonly", "true");
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        textarea.style.pointerEvents = "none";
+        textarea.style.top = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        textarea.setSelectionRange(0, value.length);
+        const ok = document.execCommand("copy");
+        document.body.removeChild(textarea);
+        return ok;
+      } catch {
+        return false;
+      }
+    };
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(generatedCommand);
+        setCopyNotice("已复制注册命令");
+        return;
+      }
+      const ok = fallbackCopy(generatedCommand);
+      setCopyNotice(ok ? "已复制注册命令" : "复制失败，请手动选择复制");
+    } catch {
+      const ok = fallbackCopy(generatedCommand);
+      setCopyNotice(ok ? "已复制注册命令" : "复制失败，请手动选择复制");
+    }
+  };
+
   return (
-    <div className="agent-inline-form">
-      <div className="agent-inline-form-header">
-        <strong>快速创建 Agent</strong>
-        {!canCreateAgents && createDisabledReason && (
-          <span className="agent-inline-hint">{createDisabledReason}</span>
-        )}
-      </div>
-      <p className="agent-inline-copy">
-        Agent 名称必须与计划接入的集群名称保持一致，注册后不可修改。Backend 地址用于生成注册命令，请填写 Agent 节点可访问的地址。
-      </p>
-      <form className="agent-inline-form-body" onSubmit={handleSubmit}>
-        <input
-          type="text"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="Agent / 集群名称"
-          disabled={submitting || !canCreateAgents}
-        />
-        <input
-          type="text"
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-          placeholder="描述（可选）"
-          disabled={submitting || !canCreateAgents}
-        />
-        <input
-          type="text"
-          value={backendUrl}
-          onChange={(event) => setBackendUrl(event.target.value)}
-          placeholder="Backend 地址（必填）"
-          disabled={submitting || !canCreateAgents}
-        />
-        <input
-          type="text"
-          value={prometheusUrl}
-          onChange={(event) => setPrometheusUrl(event.target.value)}
-          placeholder="Prometheus 地址（可选）"
-          disabled={submitting || !canCreateAgents}
-        />
-        <label className="agent-inline-toggle">
-          <input
-            type="checkbox"
-            checked={isRancherLocal}
-            onChange={(event) => setIsRancherLocal(event.target.checked)}
-            disabled={submitting || !canCreateAgents}
-          />
-          <span>Rancher Local 集群</span>
-        </label>
-        {isRancherLocal && (
-          <>
-            <input
-              type="text"
-              value={rancherUrl}
-              onChange={(event) => setRancherUrl(event.target.value)}
-              placeholder="Rancher 地址（必填）"
-              disabled={submitting || !canCreateAgents}
-            />
-            <input
-              type="password"
-              value={rancherApiKey}
-              onChange={(event) => setRancherApiKey(event.target.value)}
-              placeholder="Rancher API 密钥（必填）"
-              disabled={submitting || !canCreateAgents}
-            />
-          </>
-        )}
-        <button
-          type="submit"
-          className="secondary"
-          disabled={submitting || !canCreateAgents}
-        >
-          {submitting ? "创建中..." : "创建 Agent"}
-        </button>
-      </form>
-      {formError && <div className="feedback error">{formError}</div>}
-      {error && !formError && <div className="feedback error">{error}</div>}
-      {notice && <div className="feedback success">{notice}</div>}
-      {generatedCommand && (
-        <div className="agent-token-box">
-          <p>创建成功，请在目标节点执行以下命令完成注册。</p>
-          <code>{generatedCommand}</code>
-          <button type="button" className="secondary" onClick={onClearCommand}>
-            我已保存命令
+    <div className="modal-backdrop fullscreen">
+      <div className="modal compact cluster-create-modal">
+        <div className="modal-header">
+          <h3>添加集群</h3>
+          <button type="button" className="link-button modal-close" onClick={onClose}>
+            关闭
           </button>
         </div>
-      )}
+        {!canCreateAgents && createDisabledReason && (
+          <div className="feedback warning">{createDisabledReason}</div>
+        )}
+        <form className="cluster-create-form" onSubmit={handleSubmit}>
+          <div className="cluster-form-row two-cols">
+            <label className="field-short">
+              集群名称
+              <input
+                type="text"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="例如：cluster01"
+                disabled={submitting || !canCreateAgents}
+              />
+            </label>
+            <label className="field-short">
+              描述
+              <input
+                type="text"
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                placeholder="可选"
+                disabled={submitting || !canCreateAgents}
+              />
+            </label>
+          </div>
+
+          <div className="cluster-form-row">
+            <label className="field-short">
+              类型
+              <select
+                value={clusterType}
+                onChange={(event) =>
+                  setClusterType(event.target.value as "rke" | "rke2" | "general")
+                }
+                disabled={submitting || !canCreateAgents}
+              >
+                <option value="rke">RKE</option>
+                <option value="rke2">RKE2</option>
+                <option value="general">通用</option>
+              </select>
+            </label>
+            {clusterType === "general" && (
+              <label className="field-short">
+                Prometheus 地址
+                <input
+                  type="text"
+                  value={prometheusUrl}
+                  onChange={(event) => setPrometheusUrl(event.target.value)}
+                  placeholder="例如：http://prometheus:9090"
+                  disabled={submitting || !canCreateAgents}
+                />
+              </label>
+            )}
+          </div>
+
+          <div className="cluster-form-row">
+            <label className="switch-row">
+              <span>Rancher Local 集群</span>
+              <input
+                className="switch-input"
+                type="checkbox"
+                checked={isRancherLocal}
+                onChange={(event) => setIsRancherLocal(event.target.checked)}
+                disabled={submitting || !canCreateAgents}
+              />
+              <span className="switch-slider" aria-hidden />
+            </label>
+          </div>
+
+          {isRancherLocal && (
+            <>
+              <div className="cluster-form-row">
+                <label className="field-short">
+                  Rancher 地址
+                  <input
+                    type="text"
+                    value={rancherUrl}
+                    onChange={(event) => setRancherUrl(event.target.value)}
+                    placeholder="例如：http://rancher.example.com"
+                    disabled={submitting || !canCreateAgents}
+                  />
+                </label>
+              </div>
+              <div className="cluster-form-row">
+                <label className="field-short">
+                  Rancher API 密钥
+                  <input
+                    type="text"
+                    value={rancherApiKey}
+                    onChange={(event) => setRancherApiKey(event.target.value)}
+                    placeholder="Token-xxxxx"
+                    disabled={submitting || !canCreateAgents}
+                  />
+                </label>
+              </div>
+            </>
+          )}
+
+          {(formError || error) && (
+            <div className="feedback error">{formError || error}</div>
+          )}
+          {notice && <div className="feedback info">{notice}</div>}
+
+          {generatedCommand && (
+            <div className="cluster-command-box">
+              <div className="cluster-command-header">
+                <strong>注册命令</strong>
+                <div className="cluster-command-actions">
+                  <button type="button" className="secondary" onClick={handleCopyCommand}>
+                    一键复制
+                  </button>
+                  <button type="button" className="link-button" onClick={onClearCommand}>
+                    清除
+                  </button>
+                </div>
+              </div>
+              <pre>{generatedCommand}</pre>
+              {copyNotice && <div className="feedback info">{copyNotice}</div>}
+            </div>
+          )}
+
+          <div className="settings-actions">
+            <button type="button" className="secondary" onClick={onClose}>
+              取消
+            </button>
+            <button
+              type="submit"
+              className="primary"
+              disabled={submitting || !canCreateAgents || invalidBaseUrl}
+            >
+              {submitting ? "添加中..." : "添加集群"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 };
@@ -2665,6 +2851,10 @@ const OverviewView = ({
     ClusterConnectionStatus | "all"
   >("all");
   const [clusterKeyword, setClusterKeyword] = useState("");
+  const [isCreateClusterOpen, setIsCreateClusterOpen] = useState(false);
+  const [openClusterActionMenuId, setOpenClusterActionMenuId] = useState<
+    number | null
+  >(null);
   const enabledAgents = useMemo(
     () => agents.filter((agent) => agent.is_enabled),
     [agents]
@@ -2746,10 +2936,38 @@ const OverviewView = ({
     updatePage(1);
   }, [clusterFilterStatus, clusterKeyword, updatePage]);
 
+  useEffect(() => {
+    if (openClusterActionMenuId === null) {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest(".cluster-action-menu")) {
+        return;
+      }
+      setOpenClusterActionMenuId(null);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenClusterActionMenuId(null);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [openClusterActionMenuId]);
+
   const effectivePage = useMemo(
     () => Math.min(Math.max(currentPage, 1), totalPages),
     [currentPage, totalPages]
   );
+
+  useEffect(() => {
+    setOpenClusterActionMenuId(null);
+  }, [effectivePage, clusterFilterStatus, clusterKeyword]);
 
   useEffect(() => {
     if (currentPage !== effectivePage) {
@@ -2923,67 +3141,6 @@ const OverviewView = ({
 
   return (
     <>
-      <header className="app-header">
-        <div className="branding">
-          {appConfig.branding.logoUrl ? (
-            <img
-              src={appConfig.branding.logoUrl}
-              alt="logo"
-              className="branding-logo"
-            />
-          ) : null}
-          <div>
-            <h1>Kubernetes 巡检中心</h1>
-          </div>
-        </div>
-        <div className="header-actions">
-          {enableServerClusterUpload ? (
-            <div className="cluster-upload">
-              <label>添加集群</label>
-              {!license.loading && !license.valid && (
-                <div className="feedback error">
-                  {license.reason ?? "当前 License 无效，无法添加集群。"}
-                </div>
-              )}
-              <input
-                type="text"
-                placeholder="自定义集群名称"
-                value={clusterNameInput}
-                disabled={!license.canManageClusters}
-                onChange={(event) => setClusterNameInput(event.target.value)}
-              />
-              <input
-                type="text"
-                placeholder="Prometheus 地址"
-                value={clusterPromInput}
-                disabled={!license.canManageClusters}
-                onChange={(event) => setClusterPromInput(event.target.value)}
-              />
-              <button
-                className="secondary"
-                onClick={() => void onUpload()}
-                disabled={clusterUploading || !license.canManageClusters}
-              >
-                {clusterUploading ? "上传中..." : "上传集群"}
-              </button>
-            </div>
-          ) : (
-            <AgentQuickCreate
-              clusters={clusters}
-              agents={agents}
-              canCreateAgents={canCreateAgents}
-              createDisabledReason={createAgentDisabledReason}
-              submitting={agentSubmitting}
-              notice={agentNotice}
-              error={agentError}
-              generatedCommand={generatedAgentCommand}
-              onCreate={onCreateAgent}
-              onClearCommand={onClearAgentCommand}
-            />
-          )}
-        </div>
-      </header>
-
       {!license.loading && !license.valid && (
         <div className="feedback warning">
           {license.reason ?? "当前 License 未生效或未安装。"}
@@ -2994,8 +3151,21 @@ const OverviewView = ({
       <section className="card cluster-panel">
         <div className="card-header">
           <h2>集群列表</h2>
-          {clusters.length > 0 && (
-            <div className="card-actions">
+          <div className="card-actions">
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                try {
+                  onClearAgentCommand();
+                } finally {
+                  setIsCreateClusterOpen(true);
+                }
+              }}
+            >
+              添加集群
+            </button>
+            {clusters.length > 0 && (
               <div className="cluster-filters">
                 <select
                   value={clusterFilterStatus}
@@ -3017,36 +3187,13 @@ const OverviewView = ({
                   placeholder="关键字筛选"
                 />
               </div>
-              {canRemoveClusters && (
-                <>
-                  <span className="selection-hint">
-                    已选 {selectedFilteredCount} / {filteredClusters.length}
-                  </span>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={handleToggleAllClusters}
-                    disabled={!canRemoveClusters}
-                  >
-                    {allSelected ? "取消全选" : "全选"}
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary danger"
-                    onClick={handleDeleteSelectedClusters}
-                    disabled={selectedClusterIds.length === 0 || !canRemoveClusters}
-                  >
-                    删除
-                  </button>
-                </>
-              )}
-            </div>
-          )}
+            )}
+          </div>
         </div>
-        {clusters.length === 0 ? (
-          <p className="placeholder">
-            暂无集群，请在 Agent 端完成注册后刷新本页面。
-          </p>
+      {clusters.length === 0 ? (
+        <p className="placeholder">
+          暂无集群，请在 Agent 端完成注册后刷新本页面。
+        </p>
         ) : filteredClusters.length === 0 ? (
           <p className="placeholder">未找到匹配的集群。</p>
         ) : (
@@ -3062,7 +3209,6 @@ const OverviewView = ({
                   cluster
                 );
                 const isTesting = Boolean(testingClusterIds[cluster.id]);
-                const isSelected = selectedClusterIds.includes(cluster.id);
                 const detailPath = `/clusters/${displayId}`;
                 const versionLabel =
                   cluster.kubernetes_version &&
@@ -3073,13 +3219,19 @@ const OverviewView = ({
                   typeof cluster.node_count === "number"
                     ? String(cluster.node_count)
                     : null;
+                const isRancherLocalCluster =
+                  resolveClusterRancherLocal(cluster);
                 const healthMessage =
                   cluster.agent_health_message?.trim() || null;
                 const summaryText =
                   versionLabel || nodeCountLabel
-                    ? `版本 ${versionLabel ?? "未知"} · 节点数 ${nodeCountLabel ?? "未知"}`
+                    ? `版本 ${versionLabel ?? "未知"} · 节点数 ${nodeCountLabel ?? "未知"}${
+                        isRancherLocalCluster ? " · 类型 local" : ""
+                      }`
                     : healthMessage
-                      ? "版本 未知 · 节点数 未知"
+                      ? `版本 未知 · 节点数 未知${
+                          isRancherLocalCluster ? " · 类型 local" : ""
+                        }`
                       : cluster.connection_message || "未校验";
                 const descriptionText =
                   (cluster.description && cluster.description.trim()) ||
@@ -3089,7 +3241,7 @@ const OverviewView = ({
                 return (
                   <div
                     key={cluster.id}
-                    className={`cluster-card${isSelected ? " selected" : ""}`}
+                    className="cluster-card"
                   >
                     <Link
                       to={detailPath}
@@ -3099,43 +3251,69 @@ const OverviewView = ({
                     <div className="cluster-card-content">
                     <div className="cluster-card-top">
                       <div className="cluster-name-row">
-                        {canRemoveClusters && (
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={(event) => {
-                              event.stopPropagation();
-                              handleToggleCluster(cluster.id);
-                            }}
-                            onClick={(event) => event.stopPropagation()}
-                            disabled={!canRemoveClusters}
-                          />
-                        )}
                         <span className="cluster-id-badge">{displayId}</span>
-                        <div className="cluster-name">{cluster.name}</div>
+                        <div className="cluster-name" title={cluster.name}>
+                          {cluster.name}
+                        </div>
                       </div>
                       <div className="cluster-actions">
-                        {canEditClusters && (
-                          <button
-                            className="link-button small"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onEditCluster(cluster);
-                            }}
-                          >
-                            编辑
-                          </button>
-                        )}
-                        {canRemoveClusters && (
-                          <button
-                            className="link-button small danger"
-                            onClick={async (event) => {
-                              event.stopPropagation();
-                              await onDeleteCluster(cluster);
-                            }}
-                          >
-                            删除
-                          </button>
+                        {(canEditClusters || canRemoveClusters) && (
+                          <div className="cluster-action-menu">
+                            <button
+                              type="button"
+                              className="cluster-action-menu-trigger"
+                              aria-label="更多操作"
+                              title="更多操作"
+                              aria-haspopup="menu"
+                              aria-expanded={
+                                openClusterActionMenuId === cluster.id
+                              }
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setOpenClusterActionMenuId((prev) =>
+                                  prev === cluster.id ? null : cluster.id
+                                );
+                              }}
+                            >
+                              <span>⋮</span>
+                            </button>
+                            {openClusterActionMenuId === cluster.id && (
+                              <div
+                                className="cluster-action-menu-dropdown"
+                                role="menu"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                {canEditClusters && (
+                                  <button
+                                    type="button"
+                                    className="cluster-action-menu-item"
+                                    role="menuitem"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setOpenClusterActionMenuId(null);
+                                      onEditCluster(cluster);
+                                    }}
+                                  >
+                                    编辑
+                                  </button>
+                                )}
+                                {canRemoveClusters && (
+                                  <button
+                                    type="button"
+                                    className="cluster-action-menu-item danger"
+                                    role="menuitem"
+                                    onClick={async (event) => {
+                                      event.stopPropagation();
+                                      setOpenClusterActionMenuId(null);
+                                      await onDeleteCluster(cluster);
+                                    }}
+                                  >
+                                    删除
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
@@ -3160,7 +3338,10 @@ const OverviewView = ({
                       </span>
                     </div>
                     {healthMessage && (
-                      <div className="cluster-health-message">
+                      <div
+                        className="cluster-health-message"
+                        title={healthMessage}
+                      >
                         {healthMessage}
                       </div>
                     )}
@@ -3274,6 +3455,23 @@ const OverviewView = ({
           </>
         )}
       </section>
+      <AgentQuickCreate
+        clusters={clusters}
+        agents={agents}
+        canCreateAgents={canCreateAgents}
+        createDisabledReason={createAgentDisabledReason}
+        submitting={agentSubmitting}
+        notice={agentNotice}
+        error={agentError}
+        generatedCommand={generatedAgentCommand}
+        isOpen={isCreateClusterOpen}
+        onClose={() => {
+          setIsCreateClusterOpen(false);
+          onClearAgentCommand();
+        }}
+        onCreate={onCreateAgent}
+        onClearCommand={onClearAgentCommand}
+      />
 
     </>
   );
@@ -3467,7 +3665,8 @@ const HistoryView = ({
           runDisplayIds[run.id] ?? `#${run.id}`,
           clusterDisplayIds[run.cluster_id] ?? `#${run.cluster_id}`,
           run.cluster_name,
-          run.operator,
+          resolveRunTypeLabel(run.operator),
+          resolveTemplateLabel(run.operator),
           run.agent_name,
         ]
           .filter(Boolean)
@@ -3527,14 +3726,14 @@ const HistoryView = ({
   const visibleSelectedCount = useMemo(
     () =>
       selectedRunIds.filter((id) =>
-        filteredRuns.some((run) => run.id === id)
+        pagedRuns.some((run) => run.id === id)
       ).length,
-    [selectedRunIds, filteredRuns]
+    [selectedRunIds, pagedRuns]
   );
 
   const allSelected =
-    filteredRuns.length > 0 &&
-    filteredRuns.every((run) => selectedRunIds.includes(run.id));
+    pagedRuns.length > 0 &&
+    pagedRuns.every((run) => selectedRunIds.includes(run.id));
 
   const handleToggleRun = useCallback(
     (runId: number) => {
@@ -3555,11 +3754,11 @@ const HistoryView = ({
       if (
         !canRunInspections ||
         !canDeleteHistory ||
-        filteredRuns.length === 0
+        pagedRuns.length === 0
       ) {
         return prev;
       }
-      const visibleIds = filteredRuns.map((run) => run.id);
+      const visibleIds = pagedRuns.map((run) => run.id);
       const allVisibleSelected = visibleIds.every((id) => prev.includes(id));
       if (allVisibleSelected) {
         return prev.filter((id) => !visibleIds.includes(id));
@@ -3568,7 +3767,7 @@ const HistoryView = ({
       visibleIds.forEach((id) => merged.add(id));
       return Array.from(merged);
     });
-  }, [filteredRuns, canRunInspections, canDeleteHistory]);
+  }, [pagedRuns, canRunInspections, canDeleteHistory]);
 
   const handlePageChange = useCallback(
     (offset: number) => {
@@ -3653,7 +3852,7 @@ const HistoryView = ({
               type="text"
               value={historyKeyword}
               onChange={handleKeywordFilterChange}
-              placeholder="按巡检编号 / 集群 / 巡检人搜索"
+              placeholder="按巡检编号 / 集群 / 巡检类型搜索"
             />
             {historyKeyword && (
               <button
@@ -3759,7 +3958,7 @@ const HistoryView = ({
               <tr>
                 <th>巡检编号</th>
                 <th>集群</th>
-                <th>巡检人</th>
+                <th>巡检类型</th>
                 <th>状态</th>
                 <th>Agent 状态</th>
                 <th>开始时间</th>
@@ -3808,7 +4007,7 @@ const HistoryView = ({
                       )}
                     </td>
                     <td>{clusterLabel}</td>
-                    <td>{run.operator || "-"}</td>
+                    <td>{resolveRunTypeLabel(run.operator)}</td>
                     <td>
                       <span className={statusClass(run.status)}>
                         {run.status_label ?? run.status}
@@ -4230,15 +4429,6 @@ const AuditView = () => {
             <pre className="audit-yaml-content">
               {buildAuditYaml(yamlEntry)}
             </pre>
-            <div className="modal-actions">
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => setYamlEntry(null)}
-              >
-                关闭
-              </button>
-            </div>
           </div>
         </div>
       )}
@@ -4249,16 +4439,15 @@ const AuditView = () => {
 interface ClusterDetailViewProps {
   clusters: ClusterConfig[];
   items: InspectionItem[];
+  templates: InspectionItemTemplate[];
   runs: InspectionRunListItem[];
   prometheusVersionOptions: string[];
-  selectedIds: number[];
-  setSelectedIds: (updater: (prev: number[]) => number[]) => void;
-  operator: string;
-  setOperator: (value: string) => void;
   inspectionLoading: boolean;
   onStartInspection: (
     clusterId: number,
-    prometheusVersion: string
+    prometheusVersion: string,
+    itemIds: number[],
+    operatorName?: string
   ) => Promise<void>;
   onDeleteRun: (run: InspectionRunListItem) => Promise<void>;
   onDeleteRunsBulk: (runIds: number[]) => Promise<void>;
@@ -4286,12 +4475,9 @@ interface ClusterDetailViewProps {
 const ClusterDetailView = ({
   clusters,
   items,
+  templates,
   runs,
   prometheusVersionOptions,
-  selectedIds,
-  setSelectedIds,
-  operator,
-  setOperator,
   inspectionLoading,
   onStartInspection,
   onDeleteRun,
@@ -4316,20 +4502,18 @@ const ClusterDetailView = ({
   const enableServerConnectionTest = true;
   const { clusterKey } = useParams<{ clusterKey?: string }>();
   const navigate = useNavigate();
-  const operatorInputId = useId();
-  const prometheusVersionInputId = useId();
   const [selectedRunIds, setSelectedRunIds] = useState<number[]>([]);
   const [clusterRunPageSize, setClusterRunPageSize] = useState<number>(
     RUN_PAGE_SIZE_OPTIONS[0]
   );
   const [clusterRunPage, setClusterRunPage] = useState(1);
   const [clusterRunPageInput, setClusterRunPageInput] = useState("");
-  const [itemPageSize, setItemPageSize] = useState<number>(
-    CLUSTER_ITEM_PAGE_SIZE_OPTIONS[0]
-  );
-  const [itemPage, setItemPage] = useState(1);
-  const [itemPageInput, setItemPageInput] = useState("");
-  const [itemKeyword, setItemKeyword] = useState("");
+  const [templateKeyword, setTemplateKeyword] = useState("");
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [selectedTemplateIds, setSelectedTemplateIds] = useState<number[]>([]);
+  const [pendingTemplateRemoval, setPendingTemplateRemoval] =
+    useState<InspectionItemTemplate | null>(null);
+  const templatePickerRef = useRef<HTMLDivElement | null>(null);
   const [prometheusVersion, setPrometheusVersion] = useState(
     DEFAULT_PROMETHEUS_VERSION
   );
@@ -4354,6 +4538,7 @@ const ClusterDetailView = ({
     }
     return clusters.find((item) => item.id === resolvedClusterId) ?? null;
   }, [clusters, resolvedClusterId]);
+  const clusterIsRancherLocal = resolveClusterRancherLocal(cluster);
 
   const handleBackToPreviousPage = useCallback(() => {
     if (window.history.length > 1) {
@@ -4381,10 +4566,49 @@ const ClusterDetailView = ({
       });
   }, [cluster, runs]);
 
+  const sortedTemplates = useMemo(
+    () => templates.slice().sort((a, b) => (a.name || "").localeCompare(b.name || "")),
+    [templates]
+  );
+
+  const filteredTemplates = useMemo(() => {
+    const keyword = templateKeyword.trim().toLowerCase();
+    if (!keyword) {
+      return sortedTemplates;
+    }
+    return sortedTemplates.filter((template) =>
+      (template.name || "").toLowerCase().includes(keyword)
+    );
+  }, [sortedTemplates, templateKeyword]);
+
+  const selectedTemplates = useMemo(
+    () => sortedTemplates.filter((template) => selectedTemplateIds.includes(template.id)),
+    [sortedTemplates, selectedTemplateIds]
+  );
+
+  const itemIdSet = useMemo(
+    () => new Set(items.map((item) => item.id)),
+    [items]
+  );
+
+  const selectedTemplateItemIds = useMemo(() => {
+    const ids = new Set<number>();
+    selectedTemplates.forEach((template) => {
+      (template.item_ids ?? []).forEach((id) => {
+        if (itemIdSet.has(id)) {
+          ids.add(id);
+        }
+      });
+    });
+    return Array.from(ids);
+  }, [selectedTemplates, itemIdSet]);
+
   useEffect(() => {
-    setSelectedIds(() => []);
     setSelectedRunIds([]);
-  }, [resolvedClusterId, setSelectedIds]);
+    setSelectedTemplateIds([]);
+    setTemplateKeyword("");
+    setTemplatePickerOpen(false);
+  }, [resolvedClusterId]);
 
   useEffect(() => {
     setPrometheusVersion(DEFAULT_PROMETHEUS_VERSION);
@@ -4397,24 +4621,45 @@ const ClusterDetailView = ({
   }, [prometheusVersionOptions, prometheusVersion]);
 
   useEffect(() => {
-    setSelectedIds(() => []);
-  }, [prometheusVersion, setSelectedIds]);
-
-  useEffect(() => {
     setSelectedRunIds((prev) =>
       prev.filter((id) => clusterRuns.some((run) => run.id === id))
     );
   }, [clusterRuns]);
+
+  useEffect(() => {
+    if (!templatePickerOpen) {
+      return;
+    }
+    const handleClick = (event: MouseEvent) => {
+      if (!templatePickerRef.current) {
+        return;
+      }
+      if (!templatePickerRef.current.contains(event.target as Node)) {
+        setTemplatePickerOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+    };
+  }, [templatePickerOpen]);
+
+  useEffect(() => {
+    setSelectedTemplateIds((prev) =>
+      prev.filter((id) => templates.some((template) => template.id === id))
+    );
+  }, [templates]);
+
   useEffect(() => {
     if (!canRunInspections) {
-      setSelectedIds(() => []);
+      setSelectedTemplateIds([]);
       setSelectedRunIds([]);
       return;
     }
     if (!canDeleteHistory) {
       setSelectedRunIds([]);
     }
-  }, [canRunInspections, canDeleteHistory, setSelectedIds, setSelectedRunIds]);
+  }, [canRunInspections, canDeleteHistory]);
 
   const totalClusterRunPages = useMemo(
     () =>
@@ -4441,117 +4686,6 @@ const ClusterDetailView = ({
     return clusterRuns.slice(start, start + clusterRunPageSize);
   }, [clusterRuns, clusterRunPage, clusterRunPageSize]);
 
-  const inspectionKeyword = itemKeyword.trim().toLowerCase();
-  const selectedPrometheusVersion = normalizePrometheusVersion(
-    prometheusVersion,
-    prometheusVersionOptions
-  );
-  const matchesInspectionKeyword = useCallback(
-    (item: InspectionItem) => {
-      if (!inspectionKeyword) {
-        return true;
-      }
-      const name = (item.name ?? "").toLowerCase();
-      const desc = (item.description ?? "").toLowerCase();
-      return name.includes(inspectionKeyword) || desc.includes(inspectionKeyword);
-    },
-    [inspectionKeyword]
-  );
-  const filteredPromqlItems = useMemo(
-    () =>
-      items.filter(
-        (item) =>
-          isPromqlType(item.check_type) &&
-          normalizePrometheusVersion(
-            item.prometheus_version,
-            prometheusVersionOptions
-          ) ===
-            selectedPrometheusVersion &&
-          matchesInspectionKeyword(item)
-      ),
-    [items, matchesInspectionKeyword, selectedPrometheusVersion]
-  );
-  const filteredCommonItems = useMemo(
-    () =>
-      items.filter(
-        (item) =>
-          !isPromqlType(item.check_type) &&
-          !isRancherLocalType(item.check_type) &&
-          matchesInspectionKeyword(item)
-      ),
-    [items, matchesInspectionKeyword]
-  );
-  const filteredInspectionItems = useMemo(
-    () => [...filteredPromqlItems, ...filteredCommonItems],
-    [filteredPromqlItems, filteredCommonItems]
-  );
-  const rancherItemIdSet = useMemo(
-    () =>
-      new Set(
-        items
-          .filter((item) => isRancherLocalType(item.check_type))
-          .map((item) => item.id)
-      ),
-    [items]
-  );
-
-  const totalInspectionPages = useMemo(
-    () =>
-      Math.max(
-        1,
-        Math.ceil(filteredInspectionItems.length / Math.max(itemPageSize, 1))
-      ),
-    [filteredInspectionItems.length, itemPageSize]
-  );
-
-  useEffect(() => {
-    setItemPage(1);
-    setItemPageInput("");
-  }, [itemPageSize, filteredInspectionItems.length, itemKeyword]);
-
-  useEffect(() => {
-    setItemPage((prev) => Math.min(Math.max(prev, 1), totalInspectionPages));
-  }, [totalInspectionPages]);
-
-  useEffect(() => {
-    if (rancherItemIdSet.size === 0) {
-      return;
-    }
-    setSelectedIds((prev) => prev.filter((id) => !rancherItemIdSet.has(id)));
-  }, [rancherItemIdSet, setSelectedIds]);
-
-  const pagedInspectionItems = useMemo(() => {
-    if (filteredInspectionItems.length === 0) {
-      return [];
-    }
-    const start = (itemPage - 1) * itemPageSize;
-    return filteredInspectionItems.slice(start, start + itemPageSize);
-  }, [filteredInspectionItems, itemPage, itemPageSize]);
-  const pagedPromqlItems = useMemo(
-    () => pagedInspectionItems.filter((item) => isPromqlType(item.check_type)),
-    [pagedInspectionItems]
-  );
-  const pagedCommonItems = useMemo(
-    () =>
-      pagedInspectionItems.filter(
-        (item) =>
-          !isPromqlType(item.check_type) &&
-          !isRancherLocalType(item.check_type)
-      ),
-    [pagedInspectionItems]
-  );
-  const versionHint = useMemo(() => {
-    if (filteredPromqlItems.length === 0 && filteredCommonItems.length > 0) {
-      return `当前 Prometheus 版本 ${selectedPrometheusVersion} 暂无 PromQL 巡检项，以下为通用巡检项。`;
-    }
-    return "Prometheus 版本仅影响 PromQL 巡检项，命令行/其他类型始终可用。";
-  }, [
-    filteredCommonItems.length,
-    filteredPromqlItems.length,
-    selectedPrometheusVersion,
-  ]);
-  const promqlCountLabel = `PromQL 巡检项（${selectedPrometheusVersion}）${filteredPromqlItems.length} 条`;
-  const commonCountLabel = `通用巡检项 ${filteredCommonItems.length} 条`;
 
   const statusMeta = useMemo(() => {
     if (!cluster) {
@@ -4577,49 +4711,6 @@ const ClusterDetailView = ({
   const isTesting = enableServerConnectionTest
     ? Boolean(cluster && testingClusterIds[cluster.id])
     : false;
-  const filteredInspectionItemIdSet = useMemo(
-    () => new Set(filteredInspectionItems.map((item) => item.id)),
-    [filteredInspectionItems]
-  );
-  const selectedFilteredItemsCount = useMemo(
-    () => selectedIds.filter((id) => filteredInspectionItemIdSet.has(id)).length,
-    [filteredInspectionItemIdSet, selectedIds]
-  );
-  const allItemsSelected =
-    filteredInspectionItems.length > 0 &&
-    filteredInspectionItems.every((item) => selectedIds.includes(item.id));
-
-  const handleToggleItem = useCallback(
-    (itemId: number) => {
-      if (!canRunInspections) {
-        return;
-      }
-      setSelectedIds((prev) =>
-        prev.includes(itemId)
-          ? prev.filter((id) => id !== itemId)
-          : [...prev, itemId]
-      );
-    },
-    [setSelectedIds, canRunInspections]
-  );
-
-  const handleToggleAllItems = useCallback(() => {
-    setSelectedIds((prev) => {
-      if (!canRunInspections || filteredInspectionItems.length === 0) {
-        return prev;
-      }
-      const next = new Set(prev);
-      const allFilteredSelected = filteredInspectionItems.every((item) =>
-        next.has(item.id)
-      );
-      if (allFilteredSelected) {
-        filteredInspectionItems.forEach((item) => next.delete(item.id));
-        return Array.from(next);
-      }
-      filteredInspectionItems.forEach((item) => next.add(item.id));
-      return Array.from(next);
-    });
-  }, [filteredInspectionItems, setSelectedIds, canRunInspections]);
 
   const handleToggleRunSelection = useCallback(
     (runId: number) => {
@@ -4634,6 +4725,39 @@ const ClusterDetailView = ({
     },
     [canRunInspections, canDeleteHistory]
   );
+
+  const handleToggleTemplateSelection = useCallback(
+    (templateId: number) => {
+      if (!canRunInspections) {
+        return;
+      }
+      setSelectedTemplateIds((prev) =>
+        prev.includes(templateId)
+          ? prev.filter((id) => id !== templateId)
+          : [...prev, templateId]
+      );
+    },
+    [canRunInspections]
+  );
+
+  const handleRequestTemplateRemoval = useCallback(
+    (template: InspectionItemTemplate) => {
+      if (!canRunInspections) {
+        return;
+      }
+      setPendingTemplateRemoval(template);
+    },
+    [canRunInspections]
+  );
+
+  const handleConfirmTemplateRemoval = useCallback(() => {
+    if (!pendingTemplateRemoval) {
+      return;
+    }
+    const targetId = pendingTemplateRemoval.id;
+    setSelectedTemplateIds((prev) => prev.filter((id) => id !== targetId));
+    setPendingTemplateRemoval(null);
+  }, [pendingTemplateRemoval]);
 
   const handleToggleAllRuns = useCallback(() => {
     setSelectedRunIds((prev) => {
@@ -4686,15 +4810,23 @@ const ClusterDetailView = ({
     if (!canRunInspections) {
       return;
     }
+    const templateLabel = selectedTemplates
+      .map((template) => template.name)
+      .filter(Boolean)
+      .join("、");
     void onStartInspection(
       cluster.id,
-      normalizePrometheusVersion(prometheusVersion, prometheusVersionOptions)
+      normalizePrometheusVersion(prometheusVersion, prometheusVersionOptions),
+      selectedTemplateItemIds,
+      templateLabel || undefined
     );
   }, [
     cluster,
     onStartInspection,
     prometheusVersion,
     prometheusVersionOptions,
+    selectedTemplates,
+    selectedTemplateItemIds,
     canRunInspections,
   ]);
 
@@ -4727,34 +4859,6 @@ const ClusterDetailView = ({
     setClusterRunPageInput("");
   }, [clusterRunPageInput, totalClusterRunPages]);
 
-  const handleInspectionPageChange = useCallback(
-    (offset: number) => {
-      setItemPage((prev) => {
-        const next = prev + offset;
-        if (next < 1) {
-          return 1;
-        }
-        if (next > totalInspectionPages) {
-          return totalInspectionPages;
-        }
-        return next;
-      });
-    },
-    [totalInspectionPages]
-  );
-
-  const handleInspectionPageJump = useCallback(() => {
-    const trimmed = itemPageInput.trim();
-    if (!trimmed) {
-      return;
-    }
-    const parsed = Number(trimmed);
-    if (!Number.isNaN(parsed) && Number.isInteger(parsed)) {
-      const target = Math.min(Math.max(parsed, 1), totalInspectionPages);
-      setItemPage(target);
-    }
-    setItemPageInput("");
-  }, [itemPageInput, totalInspectionPages]);
   let detailContent: ReactNode;
 
   if (!clusterKey || resolvedClusterId === null) {
@@ -4877,6 +4981,12 @@ const ClusterDetailView = ({
                 ? cluster.node_count
                 : "未知"}
             </div>
+            {clusterIsRancherLocal && (
+              <div>
+                <strong>类型：</strong>
+                local
+              </div>
+            )}
             <div>
               <strong>创建时间：</strong>
               {formatDate(cluster.created_at)}
@@ -4890,57 +5000,71 @@ const ClusterDetailView = ({
 
         <div className="detail-card">
           <h2>执行巡检</h2>
-          <label htmlFor={operatorInputId} className="operator-inline">
-            巡检人
-            <input
-              id={operatorInputId}
-              placeholder="输入巡检人姓名（可选）"
-              value={operator}
-              onChange={(event) => setOperator(event.target.value)}
-              disabled={!canRunInspections}
-            />
-          </label>
-          <label
-            htmlFor={prometheusVersionInputId}
-            className="operator-inline"
-          >
-            Prometheus 版本
-            <select
-              id={prometheusVersionInputId}
-              value={prometheusVersion}
-              onChange={(event) => setPrometheusVersion(event.target.value)}
-              disabled={!canRunInspections}
-            >
-              {prometheusVersionOptions.map((version) => (
-                <option key={version} value={version}>
-                  {version}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="inspection-items-toolbar">
-            <span className="selection-hint">
-              已选择 {selectedFilteredItemsCount} / {filteredInspectionItems.length} 个巡检项
-            </span>
-            <div className="inspection-items-toolbar-actions">
-              <input
-                type="text"
-                className="inspection-items-filter"
-                value={itemKeyword}
-                onChange={(event) => setItemKeyword(event.target.value)}
-                placeholder="关键字筛选"
-                disabled={!canRunInspections}
-              />
-              {canCreateHistory && (
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={handleToggleAllItems}
-                  disabled={!canRunInspections}
-                >
-                  {allItemsSelected ? "清除选择" : "全选"}
-                </button>
+          <div className="inspection-template-panel">
+            <div className="template-picker-label">
+              <span>巡检模板</span>
+              <div className="template-picker" ref={templatePickerRef}>
+                <div className="template-picker-input">
+                  <input
+                    type="text"
+                    value={templateKeyword}
+                    onChange={(event) => setTemplateKeyword(event.target.value)}
+                    onFocus={() => setTemplatePickerOpen(true)}
+                    placeholder="输入模板名称或关键字搜索"
+                    disabled={!canRunInspections}
+                  />
+                </div>
+                {templatePickerOpen && (
+                  <div className="template-picker-dropdown">
+                    {filteredTemplates.length === 0 ? (
+                      <div className="placeholder">
+                        暂无匹配模板，请先在设置中创建。
+                      </div>
+                    ) : (
+                      filteredTemplates.map((template) => (
+                        <label key={template.id} className="template-option">
+                          <input
+                            type="checkbox"
+                            checked={selectedTemplateIds.includes(template.id)}
+                            onChange={() =>
+                              handleToggleTemplateSelection(template.id)
+                            }
+                            disabled={!canRunInspections}
+                          />
+                          <span>{template.name}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="template-selected-list">
+              {selectedTemplates.length === 0 ? (
+                <span className="placeholder">暂未选择巡检模板</span>
+              ) : (
+                selectedTemplates.map((template) => (
+                  <span key={template.id} className="template-chip">
+                    {template.name}
+                    <button
+                      type="button"
+                      className="template-chip-remove"
+                      onClick={() => handleRequestTemplateRemoval(template)}
+                      disabled={!canRunInspections}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))
               )}
+            </div>
+
+            <div className="template-start-row">
+              <span className="selection-hint">
+                已选择 {selectedTemplates.length} 个模板 · 共{" "}
+                {selectedTemplateItemIds.length} 个巡检项
+              </span>
               {canCreateHistory && (
                 <button
                   type="button"
@@ -4948,7 +5072,7 @@ const ClusterDetailView = ({
                   onClick={handleStart}
                   disabled={
                     inspectionLoading ||
-                    selectedIds.length === 0 ||
+                    selectedTemplateItemIds.length === 0 ||
                     !canRunInspections
                   }
                 >
@@ -4957,155 +5081,6 @@ const ClusterDetailView = ({
               )}
             </div>
           </div>
-          <div className="inspection-version-hint">
-            <span className="inspection-version-hint-text">{versionHint}</span>
-            <span className="inspection-version-counts">
-              {promqlCountLabel} · {commonCountLabel}
-            </span>
-          </div>
-          {items.length === 0 ? (
-            <ul className="item-list">
-              <li className="placeholder">暂无巡检项，请在设置中添加。</li>
-            </ul>
-          ) : filteredInspectionItems.length === 0 ? (
-            <ul className="item-list">
-              <li className="placeholder">未找到匹配的巡检项。</li>
-            </ul>
-          ) : (
-            <>
-              {pagedPromqlItems.length > 0 && (
-                <div className="inspection-item-group">
-                  <div className="inspection-item-group-title">
-                    <span className="inspection-group-title-text">PromQL 巡检项</span>
-                    <span className="group-count">
-                      {filteredPromqlItems.length} 条
-                    </span>
-                  </div>
-                  <ul className="item-list">
-                    {pagedPromqlItems.map((item) => (
-                      <li key={item.id}>
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.includes(item.id)}
-                            onChange={() => handleToggleItem(item.id)}
-                            disabled={!canRunInspections}
-                          />
-                          <div>
-                            <div className="item-title-row">
-                              <div className="item-name">{item.name}</div>
-                              <span className="item-tag promql">
-                                PromQL · {normalizePrometheusVersion(
-                                  item.prometheus_version,
-                                  prometheusVersionOptions
-                                )}
-                              </span>
-                            </div>
-                            <div className="item-desc">
-                              {item.description || "未提供描述"}
-                            </div>
-                          </div>
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {pagedCommonItems.length > 0 && (
-                <div className="inspection-item-group">
-                  <div className="inspection-item-group-title">
-                    <span className="inspection-group-title-text">通用巡检项</span>
-                    <span className="group-count">
-                      {filteredCommonItems.length} 条
-                    </span>
-                  </div>
-                  <ul className="item-list">
-                    {pagedCommonItems.map((item) => (
-                      <li key={item.id}>
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.includes(item.id)}
-                            onChange={() => handleToggleItem(item.id)}
-                            disabled={!canRunInspections}
-                          />
-                          <div>
-                            <div className="item-title-row">
-                              <div className="item-name">{item.name}</div>
-                              <span className="item-tag neutral">通用</span>
-                            </div>
-                            <div className="item-desc">
-                              {item.description || "未提供描述"}
-                            </div>
-                          </div>
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              <div className="history-pagination-controls inspection-items-pagination">
-                <label className="page-size-control">
-                  每页
-                  <select
-                    value={itemPageSize}
-                    onChange={(event) =>
-                      setItemPageSize(Number(event.target.value))
-                    }
-                  >
-                    {CLUSTER_ITEM_PAGE_SIZE_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="history-pagination-buttons">
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => handleInspectionPageChange(-1)}
-                    disabled={itemPage <= 1}
-                  >
-                    上一页
-                  </button>
-                  <span>
-                    第 {itemPage} / {totalInspectionPages} 页
-                  </span>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => handleInspectionPageChange(1)}
-                    disabled={itemPage >= totalInspectionPages}
-                  >
-                    下一页
-                  </button>
-                </div>
-                <label className="history-page-jump">
-                  跳转
-                  <input
-                    type="number"
-                    min={1}
-                    value={itemPageInput}
-                    onChange={(event) => setItemPageInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        handleInspectionPageJump();
-                      }
-                    }}
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={handleInspectionPageJump}
-                >
-                  确定
-                </button>
-              </div>
-            </>
-          )}
           {!license.canRunInspections && (
             <div className="feedback warning">
               {license.reason ?? "当前 License 不支持发起巡检。"}
@@ -5163,7 +5138,7 @@ const ClusterDetailView = ({
               <thead>
                 <tr>
                   <th>巡检编号</th>
-                  <th>巡检人</th>
+                  <th>巡检类型</th>
                   <th>状态</th>
                   <th>Agent 状态</th>
                   <th>开始时间</th>
@@ -5193,7 +5168,7 @@ const ClusterDetailView = ({
                           <span>{runSlug}</span>
                         )}
                       </td>
-                      <td>{run.operator || "-"}</td>
+                      <td>{resolveRunTypeLabel(run.operator)}</td>
                       <td>
                         {renderRunStatusBadge(
                           run.status,
@@ -5360,292 +5335,23 @@ const ClusterDetailView = ({
           </div>
         )}
       </section>
+      {pendingTemplateRemoval && (
+        <ConfirmationModal
+          state={{
+            title: "移除巡检模板",
+            message: `确认移除模板「${pendingTemplateRemoval.name}」？`,
+            confirmLabel: "移除",
+            variant: "danger",
+            onConfirm: handleConfirmTemplateRemoval,
+          }}
+          onClose={() => setPendingTemplateRemoval(null)}
+        />
+      )}
       </>
     );
   }
 
   return detailContent;
-};
-
-interface ConfirmationModalProps {
-  state: ConfirmDialogState | null;
-  onClose: () => void;
-}
-
-const ConfirmationModal = ({ state, onClose }: ConfirmationModalProps) => {
-  const [optionsMap, setOptionsMap] = useState<Record<string, boolean>>({});
-  const [submitting, setSubmitting] = useState(false);
-  const [confirmError, setConfirmError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!state) {
-      setOptionsMap({});
-      setSubmitting(false);
-      setConfirmError(null);
-      return;
-    }
-    const initial: Record<string, boolean> = {};
-    state.options?.forEach((option) => {
-      initial[option.id] = Boolean(option.defaultChecked);
-    });
-    setOptionsMap(initial);
-    setSubmitting(false);
-    setConfirmError(null);
-  }, [state]);
-
-  if (!state) {
-    return null;
-  }
-
-  const handleToggleOption = (optionId: string) => {
-    setOptionsMap((prev) => ({
-      ...prev,
-      [optionId]: !prev[optionId],
-    }));
-  };
-
-  const handleConfirm = async () => {
-    setConfirmError(null);
-    setSubmitting(true);
-    try {
-      await state.onConfirm(optionsMap);
-      onClose();
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "操作失败，请稍后重试。";
-      setConfirmError(message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const confirmClassName =
-    state.variant === "danger" ? "primary danger" : "primary";
-  const confirmLabel = submitting
-    ? "处理中..."
-    : state.confirmLabel ?? "确定";
-  const cancelLabel = state.cancelLabel ?? "取消";
-
-  return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
-      <div className="modal confirmation-modal">
-        <div className="modal-header">
-          <h3>{state.title}</h3>
-        </div>
-        <p className="modal-message">{state.message}</p>
-        {state.options && state.options.length > 0 && (
-          <div className="confirmation-options">
-            {state.options.map((option) => (
-              <label key={option.id} className="confirmation-option">
-                <input
-                  type="checkbox"
-                  checked={optionsMap[option.id] ?? Boolean(option.defaultChecked)}
-                  onChange={() => handleToggleOption(option.id)}
-                />
-                <div>
-                  <div className="option-label">{option.label}</div>
-                  {option.description && (
-                    <div className="option-description">
-                      {option.description}
-                    </div>
-                  )}
-                </div>
-              </label>
-            ))}
-          </div>
-        )}
-        {confirmError && <div className="feedback error">{confirmError}</div>}
-        <div className="modal-actions">
-          <button
-            type="button"
-            className="secondary"
-            onClick={onClose}
-            disabled={submitting}
-          >
-            {cancelLabel}
-          </button>
-          <button
-            type="button"
-            className={confirmClassName}
-            onClick={() => void handleConfirm()}
-            disabled={submitting}
-          >
-            {confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-interface SettingsModalProps {
-  open: boolean;
-  tabs: SettingsModalTab[];
-  initialTabId?: string;
-  activeTabId: string;
-  onTabChange: (tabId: string) => void;
-  onClose: () => void;
-  user?: AuthUser | null;
-  onLogout?: () => void;
-  onChangePassword?: () => void;
-  confirmState?: ConfirmDialogState | null;
-  onConfirmClose?: () => void;
-}
-
-const SettingsModal = ({
-  open,
-  tabs,
-  initialTabId,
-  activeTabId,
-  onTabChange,
-  onClose,
-  user,
-  onLogout,
-  onChangePassword,
-  confirmState,
-  onConfirmClose,
-}: SettingsModalProps) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const hasTabs = tabs.length > 0;
-  const fallbackTabId =
-    tabs.find((tab) => tab.id === (initialTabId ?? ""))?.id ??
-    tabs[0]?.id ??
-    "overview";
-  const effectiveTabId = tabs.some((tab) => tab.id === activeTabId)
-    ? activeTabId
-    : fallbackTabId;
-  const currentTab =
-    tabs.find((tab) => tab.id === effectiveTabId) ?? tabs[0] ?? null;
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const handleKeyDown = (event: { key: string }) => {
-      if (event.key === "Escape") {
-        if (confirmState && onConfirmClose) {
-          onConfirmClose();
-        } else {
-          onClose();
-        }
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, confirmState, onClose, onConfirmClose]);
-
-  useEffect(() => {
-    if (!open || !containerRef.current) {
-      return;
-    }
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    containerRef.current.focus();
-    return () => {
-      previouslyFocused?.focus?.();
-    };
-  }, [open]);
-
-  if (!open || !hasTabs || !currentTab) {
-    return null;
-  }
-
-  const selectTab = (tabId: string) => {
-    onTabChange(tabId);
-  };
-
-  const isCompactTab =
-    effectiveTabId === "overview" || effectiveTabId === "license";
-  const modalClassName = `settings-modal${
-    isCompactTab ? " settings-modal-compact" : ""
-  }`;
-
-  return (
-    <div className="modal-backdrop settings-confirm-backdrop" aria-modal="true">
-      <div
-        className={modalClassName}
-        role="dialog"
-        aria-label="系统设置"
-        ref={containerRef}
-        tabIndex={-1}
-      >
-        <div className="settings-modal-header">
-          <div>
-            <h2>系统设置</h2>
-            <p>统一管理巡检项、Agent 节点以及 License 授权。</p>
-          </div>
-          <button
-            type="button"
-            className="link-button"
-            onClick={onClose}
-            aria-label="关闭设置"
-          >
-            关闭
-          </button>
-        </div>
-        <div className="settings-modal-shell">
-          <div className="settings-modal-sidebar">
-            <nav className="settings-modal-nav">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  className={`settings-nav-button${
-                    tab.id === effectiveTabId ? " active" : ""
-                  }`}
-                  onClick={() => selectTab(tab.id)}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </nav>
-            {user && (
-              <div className="settings-user-card">
-                <div className="settings-user-avatar">
-                  {(user.display_name || user.username || "A")[0]?.toUpperCase()}
-                </div>
-                <div className="settings-user-info">
-                  <div className="settings-user-name">
-                    {user.display_name || user.username}
-                  </div>
-                  <div className="settings-user-meta">
-                    账号：{user.username}
-                  </div>
-                  <div className="settings-user-actions">
-                    <button
-                      type="button"
-                      className="secondary ghost"
-                      onClick={onChangePassword}
-                    >
-                      修改密码
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary danger"
-                      onClick={onLogout}
-                    >
-                      退出登录
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-          <section className="settings-modal-main">
-            {currentTab.render({
-              close: onClose,
-              selectTab,
-            })}
-          </section>
-        </div>
-      </div>
-      {confirmState && (
-        <ConfirmationModal
-          state={confirmState}
-          onClose={onConfirmClose ?? onClose}
-        />
-      )}
-    </div>
-  );
 };
 
 interface SettingsOverviewPanelProps {
@@ -5843,15 +5549,15 @@ const InspectionSettingsPanel = ({
     : "当前账号无巡检项管理权限。";
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [editingItem, setEditingItem] = useState<InspectionItem | null>(null);
+  const [formModalOpen, setFormModalOpen] = useState(false);
   const [formName, setFormName] = useState("");
   const [formDescription, setFormDescription] = useState("");
   const [formTypeMode, setFormTypeMode] = useState<
-    "command" | "promql" | "other"
-  >("other");
+    "command" | "promql"
+  >("command");
   const [prometheusVersion, setPrometheusVersion] = useState(
     DEFAULT_PROMETHEUS_VERSION
   );
-  const [customCheckType, setCustomCheckType] = useState("custom");
   const [commandText, setCommandText] = useState("");
   const [commandSuggestion, setCommandSuggestion] = useState("");
   const [promqlExpression, setPromqlExpression] = useState("");
@@ -5865,7 +5571,7 @@ const InspectionSettingsPanel = ({
   const [formError, setFormError] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [itemFilterType, setItemFilterType] = useState<
-    "all" | "command" | "promql" | "other"
+    "all" | "command" | "promql"
   >("all");
   const [itemFilterVersion, setItemFilterVersion] = useState<string>("all");
   const [pageSize, setPageSize] = useState(20);
@@ -5876,9 +5582,8 @@ const InspectionSettingsPanel = ({
     if (!editingItem) {
       setFormName("");
       setFormDescription("");
-      setFormTypeMode("other");
+      setFormTypeMode("command");
       setPrometheusVersion(DEFAULT_PROMETHEUS_VERSION);
-      setCustomCheckType("custom");
       setCommandText("");
       setPromqlExpression("");
       setPromqlComparison(">=");
@@ -5891,10 +5596,11 @@ const InspectionSettingsPanel = ({
   }, [editingItem]);
 
   const startEdit = (item: InspectionItem) => {
+    setFormModalOpen(true);
     setEditingItem(item);
     setFormName(item.name ?? "");
     setFormDescription(item.description ?? "");
-    const rawType = (item.check_type ?? "custom").trim();
+    const rawType = (item.check_type ?? "command").trim();
     if (isPromqlType(rawType)) {
       setPrometheusVersion(
         normalizePrometheusVersion(
@@ -5910,7 +5616,6 @@ const InspectionSettingsPanel = ({
     setConfigText(JSON.stringify(config, null, 2));
     if (rawType === "command") {
       setFormTypeMode("command");
-      setCustomCheckType("custom");
       const commandValue = config.command;
       if (Array.isArray(commandValue)) {
         setCommandText(commandValue.map(String).join(" "));
@@ -5926,7 +5631,6 @@ const InspectionSettingsPanel = ({
       );
     } else if (rawType === "promql") {
       setFormTypeMode("promql");
-      setCustomCheckType("custom");
       setPromqlExpression(String(config.expression ?? ""));
       const comparisonRaw = String(config.comparison ?? ">=");
       setPromqlComparison(comparisonRaw === "=" ? "==" : comparisonRaw);
@@ -5954,8 +5658,7 @@ const InspectionSettingsPanel = ({
         threshold === null || threshold === undefined ? "" : String(threshold)
       );
     } else {
-      setFormTypeMode("other");
-      setCustomCheckType(rawType || "custom");
+      setFormTypeMode("command");
       setCommandText("");
       setPromqlExpression("");
       setPromqlComparison(">=");
@@ -5970,9 +5673,8 @@ const InspectionSettingsPanel = ({
     setEditingItem(null);
     setFormName("");
     setFormDescription("");
-    setFormTypeMode("other");
+    setFormTypeMode("command");
     setPrometheusVersion(DEFAULT_PROMETHEUS_VERSION);
-    setCustomCheckType("custom");
     setCommandText("");
     setCommandSuggestion("");
     setPromqlExpression("");
@@ -5982,6 +5684,11 @@ const InspectionSettingsPanel = ({
     setPromqlDescribe("");
     setConfigText("{}");
     setFormError(null);
+  };
+
+  const startCreate = () => {
+    resetForm();
+    setFormModalOpen(true);
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -5996,12 +5703,7 @@ const InspectionSettingsPanel = ({
       setFormError("巡检项名称不能为空");
       return;
     }
-    const resolvedCheckType =
-      formTypeMode === "command"
-        ? "command"
-        : formTypeMode === "promql"
-          ? "promql"
-          : customCheckType.trim() || "custom";
+    const resolvedCheckType = formTypeMode === "promql" ? "promql" : "command";
     const resolvedPrometheusVersion =
       resolvedCheckType === "promql"
         ? normalizePrometheusVersion(
@@ -6009,10 +5711,6 @@ const InspectionSettingsPanel = ({
             prometheusVersionOptions
           )
         : undefined;
-    if (formTypeMode === "other" && !customCheckType.trim()) {
-      setFormError("请输入自定义类型名称");
-      return;
-    }
     const baseConfig =
       editingItem &&
       editingItem.check_type === resolvedCheckType &&
@@ -6096,6 +5794,7 @@ const InspectionSettingsPanel = ({
       config: parsedConfig,
     });
     resetForm();
+    setFormModalOpen(false);
   };
 
 
@@ -6251,9 +5950,6 @@ const InspectionSettingsPanel = ({
     setPageInput("");
   }, [pageInput, totalPages]);
 
-  const currentSummary = editingItem
-    ? `正在编辑：${editingItem.name}`
-    : "";
   const promqlSeverityLabel = promqlSeverity === "critical" ? "严重" : "告警";
   const showVersionColumn =
     itemFilterType === "all" || itemFilterType === "promql";
@@ -6262,10 +5958,19 @@ const InspectionSettingsPanel = ({
     <div className="inspection-settings-panel">
       <div className="settings-header">
         <div>
-          <h3>巡检项管理</h3>
-          {currentSummary && <p>{currentSummary}</p>}
+          <h3>巡检项</h3>
         </div>
         <div className="settings-actions">
+          {!readOnly && (
+            <button
+              type="button"
+              className="primary"
+              onClick={startCreate}
+              disabled={submitting}
+            >
+              添加巡检项
+            </button>
+          )}
           <button
             type="button"
             className="secondary"
@@ -6312,82 +6017,136 @@ const InspectionSettingsPanel = ({
       <div className="inspection-settings-body">
         <section className="inspection-section inspection-section-list">
           <div className="inspection-section-header">
-            <div>
-              <h4>已有巡检项</h4>
-              <span className="inspection-section-hint">
-                支持批量选择、导出与删除操作
-              </span>
+            <div className="settings-actions compact">
+              {!readOnly && (
+                <>
+                  <label className="table-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={
+                        filteredItems.length > 0 &&
+                        selectedFilteredCount === filteredItems.length
+                      }
+                      onChange={toggleSelectAll}
+                    />
+                    <span>全选</span>
+                  </label>
+                  <span className="muted-text">
+                    已选 {selectedFilteredCount} / {totalItems}
+                  </span>
+                  <button
+                    type="button"
+                    className="link-button danger"
+                    onClick={handleDeleteSelected}
+                    disabled={selectedFilteredCount === 0}
+                  >
+                    删除
+                  </button>
+                </>
+              )}
+              <label className="settings-filter">
+                类型
+                <select
+                  value={itemFilterType}
+                  onChange={(event) =>
+                    setItemFilterType(
+                      event.target.value as "all" | "command" | "promql"
+                    )
+                  }
+                >
+                  <option value="all">全部</option>
+                  <option value="command">命令行</option>
+                  <option value="promql">PromQL</option>
+                </select>
+              </label>
+              {itemFilterType === "promql" && (
+                <label className="settings-filter">
+                  Prometheus 版本
+                  <select
+                    value={itemFilterVersion}
+                    onChange={(event) =>
+                      setItemFilterVersion(event.target.value)
+                    }
+                  >
+                    <option value="all">全部</option>
+                    {prometheusVersionOptions.map((version) => (
+                      <option key={version} value={version}>
+                        {version}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <span className="inspection-section-count">共 {totalItems} 条</span>
             </div>
-            <span className="inspection-section-count">共 {totalItems} 条</span>
-          </div>
-          <div className="settings-list">
-            <div className="settings-list-header">
-              <div className="settings-actions">
-                {!readOnly && (
-                  <>
-                    <label className="table-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={
-                          filteredItems.length > 0 &&
-                          selectedFilteredCount === filteredItems.length
-                        }
-                        onChange={toggleSelectAll}
-                      />
-                      <span>全选</span>
-                    </label>
-                    <span>已选 {selectedFilteredCount} / {totalItems}</span>
-                    <button
-                      type="button"
-                      className="link-button danger"
-                      onClick={handleDeleteSelected}
-                      disabled={selectedFilteredCount === 0}
-                    >
-                      删除
-                    </button>
-                  </>
-                )}
-                {itemFilterType === "promql" && (
-                  <label className="settings-filter">
-                    Prometheus 版本
+            {items.length > 0 && (
+              <div className="inspection-section-pagination">
+                <div className="inline-pagination history-pagination-controls">
+                  <label className="page-size-control">
+                    每页
                     <select
-                      value={itemFilterVersion}
+                      value={pageSize}
                       onChange={(event) =>
-                        setItemFilterVersion(event.target.value)
+                        setPageSize(Number(event.target.value))
                       }
                     >
-                      <option value="all">全部</option>
-                      {prometheusVersionOptions.map((version) => (
-                        <option key={version} value={version}>
-                          {version}
+                      {[20, 50, 100].map((size) => (
+                        <option key={size} value={size}>
+                          {size}
                         </option>
                       ))}
                     </select>
                   </label>
-                )}
-                <label className="settings-filter">
-                  类型
-                  <select
-                    value={itemFilterType}
-                    onChange={(event) =>
-                      setItemFilterType(
-                        event.target.value as
-                          | "all"
-                          | "command"
-                          | "promql"
-                          | "other"
-                      )
-                    }
-                  >
-                    <option value="all">全部</option>
-                    <option value="command">命令行</option>
-                    <option value="promql">PromQL</option>
-                    <option value="other">其他</option>
-                  </select>
-                </label>
+                  <div className="history-pagination-buttons">
+                    <button
+                      type="button"
+                      className="page-button"
+                      disabled={page <= 1}
+                      onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
+                    >
+                      上一页
+                    </button>
+                    <span>
+                      第 {page} / {totalPages} 页
+                    </span>
+                    <button
+                      type="button"
+                      className="page-button"
+                      disabled={page >= totalPages}
+                      onClick={() =>
+                        setPage((prev) => Math.min(prev + 1, totalPages))
+                      }
+                    >
+                      下一页
+                    </button>
+                  </div>
+                  <div className="page-jump">
+                    跳转
+                    <input
+                      className="page-jump-input"
+                      value={pageInput}
+                      onChange={(event) => setPageInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          handlePageJump();
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="page-button"
+                      onClick={handlePageJump}
+                    >
+                      确定
+                    </button>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div className="table-wrapper">
+            )}
+          </div>
+          <div className="settings-list full">
+            <div className="table-wrapper spacious">
               {items.length === 0 ? (
                 <div className="placeholder">暂无巡检项</div>
               ) : filteredItems.length === 0 ? (
@@ -6463,147 +6222,101 @@ const InspectionSettingsPanel = ({
               )}
             </div>
             {items.length > 0 && (
-              <div className="settings-pagination">
-                <label className="page-size-control">
-                  每页
-                  <select
-                    value={pageSize}
-                    onChange={(event) =>
-                      setPageSize(Number(event.target.value))
-                    }
-                  >
-                    {[20, 50, 100].map((size) => (
-                      <option key={size} value={size}>
-                        {size}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="history-pagination-buttons">
-                  <button
-                    type="button"
-                    className="page-button"
-                    disabled={page <= 1}
-                    onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
-                  >
-                    上一页
-                  </button>
-                  <span>
-                    第 {page} / {totalPages} 页
-                  </span>
-                  <button
-                    type="button"
-                    className="page-button"
-                    disabled={page >= totalPages}
-                    onClick={() =>
-                      setPage((prev) => Math.min(prev + 1, totalPages))
-                    }
-                  >
-                    下一页
-                  </button>
-                </div>
-                <div className="page-jump">
-                  跳转
-                  <input
-                    className="page-jump-input"
-                    value={pageInput}
-                    onChange={(event) => setPageInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        handlePageJump();
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="page-button"
-                    onClick={handlePageJump}
-                  >
-                    确定
-                  </button>
-                </div>
-              </div>
+              <></>
             )}
           </div>
         </section>
-        {!readOnly && (
-          <section className="inspection-section inspection-section-form">
-            <div className="inspection-section-header">
-              <div>
-                <h4>{editingItem ? "编辑巡检项" : "新增巡检项"}</h4>
-                <span className="inspection-section-hint">
-                  选择类型后填写配置，保存后立即生效
-                </span>
-              </div>
+      </div>
+      {!readOnly && formModalOpen && (
+        <div className="modal-backdrop fullscreen">
+          <div className="modal compact inspection-item-modal">
+            <div className="modal-header">
+              <h3>{editingItem ? "编辑巡检项" : "添加巡检项"}</h3>
+              <button
+                type="button"
+                className="link-button modal-close"
+                onClick={() => {
+                  resetForm();
+                  setFormModalOpen(false);
+                }}
+              >
+                关闭
+              </button>
             </div>
-            <form className="settings-form inspection-form" onSubmit={handleSubmit}>
-              <label>
-                名称
-                <input
-                  type="text"
-                  value={formName}
-                  onChange={(event) => setFormName(event.target.value)}
-                  disabled={submitting}
-                  placeholder="例如：etcd-health"
-                />
-              </label>
-              {formTypeMode === "promql" && (
-                <label>
-                  Prometheus 版本
-                  <select
-                    value={prometheusVersion}
-                    onChange={(event) => setPrometheusVersion(event.target.value)}
-                    disabled={submitting}
-                  >
-                    {prometheusVersionOptions.map((version) => (
-                      <option key={version} value={version}>
-                        {version}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <label>
-                类型
-                <select
-                  value={formTypeMode}
-                  onChange={(event) =>
-                    setFormTypeMode(
-                      event.target.value as "command" | "promql" | "other"
-                    )
-                  }
-                  disabled={submitting}
-                >
-                  <option value="command">命令行</option>
-                  <option value="promql">PromQL</option>
-                  <option value="other">其他</option>
-                </select>
-              </label>
-              {formTypeMode === "other" && (
-                <label>
-                  自定义类型
+            <form
+              className="settings-form inspection-form inspection-form-grid"
+              onSubmit={handleSubmit}
+            >
+              <div className="field-row field-span-full inspection-form-row-two">
+                <label className="field-compact">
+                  名称
                   <input
                     type="text"
-                    value={customCheckType}
-                    onChange={(event) => setCustomCheckType(event.target.value)}
+                    value={formName}
+                    onChange={(event) => setFormName(event.target.value)}
                     disabled={submitting}
-                    placeholder="custom"
+                    placeholder="例如：etcd-health"
+                  />
+                </label>
+                <label className="field-narrow field-type">
+                  类型
+                  <select
+                    value={formTypeMode}
+                    onChange={(event) =>
+                      setFormTypeMode(
+                        event.target.value as "command" | "promql"
+                      )
+                    }
+                    disabled={submitting}
+                  >
+                    <option value="command">命令行</option>
+                    <option value="promql">PromQL</option>
+                  </select>
+                </label>
+              </div>
+              {formTypeMode === "promql" ? (
+                <div className="field-row field-span-full inspection-form-row-two">
+                  <label className="field-narrow field-prom-version">
+                    Prometheus 版本
+                    <select
+                      value={prometheusVersion}
+                      onChange={(event) =>
+                        setPrometheusVersion(event.target.value)
+                      }
+                      disabled={submitting}
+                    >
+                      {prometheusVersionOptions.map((version) => (
+                        <option key={version} value={version}>
+                          {version}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field-compact field-desc">
+                    描述
+                    <input
+                      type="text"
+                      value={formDescription}
+                      onChange={(event) => setFormDescription(event.target.value)}
+                      disabled={submitting}
+                      placeholder="可选"
+                    />
+                  </label>
+                </div>
+              ) : (
+                <label className="field-span-2">
+                  描述
+                  <input
+                    type="text"
+                    value={formDescription}
+                    onChange={(event) => setFormDescription(event.target.value)}
+                    disabled={submitting}
+                    placeholder="可选"
                   />
                 </label>
               )}
-              <label>
-                描述
-                <input
-                  type="text"
-                  value={formDescription}
-                  onChange={(event) => setFormDescription(event.target.value)}
-                  disabled={submitting}
-                  placeholder="可选"
-                />
-              </label>
               {formTypeMode === "command" && (
-                <label>
+                <label className="field-span-full">
                   命令
                   <input
                     type="text"
@@ -6615,20 +6328,20 @@ const InspectionSettingsPanel = ({
                 </label>
               )}
               {formTypeMode === "command" && (
-                <label>
+                <label className="field-span-full">
                   告警建议
                   <textarea
                     value={commandSuggestion}
                     onChange={(event) => setCommandSuggestion(event.target.value)}
                     disabled={submitting}
-                    rows={3}
+                    rows={2}
                     placeholder="例如：检查证书是否临近过期"
                   />
                 </label>
               )}
               {formTypeMode === "promql" && (
                 <>
-                  <label>
+                  <label className="field-span-full">
                     PromQL 表达式
                     <input
                       type="text"
@@ -6638,8 +6351,8 @@ const InspectionSettingsPanel = ({
                       placeholder="例如：sum(rate(container_cpu_usage_seconds_total[5m]))"
                     />
                   </label>
-                  <div className="field-row">
-                    <label>
+                  <div className="field-row field-span-full inspection-form-row-tight">
+                    <label className="field-narrow field-tiny field-alert-level field-alert-severity">
                       严重程度
                       <select
                         value={promqlSeverity}
@@ -6652,9 +6365,9 @@ const InspectionSettingsPanel = ({
                       >
                         <option value="warning">告警</option>
                         <option value="critical">Critical（严重）</option>
-                      </select>
-                    </label>
-                    <label>
+                    </select>
+                  </label>
+                    <label className="field-narrow field-tiny">
                       比较符
                       <select
                         value={promqlComparison}
@@ -6677,7 +6390,7 @@ const InspectionSettingsPanel = ({
                         ))}
                       </select>
                     </label>
-                    <label>
+                    <label className="field-narrow field-tiny field-alert-level">
                       {promqlSeverityLabel}阈值
                       <input
                         type="number"
@@ -6688,50 +6401,458 @@ const InspectionSettingsPanel = ({
                       />
                     </label>
                   </div>
-                  <label>
+                  <label className="field-span-full">
                     {promqlSeverityLabel}建议
                     <textarea
                       value={promqlDescribe}
                       onChange={(event) => setPromqlDescribe(event.target.value)}
                       disabled={submitting}
-                      rows={3}
+                      rows={2}
                       placeholder="达到阈值时写入巡检建议，例如：检查集群负载或扩容"
                     />
                   </label>
                 </>
               )}
-            {formTypeMode === "other" && (
-              <label>
+              <label className="field-span-full">
                 配置 (JSON)
                 <textarea
                   value={configText}
                   onChange={(event) => setConfigText(event.target.value)}
-                  rows={6}
+                  rows={4}
                   disabled={submitting}
                 />
               </label>
-            )}
-            <div className="settings-actions">
+              <div className="settings-actions field-span-full">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={resetForm}
+                  disabled={submitting}
+                >
+                  重置
+                </button>
+                <button
+                  type="submit"
+                  className="primary"
+                  disabled={submitting}
+                >
+                  {editingItem ? "保存修改" : "添加"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface InspectionTemplateSettingsPanelProps {
+  templates: InspectionItemTemplate[];
+  items: InspectionItem[];
+  prometheusVersionOptions: string[];
+  submitting: boolean;
+  notice: string | null;
+  error: string | null;
+  license: LicenseCapabilities;
+  canManage: boolean;
+  onSave: (payload: {
+    id?: number;
+    name: string;
+    itemIds: number[];
+  }) => Promise<void>;
+  onDelete: (template: InspectionItemTemplate) => void;
+}
+
+const InspectionTemplateSettingsPanel = ({
+  templates,
+  items,
+  prometheusVersionOptions,
+  submitting,
+  notice,
+  error,
+  license,
+  canManage,
+  onSave,
+  onDelete,
+}: InspectionTemplateSettingsPanelProps) => {
+  const readOnly = !license.canRunInspections || !canManage;
+  const readOnlyMessage = !license.canRunInspections
+    ? license.reason ?? "当前 License 不支持巡检项模板。"
+    : "当前账号无巡检项模板管理权限。";
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingTemplate, setEditingTemplate] =
+    useState<InspectionItemTemplate | null>(null);
+  const [templateName, setTemplateName] = useState("");
+  const [templateItemIds, setTemplateItemIds] = useState<number[]>([]);
+  const [templateKeyword, setTemplateKeyword] = useState("");
+  const [templatePromVersion, setTemplatePromVersion] = useState("all");
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const itemNameMap = useMemo(() => {
+    const map = new Map<number, string>();
+    items.forEach((item) => map.set(item.id, item.name));
+    return map;
+  }, [items]);
+
+  useEffect(() => {
+    setTemplateItemIds((prev) =>
+      prev.filter((id) => itemNameMap.has(id))
+    );
+  }, [itemNameMap]);
+
+  const filteredItems = useMemo(() => {
+    const keyword = templateKeyword.trim().toLowerCase();
+    const list = items
+      .slice()
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    if (!keyword) {
+      return list.filter((item) => {
+        if (!isPromqlType(item.check_type)) {
+          return true;
+        }
+        if (templatePromVersion === "all") {
+          return true;
+        }
+        return (
+          normalizePrometheusVersion(
+            item.prometheus_version,
+            prometheusVersionOptions
+          ) === templatePromVersion
+        );
+      });
+    }
+    return list.filter((item) => {
+      const name = (item.name || "").toLowerCase();
+      const desc = (item.description || "").toLowerCase();
+      const matchesKeyword = name.includes(keyword) || desc.includes(keyword);
+      if (!matchesKeyword) {
+        return false;
+      }
+      if (!isPromqlType(item.check_type)) {
+        return true;
+      }
+      if (templatePromVersion === "all") {
+        return true;
+      }
+      return (
+        normalizePrometheusVersion(
+          item.prometheus_version,
+          prometheusVersionOptions
+        ) === templatePromVersion
+      );
+    });
+  }, [items, templateKeyword, templatePromVersion, prometheusVersionOptions]);
+
+  const allFilteredTemplateItemsSelected =
+    filteredItems.length > 0 &&
+    filteredItems.every((item) => templateItemIds.includes(item.id));
+
+  const handleToggleAllTemplateItems = useCallback(() => {
+    if (readOnly) {
+      return;
+    }
+    setTemplateItemIds((prev) => {
+      const next = new Set(prev);
+      const allSelected =
+        filteredItems.length > 0 &&
+        filteredItems.every((item) => next.has(item.id));
+      if (allSelected) {
+        filteredItems.forEach((item) => next.delete(item.id));
+      } else {
+        filteredItems.forEach((item) => next.add(item.id));
+      }
+      return Array.from(next);
+    });
+  }, [filteredItems, readOnly]);
+
+  const resetForm = () => {
+    setEditingTemplate(null);
+    setTemplateName("");
+    setTemplateItemIds([]);
+    setTemplateKeyword("");
+    setTemplatePromVersion("all");
+    setFormError(null);
+  };
+
+  const handleOpenCreate = () => {
+    resetForm();
+    setFormOpen(true);
+  };
+
+  const handleOpenEdit = (template: InspectionItemTemplate) => {
+    setEditingTemplate(template);
+    setTemplateName(template.name);
+    setTemplateItemIds(template.item_ids ?? []);
+    setTemplateKeyword("");
+    setTemplatePromVersion("all");
+    setFormError(null);
+    setFormOpen(true);
+  };
+
+  const handleCloseForm = () => {
+    setFormOpen(false);
+    resetForm();
+  };
+
+  const handleToggleItem = (itemId: number) => {
+    if (readOnly) {
+      return;
+    }
+    setTemplateItemIds((prev) =>
+      prev.includes(itemId)
+        ? prev.filter((id) => id !== itemId)
+        : [...prev, itemId]
+    );
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (readOnly) {
+      setFormError(readOnlyMessage);
+      return;
+    }
+    if (!templateName.trim()) {
+      setFormError("模板名称不能为空");
+      return;
+    }
+    if (templateItemIds.length === 0) {
+      setFormError("请至少选择一个巡检项");
+      return;
+    }
+    setFormError(null);
+    try {
+      await onSave({
+        id: editingTemplate?.id,
+        name: templateName,
+        itemIds: templateItemIds,
+      });
+      handleCloseForm();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "保存巡检项模板失败";
+      setFormError(message);
+    }
+  };
+
+  return (
+    <div className="inspection-settings-panel template-settings-panel">
+      <div className="settings-header">
+        <div>
+          <h3>巡检项模板</h3>
+        </div>
+        <div className="settings-actions">
+          {!readOnly && (
+            <button
+              type="button"
+              className="primary"
+              onClick={handleOpenCreate}
+              disabled={submitting}
+            >
+              新增模板
+            </button>
+          )}
+        </div>
+      </div>
+      {notice && <div className="feedback success">{notice}</div>}
+      {error && <div className="feedback error">{error}</div>}
+      {readOnly && (
+        <div className="feedback warning">{readOnlyMessage}</div>
+      )}
+      <div className="settings-list full">
+        <div className="settings-list-header">
+          <span className="settings-list-count">
+            共 {templates.length} 条
+          </span>
+        </div>
+        <div className="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>模板名称</th>
+                <th>包含巡检项</th>
+                <th className="th-nowrap">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {templates.length === 0 ? (
+                <tr>
+                  <td colSpan={3}>暂无模板</td>
+                </tr>
+              ) : (
+                templates.map((template) => {
+                  const names = (template.item_ids ?? [])
+                    .map((id) => {
+                      const item = items.find((entry) => entry.id === id);
+                      if (!item) {
+                        return `#${id}`;
+                      }
+                      if (isPromqlType(item.check_type)) {
+                        const versionLabel = normalizePrometheusVersion(
+                          item.prometheus_version,
+                          prometheusVersionOptions
+                        );
+                        return `${item.name}(${versionLabel})`;
+                      }
+                      return item.name;
+                    })
+                    .filter(Boolean);
+                  let summary = "-";
+                  if (names.length > 0) {
+                    summary =
+                      names.length > 3
+                        ? `${names.slice(0, 3).join("、")} 等 ${names.length} 项`
+                        : names.join("、");
+                  }
+                  return (
+                    <tr key={template.id}>
+                      <td>{template.name}</td>
+                      <td className="template-items-cell">{summary}</td>
+                      <td>
+                        {!readOnly ? (
+                          <div className="table-actions">
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={() => handleOpenEdit(template)}
+                            >
+                              编辑
+                            </button>
+                            <button
+                              type="button"
+                              className="link-button danger"
+                              onClick={() => onDelete(template)}
+                            >
+                              删除
+                            </button>
+                          </div>
+                        ) : (
+                          <span>-</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {formOpen && (
+        <div className="modal-backdrop fullscreen">
+          <div className="modal compact template-modal">
+            <div className="modal-header">
+              <h3>{editingTemplate ? "编辑模板" : "新增模板"}</h3>
               <button
                 type="button"
-                className="secondary"
-                onClick={resetForm}
-                disabled={submitting}
+                className="link-button modal-close"
+                onClick={handleCloseForm}
               >
-                重置
-              </button>
-              <button
-                type="submit"
-                className="primary"
-                disabled={submitting}
-              >
-                {editingItem ? "保存修改" : "新增"}
+                关闭
               </button>
             </div>
+            {formError && <div className="feedback error">{formError}</div>}
+            <form className="settings-form template-form" onSubmit={handleSubmit}>
+              <label>
+                模板名称
+                <input
+                  type="text"
+                  className="template-name-input"
+                  value={templateName}
+                  onChange={(event) => setTemplateName(event.target.value)}
+                  disabled={submitting}
+                  placeholder="例如：生产环境巡检"
+                />
+              </label>
+              <div className="template-form-toolbar">
+                <input
+                  type="text"
+                  className="inspection-items-filter"
+                  value={templateKeyword}
+                  onChange={(event) => setTemplateKeyword(event.target.value)}
+                  placeholder="搜索巡检项"
+                  disabled={submitting}
+                />
+                <select
+                  className="inspection-items-filter inspection-template-select"
+                  value={templatePromVersion}
+                  onChange={(event) => setTemplatePromVersion(event.target.value)}
+                  disabled={submitting}
+                >
+                  <option value="all">Prometheus版本</option>
+                  {prometheusVersionOptions.map((version) => (
+                    <option key={version} value={version}>
+                      {version}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="secondary template-select-all"
+                  onClick={handleToggleAllTemplateItems}
+                  disabled={submitting || readOnly || filteredItems.length === 0}
+                >
+                  {allFilteredTemplateItemsSelected ? "取消全选" : "全选"}
+                </button>
+                <span className="selection-hint">
+                  已选 {templateItemIds.length} / {filteredItems.length}
+                </span>
+              </div>
+              <div className="template-item-list">
+                {filteredItems.length === 0 ? (
+                  <div className="placeholder">未找到巡检项</div>
+                ) : (
+                  <ul className="item-list">
+                    {filteredItems.map((item) => (
+                      <li key={item.id}>
+                        <label className="template-item-row">
+                          <input
+                            type="checkbox"
+                            checked={templateItemIds.includes(item.id)}
+                            onChange={() => handleToggleItem(item.id)}
+                            disabled={submitting || readOnly}
+                          />
+                          <div className="template-item-content">
+                            <div className="item-title-row">
+                              <div className="item-name">{item.name}</div>
+                              {isPromqlType(item.check_type) && (
+                                <span className="item-tag promql">
+                                  PromQL ·{" "}
+                                  {normalizePrometheusVersion(
+                                    item.prometheus_version,
+                                    prometheusVersionOptions
+                                  )}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div className="settings-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={handleCloseForm}
+                  disabled={submitting}
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="primary"
+                  disabled={submitting || readOnly}
+                >
+                  {submitting ? "保存中..." : "保存"}
+                </button>
+              </div>
             </form>
-          </section>
-        )}
-      </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -6760,6 +6881,8 @@ const PrometheusVersionSettingsPanel = ({
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showDeleteControls, setShowDeleteControls] = useState(false);
+
+  useAutoClearError(error, setError);
 
   const usageMap = useMemo(() => {
     const counts = new Map<string, number>();
@@ -6936,6 +7059,7 @@ interface ScheduleSettingsPanelProps {
   clusters: ClusterConfig[];
   clusterDisplayIds: Record<number, string>;
   items: InspectionItem[];
+  templates: InspectionItemTemplate[];
   prometheusVersionOptions: string[];
   submitting: boolean;
   notice: string | null;
@@ -6947,7 +7071,9 @@ interface ScheduleSettingsPanelProps {
     name?: string;
     cron: string;
     clusterIds: number[];
+    templateIds: number[];
     itemIds: number[];
+    reportRetentionCount: number;
     isEnabled: boolean;
   }) => Promise<void>;
   onDelete: (schedule: InspectionSchedule) => void;
@@ -6960,6 +7086,7 @@ const ScheduleSettingsPanel = ({
   clusters,
   clusterDisplayIds,
   items,
+  templates,
   prometheusVersionOptions,
   submitting,
   notice,
@@ -6987,10 +7114,21 @@ const ScheduleSettingsPanel = ({
   const [formEnabled, setFormEnabled] = useState(true);
   const [selectedClusterIds, setSelectedClusterIds] = useState<number[]>([]);
   const [selectedItemIds, setSelectedItemIds] = useState<number[]>([]);
+  const [selectedTemplateIds, setSelectedTemplateIds] = useState<number[]>([]);
   const [clusterKeyword, setClusterKeyword] = useState("");
   const [itemKeyword, setItemKeyword] = useState("");
   const [itemVersionFilter, setItemVersionFilter] = useState("all");
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [templateKeyword, setTemplateKeyword] = useState("");
+  const [scheduleRetentionCount, setScheduleRetentionCount] = useState(() =>
+    String(DEFAULT_SCHEDULE_REPORT_RETENTION_COUNT)
+  );
+  const [clusterPickerOpen, setClusterPickerOpen] = useState(false);
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const scheduleFormErrorRef = useRef<HTMLDivElement | null>(null);
+  const scheduleClusterPickerRef = useRef<HTMLDivElement | null>(null);
+  const scheduleTemplatePickerRef = useRef<HTMLDivElement | null>(null);
   const [scheduleKeyword, setScheduleKeyword] = useState("");
   const [scheduleStatusFilter, setScheduleStatusFilter] = useState<
     "all" | "enabled" | "disabled"
@@ -7034,9 +7172,15 @@ const ScheduleSettingsPanel = ({
     setFormEnabled(true);
     setSelectedClusterIds([]);
     setSelectedItemIds([]);
+    setSelectedTemplateIds([]);
     setClusterKeyword("");
+    setTemplateKeyword("");
     setItemKeyword("");
     setItemVersionFilter("all");
+    setSelectedTemplateId("");
+    setScheduleRetentionCount(String(DEFAULT_SCHEDULE_REPORT_RETENTION_COUNT));
+    setClusterPickerOpen(false);
+    setTemplatePickerOpen(false);
     setFormError(null);
   }, []);
 
@@ -7055,10 +7199,77 @@ const ScheduleSettingsPanel = ({
     setCronMonth(resolvedParts[3]);
     setCronWeek(resolvedParts[4]);
     setFormEnabled(editingSchedule.is_enabled);
-    setSelectedClusterIds(editingSchedule.cluster_ids ?? []);
+    setSelectedClusterIds(
+      editingSchedule.cluster_ids?.length
+        ? [editingSchedule.cluster_ids[0]]
+        : []
+    );
     setSelectedItemIds(editingSchedule.item_ids ?? []);
+    const persistedTemplateIds = Array.isArray(editingSchedule.template_ids)
+      ? editingSchedule.template_ids
+          .map((value) => Number(value))
+          .filter(
+            (value, index, list) =>
+              Number.isInteger(value) &&
+              value > 0 &&
+              list.indexOf(value) === index &&
+              templates.some((template) => template.id === value)
+          )
+      : [];
+    if (persistedTemplateIds.length > 0) {
+      setSelectedTemplateIds(persistedTemplateIds);
+    } else {
+      const scheduleItemIdSet = new Set(editingSchedule.item_ids ?? []);
+      const templateCandidates = templates
+        .map((template) => {
+          const normalizedItemIds = Array.from(
+            new Set(
+              (template.item_ids ?? []).filter((itemId) => scheduleItemIdSet.has(itemId))
+            )
+          );
+          return {
+            id: template.id,
+            itemIds: normalizedItemIds,
+          };
+        })
+        .filter((template) => template.itemIds.length > 0)
+        .filter((template) =>
+          template.itemIds.every((itemId) => scheduleItemIdSet.has(itemId))
+        )
+        .sort((a, b) => {
+          if (b.itemIds.length !== a.itemIds.length) {
+            return b.itemIds.length - a.itemIds.length;
+          }
+          return a.id - b.id;
+        });
+      const coveredItemIds = new Set<number>();
+      const matchedTemplateIds: number[] = [];
+      templateCandidates.forEach((candidate) => {
+        const addsNewItem = candidate.itemIds.some(
+          (itemId) => !coveredItemIds.has(itemId)
+        );
+        if (!addsNewItem) {
+          return;
+        }
+        matchedTemplateIds.push(candidate.id);
+        candidate.itemIds.forEach((itemId) => coveredItemIds.add(itemId));
+      });
+      setSelectedTemplateIds(matchedTemplateIds);
+    }
+    setTemplateKeyword("");
+    const editingClusterId = editingSchedule.cluster_ids?.[0];
+    const editingCluster = editingClusterId
+      ? scheduleClusterMap.get(editingClusterId)
+      : null;
+    setClusterKeyword(editingCluster?.name ?? "");
+    setScheduleRetentionCount(
+      String(editingSchedule.report_retention_count || DEFAULT_SCHEDULE_REPORT_RETENTION_COUNT)
+    );
+    setClusterPickerOpen(false);
+    setTemplatePickerOpen(false);
+    setSelectedTemplateId("");
     setFormError(null);
-  }, [editingSchedule, resetForm]);
+  }, [editingSchedule, resetForm, scheduleClusterMap, templates]);
 
   useEffect(() => {
     setSelectedClusterIds((prev) =>
@@ -7092,6 +7303,52 @@ const ScheduleSettingsPanel = ({
     setSchedulePage(1);
     setSchedulePageInput("");
   }, [schedulePageSize, scheduleKeyword, scheduleStatusFilter]);
+
+  useEffect(() => {
+    if (formError && scheduleFormErrorRef.current) {
+      scheduleFormErrorRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }
+  }, [formError]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (
+        scheduleClusterPickerRef.current &&
+        target &&
+        !scheduleClusterPickerRef.current.contains(target)
+      ) {
+        setClusterPickerOpen(false);
+      }
+      if (
+        scheduleTemplatePickerRef.current &&
+        target &&
+        !scheduleTemplatePickerRef.current.contains(target)
+      ) {
+        setTemplatePickerOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", handlePointerDown);
+    return () => window.removeEventListener("mousedown", handlePointerDown);
+  }, []);
+
+  useEffect(() => {
+    if (selectedTemplateIds.length === 0) {
+      return;
+    }
+    const merged = new Set<number>();
+    selectedTemplateIds.forEach((templateId) => {
+      const template = templates.find((candidate) => candidate.id === templateId);
+      template?.item_ids?.forEach((itemId) => merged.add(itemId));
+    });
+    setSelectedItemIds(Array.from(merged));
+  }, [selectedTemplateIds, templates]);
 
   useEffect(() => {
     setSelectedScheduleIds((prev) =>
@@ -7137,22 +7394,59 @@ const ScheduleSettingsPanel = ({
       setFormError("请完整填写分/时/日/月/周");
       return;
     }
-    if (selectedAvailableClusterIds.length === 0) {
-      setFormError("请至少选择一个集群");
+    if (selectedAvailableClusterIds.length !== 1) {
+      setFormError("请选择一个集群");
       return;
     }
-    if (selectedItemIds.length === 0) {
-      setFormError("请至少选择一个巡检项");
+    const normalizedCron = parts.join(" ");
+    const selectedClusterId = selectedAvailableClusterIds[0];
+    const duplicatedSchedule = schedules.find((schedule) => {
+      if (editingSchedule?.id && schedule.id === editingSchedule.id) {
+        return false;
+      }
+      if ((schedule.cron || "").trim() !== normalizedCron) {
+        return false;
+      }
+      return (schedule.cluster_ids || []).includes(selectedClusterId);
+    });
+    if (duplicatedSchedule) {
+      setFormError("同一集群不能创建两个相同运行时间的定时任务");
       return;
     }
+    const resolvedItemIds =
+      selectedTemplateItemIds.length > 0 ? selectedTemplateItemIds : selectedItemIds;
+    if (resolvedItemIds.length === 0) {
+      setFormError("请至少选择一个巡检模板");
+      return;
+    }
+    const parsedRetentionCount = Number(scheduleRetentionCount.trim());
+    if (!Number.isFinite(parsedRetentionCount) || parsedRetentionCount <= 0) {
+      setFormError("保存份数需为正整数");
+      return;
+    }
+    const clusterName = selectedScheduleCluster?.name?.trim() || "定时巡检";
+    const firstTemplateName = selectedScheduleTemplates[0]?.name?.trim();
+    const templateSummary =
+      selectedScheduleTemplates.length === 0
+        ? "未选择模板"
+        : selectedScheduleTemplates.length === 1
+          ? firstTemplateName || "巡检模板"
+          : `${firstTemplateName || "巡检模板"}等${selectedScheduleTemplates.length}个模板`;
+    const derivedName = `${clusterName} | ${templateSummary} | ${parts.join(" ")}`.slice(
+      0,
+      100
+    );
+    const finalScheduleName = derivedName;
     setFormError(null);
     try {
       await onSave({
         id: editingSchedule?.id,
-        name: formName.trim(),
-        cron: parts.join(" "),
+        name: finalScheduleName,
+        cron: normalizedCron,
         clusterIds: selectedAvailableClusterIds,
-        itemIds: selectedItemIds,
+        templateIds: selectedTemplateIds,
+        itemIds: resolvedItemIds,
+        reportRetentionCount: Math.floor(parsedRetentionCount),
         isEnabled: formEnabled,
       });
       handleCloseForm();
@@ -7181,6 +7475,45 @@ const ScheduleSettingsPanel = ({
     );
   }, [availableClusters, clusterKeyword]);
 
+  const selectedScheduleCluster = useMemo(() => {
+    const selectedId = selectedAvailableClusterIds[0];
+    if (!selectedId) {
+      return null;
+    }
+    return (
+      availableClusters.find((cluster) => cluster.id === selectedId) ?? null
+    );
+  }, [availableClusters, selectedAvailableClusterIds]);
+
+  const filteredTemplateOptions = useMemo(() => {
+    const keyword = templateKeyword.trim().toLowerCase();
+    const list = templates.slice().sort((a, b) => {
+      const nameA = (a.name || "").toLowerCase();
+      const nameB = (b.name || "").toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+    if (!keyword) {
+      return list;
+    }
+    return list.filter((template) =>
+      (template.name || "").toLowerCase().includes(keyword)
+    );
+  }, [templateKeyword, templates]);
+
+  const selectedScheduleTemplates = useMemo(
+    () =>
+      templates.filter((template) => selectedTemplateIds.includes(template.id)),
+    [templates, selectedTemplateIds]
+  );
+
+  const selectedTemplateItemIds = useMemo(() => {
+    const merged = new Set<number>();
+    selectedScheduleTemplates.forEach((template) => {
+      template.item_ids.forEach((itemId) => merged.add(itemId));
+    });
+    return Array.from(merged);
+  }, [selectedScheduleTemplates]);
+
   const filteredClusterIdSet = useMemo(
     () => new Set(filteredClusters.map((cluster) => cluster.id)),
     [filteredClusters]
@@ -7195,13 +7528,18 @@ const ScheduleSettingsPanel = ({
     filteredClusters.length > 0 &&
     selectedFilteredClusterCount === filteredClusters.length;
 
-  const toggleCluster = useCallback((clusterId: number) => {
-    setSelectedClusterIds((prev) =>
-      prev.includes(clusterId)
-        ? prev.filter((id) => id !== clusterId)
-        : [...prev, clusterId]
-    );
-  }, []);
+  const toggleCluster = useCallback(
+    (clusterId: number) => {
+      setSelectedClusterIds((prev) => {
+        const next = prev[0] === clusterId ? [] : [clusterId];
+        const nextCluster =
+          next.length > 0 ? scheduleClusterMap.get(next[0]) ?? null : null;
+        setClusterKeyword(nextCluster?.name ?? "");
+        return next;
+      });
+    },
+    [scheduleClusterMap]
+  );
 
   const toggleAllClusters = useCallback(() => {
     setSelectedClusterIds((prev) => {
@@ -7291,6 +7629,14 @@ const ScheduleSettingsPanel = ({
       return Array.from(next);
     });
   }, [filteredItems]);
+
+  const toggleTemplateSelection = useCallback((templateId: number) => {
+    setSelectedTemplateIds((prev) =>
+      prev.includes(templateId)
+        ? prev.filter((id) => id !== templateId)
+        : [...prev, templateId]
+    );
+  }, []);
 
   const filteredPromqlItems = useMemo(
     () => filteredItems.filter((item) => isPromqlType(item.check_type)),
@@ -7515,12 +7861,49 @@ const ScheduleSettingsPanel = ({
     [scheduleItemMap, prometheusVersionOptions]
   );
 
+  const getScheduleTemplateSummary = useCallback(
+    (schedule: InspectionSchedule) => {
+      const templateIdSet = new Set(
+        Array.isArray(schedule.template_ids)
+          ? schedule.template_ids
+              .map((value) => Number(value))
+              .filter((value) => Number.isInteger(value) && value > 0)
+          : []
+      );
+      const matchedTemplates =
+        templateIdSet.size > 0
+          ? templates.filter((template) => templateIdSet.has(template.id))
+          : templates.filter((template) => {
+              if (!template.item_ids?.length) {
+                return false;
+              }
+              const itemIdSet = new Set(schedule.item_ids ?? []);
+              return template.item_ids.every((itemId) => itemIdSet.has(itemId));
+            });
+      if (matchedTemplates.length === 0) {
+        return {
+          title: `${schedule.item_ids.length} 项`,
+          detail: `PromQL 版本：${getPrometheusSummary(schedule)}`,
+        };
+      }
+      return {
+        title: summarizeNames(matchedTemplates.map((template) => template.name)),
+        detail: `${matchedTemplates.length} 个模板 · ${schedule.item_ids.length} 项`,
+      };
+    },
+    [templates, summarizeNames, getPrometheusSummary]
+  );
+
+  const cronPreviewText = useMemo(
+    () => describeScheduleCron(cronMinute, cronHour, cronDay, cronMonth, cronWeek),
+    [cronMinute, cronHour, cronDay, cronMonth, cronWeek]
+  );
+
   return (
     <div className="inspection-settings-panel">
       <div className="card-header history-header">
         <div>
           <h2>定时巡检</h2>
-          <p className="card-caption">基于 Cron 表达式定时触发巡检任务</p>
         </div>
         <div className="card-actions">
           {!readOnly && (
@@ -7556,6 +7939,42 @@ const ScheduleSettingsPanel = ({
             </span>
           </div>
           <div className="settings-list">
+            <div className="history-filter-row schedule-list-filter-row">
+              <div className="history-chip history-chip-select">
+                <span className="history-chip-label">状态筛选</span>
+                <select
+                  value={scheduleStatusFilter}
+                  onChange={(event) =>
+                    setScheduleStatusFilter(
+                      event.target.value as "all" | "enabled" | "disabled"
+                    )
+                  }
+                >
+                  <option value="all">全部</option>
+                  <option value="enabled">启用</option>
+                  <option value="disabled">停用</option>
+                </select>
+              </div>
+              <div className="history-chip history-chip-search">
+                <span className="history-chip-label">关键字</span>
+                <input
+                  type="text"
+                  value={scheduleKeyword}
+                  onChange={(event) => setScheduleKeyword(event.target.value)}
+                  placeholder="按集群 / 运行时间 / 巡检模板搜索"
+                />
+                {scheduleKeyword && (
+                  <button
+                    type="button"
+                    className="history-search-clear"
+                    onClick={() => setScheduleKeyword("")}
+                    aria-label="清空关键字"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            </div>
             <div className="history-toolbar">
               {!readOnly && (
                 <div className="history-selection">
@@ -7580,42 +7999,71 @@ const ScheduleSettingsPanel = ({
                   </button>
                 </div>
               )}
-              <div className="history-filter-row">
-                <div className="history-chip history-chip-select">
-                  <span className="history-chip-label">状态筛选</span>
-                  <select
-                    value={scheduleStatusFilter}
-                    onChange={(event) =>
-                      setScheduleStatusFilter(
-                        event.target.value as "all" | "enabled" | "disabled"
-                      )
-                    }
-                  >
-                    <option value="all">全部</option>
-                    <option value="enabled">启用</option>
-                    <option value="disabled">停用</option>
-                  </select>
-                </div>
-                <div className="history-chip history-chip-search">
-                  <span className="history-chip-label">关键字</span>
-                  <input
-                    type="text"
-                    value={scheduleKeyword}
-                    onChange={(event) => setScheduleKeyword(event.target.value)}
-                    placeholder="按名称 / Cron / 集群 / 巡检项搜索"
-                  />
-                  {scheduleKeyword && (
+              {filteredSchedules.length > 0 && (
+                <div className="history-pagination-controls schedule-pagination">
+                  <label className="page-size-control">
+                    每页
+                    <select
+                      value={schedulePageSize}
+                      onChange={(event) =>
+                        setSchedulePageSize(Number(event.target.value))
+                      }
+                      className="page-size-select"
+                    >
+                      {[10, 20, 50].map((size) => (
+                        <option key={size} value={size}>
+                          {size}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="history-pagination-buttons">
                     <button
                       type="button"
-                      className="history-search-clear"
-                      onClick={() => setScheduleKeyword("")}
-                      aria-label="清空关键字"
+                      className="secondary"
+                      onClick={() => handleSchedulePageChange(-1)}
+                      disabled={schedulePage <= 1}
                     >
-                      ×
+                      上一页
                     </button>
-                  )}
+                    <span>
+                      第 {schedulePage} / {scheduleTotalPages} 页
+                    </span>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => handleSchedulePageChange(1)}
+                      disabled={schedulePage >= scheduleTotalPages}
+                    >
+                      下一页
+                    </button>
+                  </div>
+                  <label className="history-page-jump">
+                    跳转
+                    <input
+                      type="number"
+                      min={1}
+                      value={schedulePageInput}
+                      onChange={(event) =>
+                        setSchedulePageInput(event.target.value)
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          handleSchedulePageJump();
+                        }
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={handleSchedulePageJump}
+                  >
+                    确定
+                  </button>
                 </div>
-              </div>
+              )}
             </div>
             <div className="table-wrapper">
               {filteredSchedules.length === 0 ? (
@@ -7625,10 +8073,9 @@ const ScheduleSettingsPanel = ({
                   <thead>
                     <tr>
                       <th></th>
-                      <th>名称</th>
-                      <th>Cron</th>
                       <th>集群</th>
-                      <th>巡检项</th>
+                      <th>运行时间</th>
+                      <th>巡检模板</th>
                       <th>状态</th>
                       <th>最近执行</th>
                       <th>操作</th>
@@ -7636,15 +8083,15 @@ const ScheduleSettingsPanel = ({
                   </thead>
                   <tbody>
                     {pagedSchedules.map((schedule) => {
-                      const label =
-                        schedule.name?.trim() ||
-                        `定时巡检 #${schedule.id}`;
                       const clusterSummary = summarizeNames(
                         schedule.cluster_ids.map((id) =>
                           getScheduleClusterLabel(schedule, id)
                         )
                       );
-                      const versionSummary = getPrometheusSummary(schedule);
+                      const scheduleTimeSummary = describeCronExpression(
+                        schedule.cron
+                      );
+                      const templateSummary = getScheduleTemplateSummary(schedule);
                       return (
                         <tr key={schedule.id}>
                           <td>
@@ -7658,8 +8105,6 @@ const ScheduleSettingsPanel = ({
                               </label>
                             )}
                           </td>
-                          <td>{label}</td>
-                          <td className="th-nowrap">{schedule.cron}</td>
                           <td>
                             <div className="schedule-cell">
                               <span>{clusterSummary}</span>
@@ -7670,11 +8115,17 @@ const ScheduleSettingsPanel = ({
                           </td>
                           <td>
                             <div className="schedule-cell">
-                              <span>
-                                {schedule.item_ids.length} 项
-                              </span>
+                              <span>{scheduleTimeSummary.replace(/^运行时间：/, "")}</span>
                               <span className="schedule-muted">
-                                PromQL 版本：{versionSummary}
+                                Cron：{schedule.cron}
+                              </span>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="schedule-cell">
+                              <span>{templateSummary.title}</span>
+                              <span className="schedule-muted">
+                                {templateSummary.detail}
                               </span>
                             </div>
                           </td>
@@ -7733,71 +8184,6 @@ const ScheduleSettingsPanel = ({
                 </table>
               )}
             </div>
-            {filteredSchedules.length > 0 && (
-              <div className="history-pagination-controls schedule-pagination">
-                <label className="page-size-control">
-                  每页
-                  <select
-                    value={schedulePageSize}
-                    onChange={(event) =>
-                      setSchedulePageSize(Number(event.target.value))
-                    }
-                    className="page-size-select"
-                  >
-                    {[10, 20, 50].map((size) => (
-                      <option key={size} value={size}>
-                        {size}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="history-pagination-buttons">
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => handleSchedulePageChange(-1)}
-                    disabled={schedulePage <= 1}
-                  >
-                    上一页
-                  </button>
-                  <span>
-                    第 {schedulePage} / {scheduleTotalPages} 页
-                  </span>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => handleSchedulePageChange(1)}
-                    disabled={schedulePage >= scheduleTotalPages}
-                  >
-                    下一页
-                  </button>
-                </div>
-                <label className="history-page-jump">
-                  跳转
-                  <input
-                    type="number"
-                    min={1}
-                    value={schedulePageInput}
-                    onChange={(event) =>
-                      setSchedulePageInput(event.target.value)
-                    }
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        handleSchedulePageJump();
-                      }
-                    }}
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={handleSchedulePageJump}
-                >
-                  确定
-                </button>
-              </div>
-            )}
           </div>
         </section>
       </div>
@@ -7807,7 +8193,6 @@ const ScheduleSettingsPanel = ({
             <div className="settings-header">
               <div>
                 <h3>{editingSchedule ? "编辑定时任务" : "新增定时任务"}</h3>
-                <p>时间格式为 分 时 日 月 周，按服务器时间执行</p>
               </div>
               <div className="settings-actions">
                 <button
@@ -7819,306 +8204,231 @@ const ScheduleSettingsPanel = ({
                 </button>
               </div>
             </div>
-            {formError && <div className="feedback error">{formError}</div>}
-            <form className="settings-form" onSubmit={handleSubmit}>
-              <label>
-                任务名称
-                <input
-                  type="text"
-                  className="schedule-input"
-                  value={formName}
-                  onChange={(event) => setFormName(event.target.value)}
-                  placeholder="例如：每日健康巡检"
-                  disabled={submitting || readOnly}
-                />
-              </label>
-              <div className="schedule-cron-row">
-                <div className="schedule-cron-grid">
-                  <label>
-                    分
-                    <input
-                      type="text"
-                      className="schedule-cron-input"
-                      value={cronMinute}
-                      onChange={(event) => setCronMinute(event.target.value)}
-                      placeholder="0-59"
-                      disabled={submitting || readOnly}
-                    />
-                  </label>
-                  <label>
-                    时
-                    <input
-                      type="text"
-                      className="schedule-cron-input"
-                      value={cronHour}
-                      onChange={(event) => setCronHour(event.target.value)}
-                      placeholder="0-23"
-                      disabled={submitting || readOnly}
-                    />
-                  </label>
-                  <label>
-                    日
-                    <input
-                      type="text"
-                      className="schedule-cron-input"
-                      value={cronDay}
-                      onChange={(event) => setCronDay(event.target.value)}
-                      placeholder="1-31/*"
-                      disabled={submitting || readOnly}
-                    />
-                  </label>
-                  <label>
-                    月
-                    <input
-                      type="text"
-                      className="schedule-cron-input"
-                      value={cronMonth}
-                      onChange={(event) => setCronMonth(event.target.value)}
-                      placeholder="1-12/*"
-                      disabled={submitting || readOnly}
-                    />
-                  </label>
-                  <label>
-                    周
-                    <input
-                      type="text"
-                      className="schedule-cron-input"
-                      value={cronWeek}
-                      onChange={(event) => setCronWeek(event.target.value)}
-                      placeholder="0-6/*"
-                      disabled={submitting || readOnly}
-                    />
-                  </label>
-                </div>
-                <label className="table-checkbox schedule-enabled">
-                  <span>启用</span>
-                  <input
-                    type="checkbox"
-                    checked={formEnabled}
-                    onChange={(event) => setFormEnabled(event.target.checked)}
-                    disabled={submitting || readOnly}
-                  />
-                </label>
+            {formError && (
+              <div
+                ref={scheduleFormErrorRef}
+                className="feedback error"
+              >
+                {formError}
               </div>
-              <div className="inspection-item-group schedule-section schedule-section-cluster">
-                <div className="inspection-item-group-title">
-                  <span className="inspection-group-title-text">选择集群</span>
-                  <span className="group-count">
-                    已选 {selectedAvailableClusterIds.length} / {filteredClusters.length}
-                  </span>
-                </div>
-                <div className="inspection-items-toolbar">
-                  <div className="inspection-items-toolbar-actions">
-                    <input
-                      type="text"
-                      className="inspection-items-filter"
-                      value={clusterKeyword}
-                      onChange={(event) =>
-                        setClusterKeyword(event.target.value)
-                      }
-                      placeholder="搜索集群"
-                      disabled={submitting || readOnly}
-                    />
-                    <button
-                      type="button"
-                      className="secondary"
-                      onClick={toggleAllClusters}
-                      disabled={submitting || readOnly}
+            )}
+            <form className="settings-form schedule-task-form" onSubmit={handleSubmit}>
+              <div className="schedule-form-grid">
+                <div className="schedule-form-row schedule-form-row-top">
+                  <div className="schedule-form-field schedule-form-cluster-field">
+                    <div className="schedule-form-label">集群</div>
+                    <div
+                      className="template-picker schedule-form-picker"
+                      ref={scheduleClusterPickerRef}
                     >
-                      {allFilteredClustersSelected ? "清除选择" : "全选"}
-                    </button>
+                      <div className="template-picker-input">
+                        <input
+                          type="text"
+                          value={clusterKeyword}
+                          onChange={(event) => setClusterKeyword(event.target.value)}
+                          onFocus={() => setClusterPickerOpen(true)}
+                          placeholder="输入集群名称搜索或下拉选择"
+                          disabled={submitting || readOnly}
+                        />
+                      </div>
+                      {clusterPickerOpen && (
+                        <div className="template-picker-dropdown">
+                          {availableClusters.length === 0 ? (
+                            <div className="placeholder">暂无可用集群</div>
+                          ) : filteredClusters.length === 0 ? (
+                            <div className="placeholder">未找到匹配集群</div>
+                          ) : (
+                            filteredClusters.map((cluster) => {
+                              const displayId = getClusterDisplayId(
+                                clusterDisplayIds,
+                                cluster.id,
+                                cluster
+                              );
+                              const checked = selectedClusterIds.includes(cluster.id);
+                              return (
+                                <label key={cluster.id} className="template-option">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => {
+                                      toggleCluster(cluster.id);
+                                      setClusterPickerOpen(false);
+                                    }}
+                                    disabled={submitting || readOnly}
+                                  />
+                                  <span>
+                                    {cluster.name}（{displayId}）
+                                  </span>
+                                </label>
+                              );
+                            })
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="schedule-form-field schedule-form-enable">
+                    <div className="schedule-form-label">启用</div>
+                    <label className="switch-row">
+                      <input
+                        className="switch-input"
+                        type="checkbox"
+                        checked={formEnabled}
+                        onChange={(event) => setFormEnabled(event.target.checked)}
+                        disabled={submitting || readOnly}
+                      />
+                      <span className="switch-slider" aria-hidden />
+                    </label>
                   </div>
                 </div>
-                <details className="schedule-dropdown schedule-cluster-dropdown">
-                  <summary>
-                    <span>展开集群列表</span>
-                    <span className="schedule-dropdown-summary">
-                      已选 {selectedAvailableClusterIds.length}
-                    </span>
-                  </summary>
-                  <div className="schedule-dropdown-body">
-                    {availableClusters.length === 0 ? (
-                      <div className="placeholder">暂无可用集群</div>
-                    ) : filteredClusters.length === 0 ? (
-                      <div className="placeholder">未找到匹配的集群</div>
-                    ) : (
-                      <ul className="item-list scrollable schedule-cluster-list">
-                        {filteredClusters.map((cluster) => {
-                          const displayId = getClusterDisplayId(
-                            clusterDisplayIds,
-                            cluster.id,
-                            cluster
-                          );
-                          return (
-                            <li key={cluster.id}>
-                              <label className="schedule-cluster-option">
-                                <div className="schedule-option-info">
-                                  <div className="item-title-row">
-                                    <div className="item-name">{cluster.name}</div>
-                                    <span className="item-tag neutral">
-                                      {displayId}
-                                    </span>
-                                  </div>
-                                </div>
-                                <input
-                                  type="checkbox"
-                                  checked={selectedClusterIds.includes(cluster.id)}
-                                  onChange={() => toggleCluster(cluster.id)}
-                                  disabled={submitting || readOnly}
-                                />
-                              </label>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                    <div className="schedule-dropdown-hint">勾选即可多选</div>
+
+                <div className="schedule-form-field">
+                  <div className="schedule-form-label">时间</div>
+                  <div className="schedule-cron-row schedule-cron-row-compact">
+                    <div className="schedule-cron-grid">
+                      <label>
+                        分
+                        <input
+                          type="text"
+                          className="schedule-cron-input"
+                          value={cronMinute}
+                          onChange={(event) => setCronMinute(event.target.value)}
+                          placeholder="0"
+                          disabled={submitting || readOnly}
+                        />
+                      </label>
+                      <label>
+                        时
+                        <input
+                          type="text"
+                          className="schedule-cron-input"
+                          value={cronHour}
+                          onChange={(event) => setCronHour(event.target.value)}
+                          placeholder="2"
+                          disabled={submitting || readOnly}
+                        />
+                      </label>
+                      <label>
+                        日
+                        <input
+                          type="text"
+                          className="schedule-cron-input"
+                          value={cronDay}
+                          onChange={(event) => setCronDay(event.target.value)}
+                          placeholder="*"
+                          disabled={submitting || readOnly}
+                        />
+                      </label>
+                      <label>
+                        月
+                        <input
+                          type="text"
+                          className="schedule-cron-input"
+                          value={cronMonth}
+                          onChange={(event) => setCronMonth(event.target.value)}
+                          placeholder="*"
+                          disabled={submitting || readOnly}
+                        />
+                      </label>
+                      <label>
+                        周
+                        <input
+                          type="text"
+                          className="schedule-cron-input"
+                          value={cronWeek}
+                          onChange={(event) => setCronWeek(event.target.value)}
+                          placeholder="*"
+                          disabled={submitting || readOnly}
+                        />
+                      </label>
+                    </div>
                   </div>
-                </details>
-              </div>
-              <div className="inspection-item-group schedule-section schedule-section-items">
-                <div className="inspection-item-group-title">
-                  <span className="inspection-group-title-text">选择巡检项</span>
-                  <span className="group-count">
-                    已选 {selectedItemIds.length} / {filteredItems.length}
-                  </span>
+                  <div className="schedule-cron-preview">{cronPreviewText}</div>
                 </div>
-                <div className="inspection-items-toolbar">
-                  <span className="selection-hint">
-                    已选 {selectedFilteredItemCount} / {filteredItems.length}
-                  </span>
-                  <div className="inspection-items-toolbar-actions">
-                    <input
-                      type="text"
-                      className="inspection-items-filter"
-                      value={itemKeyword}
-                      onChange={(event) => setItemKeyword(event.target.value)}
-                      placeholder="关键字筛选"
-                      disabled={submitting || readOnly}
-                    />
-                    <select
-                      className="inspection-items-filter"
-                      value={itemVersionFilter}
-                      onChange={(event) =>
-                        setItemVersionFilter(event.target.value)
-                      }
-                      disabled={submitting || readOnly}
-                    >
-                      <option value="all">PromQL 全部版本</option>
-                      {prometheusVersionOptions.map((version) => (
-                        <option key={version} value={version}>
-                          {version}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      className="secondary"
-                      onClick={toggleAllItems}
-                      disabled={submitting || readOnly}
-                    >
-                      {allFilteredItemsSelected ? "清除选择" : "全选"}
-                    </button>
-                  </div>
-                </div>
-                {items.length === 0 ? (
-                  <div className="placeholder">暂无巡检项</div>
-                ) : filteredItems.length === 0 ? (
-                  <div className="placeholder">未找到匹配的巡检项</div>
-                ) : (
+
+                <div className="schedule-form-field schedule-form-template-field">
+                  <div className="schedule-form-label">巡检模板</div>
                   <div
-                    className="inspection-item-columns"
+                    className="template-picker schedule-form-picker"
+                    ref={scheduleTemplatePickerRef}
                   >
-                    <div className="inspection-item-column">
-                      <details className="schedule-dropdown">
-                        <summary>
-                          <span>PromQL 巡检项</span>
-                          <span className="schedule-dropdown-summary">
-                            {filteredPromqlItems.length} 条
-                          </span>
-                        </summary>
-                        <div className="schedule-dropdown-body">
-                          {filteredPromqlItems.length === 0 ? (
-                            <div className="placeholder">
-                              暂无 PromQL 巡检项
-                            </div>
-                          ) : (
-                            <ul className="item-list scrollable">
-                              {filteredPromqlItems.map((item) => (
-                                <li key={item.id}>
-                                  <label>
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedItemIds.includes(item.id)}
-                                      onChange={() => toggleItem(item.id)}
-                                      disabled={submitting || readOnly}
-                                    />
-                                    <div>
-                                      <div className="item-title-row">
-                                        <div className="item-name">{item.name}</div>
-                                        <span className="item-tag promql">
-                                          PromQL ·{" "}
-                                          {normalizePrometheusVersion(
-                                            item.prometheus_version,
-                                            prometheusVersionOptions
-                                          )}
-                                        </span>
-                                      </div>
-                                      <div className="item-desc">
-                                        {item.description || "未提供描述"}
-                                      </div>
-                                    </div>
-                                  </label>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      </details>
+                    <div className="template-picker-input">
+                      <input
+                        type="text"
+                        value={templateKeyword}
+                        onChange={(event) => setTemplateKeyword(event.target.value)}
+                        onFocus={() => setTemplatePickerOpen(true)}
+                        placeholder="输入模板名称或关键字搜索"
+                        disabled={submitting || readOnly}
+                      />
                     </div>
-                    <div className="inspection-item-column">
-                      <details className="schedule-dropdown">
-                        <summary>
-                          <span>通用巡检项</span>
-                          <span className="schedule-dropdown-summary">
-                            {filteredCommonItems.length} 条
-                          </span>
-                        </summary>
-                        <div className="schedule-dropdown-body">
-                          {filteredCommonItems.length === 0 ? (
-                            <div className="placeholder">
-                              暂无通用巡检项
-                            </div>
-                          ) : (
-                            <ul className="item-list scrollable">
-                              {filteredCommonItems.map((item) => (
-                                <li key={item.id}>
-                                  <label>
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedItemIds.includes(item.id)}
-                                      onChange={() => toggleItem(item.id)}
-                                      disabled={submitting || readOnly}
-                                    />
-                                    <div>
-                                      <div className="item-title-row">
-                                        <div className="item-name">{item.name}</div>
-                                        <span className="item-tag neutral">通用</span>
-                                      </div>
-                                      <div className="item-desc">
-                                        {item.description || "未提供描述"}
-                                      </div>
-                                    </div>
-                                  </label>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      </details>
-                    </div>
+                    {templatePickerOpen && (
+                      <div className="template-picker-dropdown">
+                        {filteredTemplateOptions.length === 0 ? (
+                          <div className="placeholder">暂无匹配模板</div>
+                        ) : (
+                          filteredTemplateOptions.map((template) => (
+                            <label key={template.id} className="template-option">
+                              <input
+                                type="checkbox"
+                                checked={selectedTemplateIds.includes(template.id)}
+                                onChange={() => toggleTemplateSelection(template.id)}
+                                disabled={submitting || readOnly}
+                              />
+                              <span>{template.name}</span>
+                            </label>
+                          ))
+                        )}
+                      </div>
+                    )}
                   </div>
-                )}
+                  <div className="template-selected-list schedule-template-chip-list">
+                    {selectedScheduleTemplates.length === 0 ? (
+                      <span className="placeholder">暂未选择巡检模板</span>
+                    ) : (
+                      selectedScheduleTemplates.map((template) => (
+                        <span key={template.id} className="template-chip">
+                          {template.name}
+                          <button
+                            type="button"
+                            className="template-chip-remove"
+                            onClick={() => toggleTemplateSelection(template.id)}
+                            disabled={submitting || readOnly}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))
+                    )}
+                  </div>
+                  <div className="selection-hint schedule-template-summary">
+                    已选择 {selectedScheduleTemplates.length} 个模板 · 共{" "}
+                    {selectedTemplateItemIds.length > 0
+                      ? selectedTemplateItemIds.length
+                      : selectedItemIds.length}{" "}
+                    个巡检项
+                  </div>
+                </div>
+
+                <div className="schedule-form-row schedule-form-row-bottom">
+                  <label className="schedule-form-field schedule-retention-field">
+                    <span className="schedule-form-label">保存份数</span>
+                    <div className="general-settings-inline">
+                      <input
+                        type="number"
+                        min={1}
+                        className="general-settings-input short schedule-retention-input"
+                        value={scheduleRetentionCount}
+                        onChange={(event) =>
+                          setScheduleRetentionCount(event.target.value)
+                        }
+                        placeholder="10"
+                        disabled={submitting || readOnly}
+                      />
+                      <span className="general-settings-unit">份</span>
+                    </div>
+                  </label>
+                </div>
               </div>
               <div className="settings-actions">
                 <button
@@ -8150,6 +8460,7 @@ interface SchedulePageProps {
   clusters: ClusterConfig[];
   clusterDisplayIds: Record<number, string>;
   items: InspectionItem[];
+  templates: InspectionItemTemplate[];
   prometheusVersionOptions: string[];
   submitting: boolean;
   notice: string | null;
@@ -8161,7 +8472,9 @@ interface SchedulePageProps {
     name?: string;
     cron: string;
     clusterIds: number[];
+    templateIds: number[];
     itemIds: number[];
+    reportRetentionCount: number;
     isEnabled: boolean;
   }) => Promise<void>;
   onDelete: (schedule: InspectionSchedule) => void;
@@ -8174,6 +8487,7 @@ const SchedulePage = ({
   clusters,
   clusterDisplayIds,
   items,
+  templates,
   prometheusVersionOptions,
   submitting,
   notice,
@@ -8191,6 +8505,7 @@ const SchedulePage = ({
       clusters={clusters}
       clusterDisplayIds={clusterDisplayIds}
       items={items}
+      templates={templates}
       prometheusVersionOptions={prometheusVersionOptions}
       submitting={submitting}
       notice={notice}
@@ -8853,7 +9168,7 @@ const UserSettingsPanel = ({
         <div className="settings-list-header">
           <div className="settings-list-count">共 {sortedUsers.length} 个用户</div>
         </div>
-        <div className="table-wrapper">
+        <div className="table-wrapper user-table-scroll">
           <table>
             <thead>
               <tr>
@@ -9017,30 +9332,105 @@ const UserSettingsPanel = ({
   );
 };
 
-interface LicenseSettingsPanelProps {
+interface GeneralSettingsPanelProps {
   status: LicenseCapabilities;
   uploading: boolean;
   textUploading: boolean;
   canUpload: boolean;
   onUpload: (file: File) => Promise<LicenseStatus | null>;
   onUploadText: (value: string) => Promise<LicenseStatus | null>;
-  onRefresh: () => Promise<LicenseStatus | null>;
 }
 
-const LicenseSettingsPanel = ({
+const GeneralSettingsPanel = ({
   status,
   uploading,
   textUploading,
   canUpload,
   onUpload,
   onUploadText,
-  onRefresh,
-}: LicenseSettingsPanelProps) => {
+}: GeneralSettingsPanelProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [textValue, setTextValue] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
   const [localNotice, setLocalNotice] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
+  const [generalNotice, setGeneralNotice] = useState<string | null>(null);
+  const [generalError, setGeneralError] = useState<string | null>(null);
+  const [baseUrl, setBaseUrl] = useState(() => resolveDefaultBaseUrl());
+  const [retentionDays, setRetentionDays] = useState(() =>
+    String(DEFAULT_REPORT_RETENTION_DAYS)
+  );
+  const [generalLoading, setGeneralLoading] = useState(false);
+  const [generalSaving, setGeneralSaving] = useState(false);
+
+  const handleSaveGeneral = async () => {
+    const trimmedBaseUrl = baseUrl.trim();
+    if (!trimmedBaseUrl) {
+      setGeneralError("BaseURL 不能为空");
+      setGeneralNotice(null);
+      return;
+    }
+    if (!/^https?:\/\//i.test(trimmedBaseUrl)) {
+      setGeneralError("BaseURL 需以 http:// 或 https:// 开头");
+      setGeneralNotice(null);
+      return;
+    }
+    const parsedDays = Number(retentionDays);
+    if (!Number.isFinite(parsedDays) || parsedDays <= 0) {
+      setGeneralError("巡检报告保存份数需为正整数");
+      setGeneralNotice(null);
+      return;
+    }
+    setGeneralSaving(true);
+    try {
+      const settings = await updateGeneralSettings({
+        base_url: trimmedBaseUrl,
+        report_retention_days: Math.floor(parsedDays),
+      });
+      setBaseUrl(settings.base_url || trimmedBaseUrl);
+      setRetentionDays(String(settings.report_retention_days));
+      setGeneralError(null);
+      setGeneralNotice("已保存通用设置");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "保存通用设置失败";
+      setGeneralError(message);
+      setGeneralNotice(null);
+    } finally {
+      setGeneralSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchSettings = async () => {
+      setGeneralLoading(true);
+      try {
+        const settings = await getGeneralSettings();
+        if (cancelled) {
+          return;
+        }
+        const resolvedBaseUrl = (settings.base_url || "").trim();
+        setBaseUrl(resolvedBaseUrl || resolveDefaultBaseUrl());
+        setRetentionDays(String(settings.report_retention_days));
+        setGeneralError(null);
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+        const message =
+          err instanceof Error ? err.message : "获取通用设置失败";
+        setGeneralError(message);
+      } finally {
+        if (!cancelled) {
+          setGeneralLoading(false);
+        }
+      }
+    };
+    void fetchSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleFileChange = async (
     event: ChangeEvent<HTMLInputElement>
@@ -9055,8 +9445,10 @@ const LicenseSettingsPanel = ({
       return;
     }
     try {
+      setLocalNotice(null);
       setLocalError(null);
       await onUpload(file);
+      setLocalNotice("已上传 License 文件");
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "上传 License 失败";
@@ -9076,29 +9468,15 @@ const LicenseSettingsPanel = ({
       return;
     }
     try {
+      setLocalNotice(null);
       setLocalError(null);
       await onUploadText(content);
       setTextValue("");
+      setLocalNotice("已导入 License 文本");
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "导入 License 失败";
       setLocalError(message);
-    }
-  };
-
-  const handleRefresh = async () => {
-    try {
-      setRefreshing(true);
-      setLocalError(null);
-      setLocalNotice(null);
-      await onRefresh();
-      setLocalNotice("已刷新 License 状态");
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "刷新 License 状态失败";
-      setLocalError(message);
-    } finally {
-      setRefreshing(false);
     }
   };
 
@@ -9114,111 +9492,163 @@ const LicenseSettingsPanel = ({
     return () => window.clearTimeout(timer);
   }, [localNotice]);
 
+  useEffect(() => {
+    if (!generalNotice || typeof window === "undefined") {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setGeneralNotice(null);
+    }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [generalNotice]);
+
   return (
-    <div className="settings-content settings-content-stack license-panel">
+    <div className="settings-content settings-content-stack general-settings-panel">
       <div className="settings-header">
         <div>
-          <h3>License 管理</h3>
-          <p>统一管理巡检项、Agent 节点以及 License 授权。</p>
+          <h3>通用设置</h3>
         </div>
-        <div className="settings-actions">
+      </div>
+      {generalNotice && <div className="feedback success">{generalNotice}</div>}
+      {generalError && <div className="feedback error">{generalError}</div>}
+      <div className="general-settings-grid">
+        <div className="general-settings-row">
+          <label className="general-settings-label" htmlFor="general-base-url">
+            BaseURL
+          </label>
+          <input
+            id="general-base-url"
+            className="general-settings-input"
+            type="text"
+            value={baseUrl}
+            onChange={(event) => setBaseUrl(event.target.value)}
+            placeholder="例如：http://backend:8000"
+            disabled={generalSaving || generalLoading}
+          />
+        </div>
+        <div className="general-settings-row">
+          <label
+            className="general-settings-label"
+            htmlFor="general-retention-days"
+          >
+            巡检报告保存份数
+          </label>
+          <div className="general-settings-inline">
+            <input
+              id="general-retention-days"
+              className="general-settings-input short"
+              type="number"
+              min={1}
+              value={retentionDays}
+              onChange={(event) => setRetentionDays(event.target.value)}
+              placeholder="10"
+              disabled={generalSaving || generalLoading}
+            />
+            <span className="general-settings-unit">份</span>
+          </div>
+        </div>
+        <div className="general-settings-actions">
           <button
             type="button"
-            className="secondary"
-            onClick={handleRefresh}
-            disabled={refreshing}
+            className="primary"
+            onClick={handleSaveGeneral}
+            disabled={generalSaving || generalLoading}
           >
-            {refreshing ? "刷新中..." : "刷新状态"}
+            {generalSaving ? "保存中..." : "保存"}
           </button>
         </div>
       </div>
-      {localNotice && <div className="feedback success">{localNotice}</div>}
-      {status.reason && !status.valid && (
-        <div className="feedback warning">{status.reason}</div>
-      )}
-      {!canUpload && (
-        <div className="feedback warning">当前账号无 License 上传权限</div>
-      )}
-      {localError && <div className="feedback error">{localError}</div>}
-      <section className="settings-list">
-        <table>
-          <tbody>
-            <tr>
-              <th>状态</th>
-              <td>{status.valid ? "已激活" : "未激活"}</td>
-            </tr>
-            <tr>
-              <th>授权对象</th>
-              <td>{licenseStatus?.licensee ?? "-"}</td>
-            </tr>
-            <tr>
-              <th>产品</th>
-              <td>{licenseStatus?.product ?? "-"}</td>
-            </tr>
-            <tr>
-              <th>有效期</th>
-              <td>
-                {licenseStatus?.not_before ?? "-"} ~{" "}
-                {licenseStatus?.expires_at ?? "-"}
-              </td>
-            </tr>
-            <tr>
-              <th>特性</th>
-              <td>
-                {status.features.length === 0 ? (
-                  "-"
-                ) : (
-                  <div className="chip-group">
-                    {status.features.map((feature) => (
-                      <span key={feature} className="chip">
-                        {feature}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
-      {canUpload && (
-        <div className="license-detail-grid">
-          <section className="settings-form license-form">
-            <h4>License 文件</h4>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".lic,.txt,.json"
-              onChange={handleFileChange}
-              disabled={uploading}
-            />
-            <p className="settings-overview-hint">
-              支持 .lic / .txt / .json 文件，上传后立即生效。
-            </p>
-          </section>
-          <section className="settings-form license-form">
-            <h4>License 文本</h4>
-            <form onSubmit={handleSubmitText}>
-              <textarea
-                rows={6}
-                value={textValue}
-                onChange={(event) => setTextValue(event.target.value)}
-                placeholder="-----BEGIN LICENSE-----"
-                disabled={textUploading}
-              />
-              <div className="settings-actions">
-                <button
-                  type="submit"
-                  className="primary"
-                  disabled={textUploading}
-                >
-                  {textUploading ? "导入中..." : "导入文本"}
-                </button>
-              </div>
-            </form>
-          </section>
+      <section className="general-license-section">
+        <div className="general-license-header">
+          <h3>License</h3>
         </div>
-      )}
+        {localNotice && <div className="feedback success">{localNotice}</div>}
+        {status.reason && !status.valid && (
+          <div className="feedback warning">{status.reason}</div>
+        )}
+        {!canUpload && (
+          <div className="feedback warning">当前账号无 License 上传权限</div>
+        )}
+        {localError && <div className="feedback error">{localError}</div>}
+        <div className="general-license-grid">
+          <div className="general-license-status">
+            <table>
+              <tbody>
+                <tr>
+                  <th>状态</th>
+                  <td>{status.valid ? "已激活" : "未激活"}</td>
+                </tr>
+                <tr>
+                  <th>授权对象</th>
+                  <td>{licenseStatus?.licensee ?? "-"}</td>
+                </tr>
+                <tr>
+                  <th>产品</th>
+                  <td>{licenseStatus?.product ?? "-"}</td>
+                </tr>
+                <tr>
+                  <th>有效期</th>
+                  <td>
+                    {licenseStatus?.not_before ?? "-"} ~{" "}
+                    {licenseStatus?.expires_at ?? "-"}
+                  </td>
+                </tr>
+                <tr>
+                  <th>特性</th>
+                  <td>
+                    {status.features.length === 0 ? (
+                      "-"
+                    ) : (
+                      <div className="chip-group">
+                        {status.features.map((feature) => (
+                          <span key={feature} className="chip">
+                            {feature}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          {canUpload && (
+            <div className="general-license-upload">
+              <label className="general-settings-field">
+                <span>License 文件</span>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".lic,.txt,.json"
+                  onChange={handleFileChange}
+                  disabled={uploading}
+                />
+              </label>
+              <form onSubmit={handleSubmitText}>
+                <label className="general-settings-field">
+                  <span>License 文本</span>
+                  <textarea
+                    rows={3}
+                    value={textValue}
+                    onChange={(event) => setTextValue(event.target.value)}
+                    placeholder="-----BEGIN LICENSE-----"
+                    disabled={textUploading}
+                  />
+                </label>
+                <div className="settings-actions">
+                  <button
+                    type="submit"
+                    className="primary"
+                    disabled={textUploading}
+                  >
+                    {textUploading ? "导入中..." : "导入文本"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+        </div>
+      </section>
     </div>
   );
 };
@@ -9280,6 +9710,8 @@ const RunDetailView = ({
   const canDownloadReports = license.canDownloadReports;
   const canManageHistoryActions = canUpdateHistory;
   const canRemoveHistory = canDeleteHistory;
+
+  useAutoClearError(error, setError);
 
   const resolvedClusterId = useMemo(
     () =>
@@ -9857,8 +10289,12 @@ const RunDetailView = ({
             {cluster ? `${cluster.name}（${clusterSlug}）` : clusterSlug}
           </div>
           <div>
-            <strong>巡检人：</strong>
-            {summaryRun?.operator || "-"}
+            <strong>巡检模板：</strong>
+            {resolveTemplateLabel(summaryRun?.operator)}
+          </div>
+          <div>
+            <strong>巡检类型：</strong>
+            {resolveRunTypeLabel(summaryRun?.operator)}
           </div>
           <div>
             <strong>Prometheus 版本：</strong>
@@ -10375,6 +10811,8 @@ const ClusterNodesView = ({
   const refreshNoticeTimerRef = useRef<number | null>(null);
   const canManageClusters = license.canManageClusters;
 
+  useAutoClearError(error, setError);
+
   const resolvedClusterId = useMemo(
     () =>
       resolveClusterIdFromRouteKey(clusterKey, clusterDisplayIds, clusters),
@@ -10829,6 +11267,9 @@ const App = () => {
   const [agents, setAgents] = useState<InspectionAgent[]>([]);
   const [runs, setRuns] = useState<InspectionRunListItem[]>([]);
   const [items, setItems] = useState<InspectionItem[]>([]);
+  const [inspectionTemplates, setInspectionTemplates] = useState<
+    InspectionItemTemplate[]
+  >([]);
   const [schedules, setSchedules] = useState<InspectionSchedule[]>([]);
   const [overviewSummary, setOverviewSummary] = useState<OverviewSummary | null>(
     null
@@ -10837,6 +11278,37 @@ const App = () => {
     null
   );
   const isAuthenticated = authUser !== null;
+  const location = useLocation();
+  const navigate = useNavigate();
+  const previousPathRef = useRef(location.pathname);
+  const [suppressOverviewDetailLoading, setSuppressOverviewDetailLoading] =
+    useState(false);
+  useEffect(() => {
+    const previousPath = previousPathRef.current;
+    if (location.pathname === "/" && previousPath !== "/") {
+      setSuppressOverviewDetailLoading(true);
+    } else if (location.pathname !== "/") {
+      setSuppressOverviewDetailLoading(false);
+    }
+    previousPathRef.current = location.pathname;
+  }, [location.pathname]);
+  const effectiveSuppressDetailLoading =
+    suppressOverviewDetailLoading ||
+    (location.pathname === "/" && previousPathRef.current !== "/");
+  const currentNoticeScope = useMemo(
+    () => resolveNoticeScope(location.pathname),
+    [location.pathname]
+  );
+  const loginRedirectState = useMemo(
+    () => ({
+      from: {
+        pathname: location.pathname,
+        search: location.search,
+        hash: location.hash,
+      },
+    }),
+    [location.pathname, location.search, location.hash]
+  );
   const permissionSet = useMemo(
     () => new Set(authUser?.permissions ?? []),
     [authUser?.permissions]
@@ -10963,14 +11435,15 @@ const App = () => {
       setAuthSubmitting(false);
       setAuthUser(null);
       setAuthChecked(true);
-      setSettingsOpen(false);
       setClusters([]);
       setAgents([]);
       setRuns([]);
       setItems([]);
+      setInspectionTemplates([]);
       setSchedules([]);
       setRoles([]);
       setUsers([]);
+      setSettingsTabId("general");
     }
   }, []);
 
@@ -10979,6 +11452,15 @@ const App = () => {
     setPasswordNotice(null);
     setPasswordModalOpen(true);
   }, []);
+
+  const handleOpenSettings = useCallback(() => {
+    setSettingsError(null);
+    setSettingsNotice(null);
+    setSettingsTabId("general");
+    navigate(`${SETTINGS_BASE_PATH}/general`, {
+      replace: location.pathname.startsWith(SETTINGS_BASE_PATH),
+    });
+  }, [location.pathname, navigate]);
 
   const handleClosePasswordModal = useCallback(() => {
     setPasswordModalOpen(false);
@@ -11034,12 +11516,13 @@ const App = () => {
   const [inspectionNotice, setInspectionNotice] = useState<string | null>(null);
   const [inspectionError, setInspectionError] = useState<string | null>(null);
   const [inspectionLoading, setInspectionLoading] = useState(false);
+  const [templateNotice, setTemplateNotice] = useState<string | null>(null);
+  const [templateError, setTemplateError] = useState<string | null>(null);
+  const [templateSubmitting, setTemplateSubmitting] = useState(false);
   const [scheduleNotice, setScheduleNotice] = useState<string | null>(null);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
 
-  const [selectedItemIds, setSelectedItemIdsState] = useState<number[]>([]);
-  const [operator, setOperator] = useState("");
   const [prometheusVersionOptions, setPrometheusVersionOptions] = useState<
     string[]
   >(() => loadPrometheusVersionOptions());
@@ -11069,13 +11552,11 @@ const App = () => {
     Record<number, number>
   >({});
 
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSubmitting, setSettingsSubmitting] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [settingsNotice, setSettingsNotice] = useState<string | null>(null);
-  const [settingsTabId, setSettingsTabId] = useState<string>("overview");
+  const [settingsTabId, setSettingsTabId] = useState<string>("general");
   const previousSettingsPathRef = useRef<string>("/");
-  const backgroundLocationRef = useRef<RouterLocation | null>(null);
   const [roles, setRoles] = useState<AuthRole[]>([]);
   const [rolesLoading, setRolesLoading] = useState(false);
   const [rolesError, setRolesError] = useState<string | null>(null);
@@ -11096,6 +11577,7 @@ const App = () => {
   useAutoClearError(passwordError, setPasswordError);
   useAutoClearError(clusterError, setClusterError);
   useAutoClearError(inspectionError, setInspectionError);
+  useAutoClearError(templateError, setTemplateError);
   useAutoClearError(scheduleError, setScheduleError);
   useAutoClearError(clusterEditError, setClusterEditError);
   useAutoClearError(agentError, setAgentError);
@@ -11345,45 +11827,23 @@ const App = () => {
     [items]
   );
 
-const location = useLocation();
-const navigate = useNavigate();
-const previousPathRef = useRef(location.pathname);
-const [suppressOverviewDetailLoading, setSuppressOverviewDetailLoading] =
-  useState(false);
-useEffect(() => {
-  const previousPath = previousPathRef.current;
-  if (location.pathname === "/" && previousPath !== "/") {
-    setSuppressOverviewDetailLoading(true);
-  } else if (location.pathname !== "/") {
-    setSuppressOverviewDetailLoading(false);
-  }
-  previousPathRef.current = location.pathname;
-}, [location.pathname]);
-const effectiveSuppressDetailLoading =
-  suppressOverviewDetailLoading ||
-  (location.pathname === "/" && previousPathRef.current !== "/");
-const currentNoticeScope = useMemo(
-  () => resolveNoticeScope(location.pathname),
-  [location.pathname]
-);
-const loginRedirectState = useMemo(
-  () => ({
-    from: {
-      pathname: location.pathname,
-      search: location.search,
-      hash: location.hash,
-    },
-  }),
-  [location.pathname, location.search, location.hash]
-);
-  const backgroundLocation =
-    (
-      location.state as
-        | {
-            backgroundLocation?: RouterLocation;
-          }
-        | undefined
-    )?.backgroundLocation ?? null;
+  const userRoleLabel = useMemo(() => {
+    if (!authUser) {
+      return "";
+    }
+    const roleNames =
+      authUser.roles && authUser.roles.length > 0
+        ? authUser.roles
+        : authUser.role
+          ? [authUser.role]
+          : [];
+    if (roleNames.length === 0) {
+      return "";
+    }
+    const primaryRole = roleNames[0];
+    const matched = roles.find((role) => role.name === primaryRole);
+    return (matched?.display_name || matched?.name || primaryRole || "").trim();
+  }, [authUser, roles]);
 
   const handleLogin = useCallback(
     async (username: string, password: string) => {
@@ -11392,9 +11852,7 @@ const loginRedirectState = useMemo(
       try {
         const user = await login(username, password);
         setAuthUser(user);
-        backgroundLocationRef.current = null;
-        setSettingsOpen(false);
-        setSettingsTabId("overview");
+        setSettingsTabId("general");
         setConfirmState(null);
         previousSettingsPathRef.current = "/";
         navigate("/", { replace: true });
@@ -11407,12 +11865,6 @@ const loginRedirectState = useMemo(
     },
     [navigate]
   );
-
-  useEffect(() => {
-    if (backgroundLocation) {
-      backgroundLocationRef.current = backgroundLocation;
-    }
-  }, [backgroundLocation]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -11439,9 +11891,11 @@ const loginRedirectState = useMemo(
       entityType = "cluster_config";
     } else if (pathname.startsWith("/setting")) {
       const segments = pathname.split("/").filter(Boolean);
-      const tab = (segments[1] ?? "overview").toLowerCase();
+      const rawTab = (segments[1] ?? "general").toLowerCase();
+      const tab =
+        rawTab === "license" || rawTab === "overview" ? "general" : rawTab;
       if (tab === "inspection") {
-        description = "查询巡检项设置";
+        description = "查询巡检项";
         entityType = "inspection_item";
       } else if (tab === "prometheus-version") {
         description = "查询 Prometheus 版本设置";
@@ -11449,11 +11903,11 @@ const loginRedirectState = useMemo(
       } else if (tab === "users") {
         description = "查询用户管理";
         entityType = "auth_user";
-      } else if (tab === "license") {
-        description = "查询 License 设置";
-        entityType = "license";
+      } else if (tab === "general") {
+        description = "查询通用设置";
+        entityType = "setting";
       } else {
-        description = "查询设置总览";
+        description = "查询通用设置";
         entityType = "setting";
       }
     } else if (pathname.startsWith("/clusters/")) {
@@ -11489,38 +11943,15 @@ const loginRedirectState = useMemo(
   }, [isAuthenticated, location.pathname]);
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      return;
-    }
-    if (!location.pathname.startsWith(SETTINGS_BASE_PATH)) {
-      return;
-    }
-    if (backgroundLocation || backgroundLocationRef.current) {
-      return;
-    }
-    setSettingsOpen(false);
-    setSettingsTabId("overview");
-    previousSettingsPathRef.current = "/";
-    navigate("/", { replace: true });
-  }, [isAuthenticated, location.pathname, backgroundLocation, navigate]);
-
-  useEffect(() => {
     if (isAuthenticated) {
       return;
     }
-    setSettingsOpen(false);
-    setSettingsTabId("overview");
+    setSettingsTabId("general");
     setConfirmState((prev) =>
       prev && prev.scope === "settings" ? null : prev
     );
-    backgroundLocationRef.current = null;
     previousSettingsPathRef.current = "/";
   }, [isAuthenticated]);
-
-  const routesLocation =
-    location.pathname.startsWith(SETTINGS_BASE_PATH) && backgroundLocation
-      ? backgroundLocation
-      : location;
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -11606,12 +12037,13 @@ const loginRedirectState = useMemo(
   }, [location.pathname, location.search, location.hash]);
 
   useEffect(() => {
-    if (!settingsOpen) {
+    if (!location.pathname.startsWith(SETTINGS_BASE_PATH)) {
       setConfirmState((prev) =>
         prev && prev.scope === "settings" ? null : prev
       );
+      setSettingsTabId("general");
     }
-  }, [settingsOpen]);
+  }, [location.pathname]);
 
   const setClusterTesting = useCallback((clusterId: number, value: boolean) => {
     setTestingClusterIds((prev) => {
@@ -11633,7 +12065,6 @@ const loginRedirectState = useMemo(
     if (
       !clusterNotice ||
       !clusterNoticeType ||
-      clusterNoticeType === "error" ||
       typeof window === "undefined"
     ) {
       return;
@@ -11641,7 +12072,7 @@ const loginRedirectState = useMemo(
 
     const timeout = window.setTimeout(() => {
       clearClusterNotice();
-    }, 5000);
+    }, ERROR_AUTO_DISMISS_MS);
 
     return () => {
       window.clearTimeout(timeout);
@@ -11675,6 +12106,20 @@ const loginRedirectState = useMemo(
       window.clearTimeout(timeout);
     };
   }, [settingsNotice]);
+
+  useEffect(() => {
+    if (!templateNotice || typeof window === "undefined") {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setTemplateNotice(null);
+    }, 5000);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [templateNotice]);
 
   useEffect(() => {
     if (!scheduleNotice || typeof window === "undefined") {
@@ -11922,11 +12367,11 @@ const loginRedirectState = useMemo(
       }
       const normalizedName = payload.name.trim();
       if (!normalizedName) {
-        setAgentError("Agent 名称不能为空。");
+        setAgentError("集群名称不能为空。");
         return;
       }
       if (agents.some((agent) => agent.name.trim() === normalizedName)) {
-        setAgentError(`Agent 名称 ${normalizedName} 已存在，请更换其他名称。`);
+        setAgentError(`集群名称 ${normalizedName} 已存在，请更换其他名称。`);
         return;
       }
       const { backend_url, ...requestPayload } = payload;
@@ -11962,12 +12407,12 @@ const loginRedirectState = useMemo(
           })
         );
         setAgentNotice(
-          `Agent ${response.name} 创建成功，请在目标节点执行注册命令。`
+          `集群 ${response.name} 添加成功，请在目标节点执行注册命令。`
         );
         await Promise.all([refreshAgents(), refreshClusters()]);
       } catch (err) {
         const message =
-          err instanceof Error ? err.message : "创建 Agent 失败";
+          err instanceof Error ? err.message : "添加集群失败";
         setAgentError(message);
         throw err instanceof Error ? err : new Error(message);
       } finally {
@@ -12075,6 +12520,26 @@ const loginRedirectState = useMemo(
         err instanceof Error ? err.message : "获取巡检项失败";
       logWithTimestamp("error", "获取巡检项失败: %s", message);
       setInspectionError(message);
+    }
+  }, [canViewInspectionItems]);
+
+  const refreshTemplates = useCallback(async () => {
+    if (!canViewInspectionItems) {
+      setInspectionTemplates([]);
+      setTemplateError(null);
+      return;
+    }
+    try {
+      logWithTimestamp("info", "开始获取巡检项模板");
+      const data = await getInspectionItemTemplates();
+      setInspectionTemplates(data);
+      setTemplateError(null);
+      logWithTimestamp("info", "巡检项模板获取成功,数量: %d", data.length);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "获取巡检项模板失败";
+      logWithTimestamp("error", "获取巡检项模板失败: %s", message);
+      setTemplateError(message);
     }
   }, [canViewInspectionItems]);
 
@@ -12367,44 +12832,20 @@ const loginRedirectState = useMemo(
     [clusters]
   );
 
-  const handleOpenSettings = useCallback(() => {
-    setSettingsError(null);
-    setSettingsNotice(null);
-
-    if (location.pathname.startsWith(SETTINGS_BASE_PATH)) {
-      setSettingsOpen(true);
-      return;
-    }
-
-    const currentPath = `${location.pathname}${location.search}${location.hash}`;
-    previousSettingsPathRef.current =
-      currentPath.length > 0 ? currentPath : "/";
-    backgroundLocationRef.current = location;
-    setSettingsTabId("overview");
-    setSettingsOpen(true);
-    navigate(SETTINGS_BASE_PATH, {
-      state: { backgroundLocation: location },
-    });
-  }, [location, navigate]);
-
-  const handleCloseSettings = useCallback(() => {
-    const background = backgroundLocationRef.current;
-    setSettingsOpen(false);
+  const handleLeaveSettings = useCallback(() => {
     setConfirmState((prev) =>
       prev && prev.scope === "settings" ? null : prev
     );
-    if (location.pathname.startsWith(SETTINGS_BASE_PATH) && background) {
-      backgroundLocationRef.current = null;
-      navigate(-1);
-      return;
-    }
+    setSettingsTabId("general");
     const target =
-      (background
-        ? `${background.pathname}${background.search}${background.hash}`
-        : previousSettingsPathRef.current) || "/";
-    backgroundLocationRef.current = null;
-    navigate(target, { replace: true });
-  }, [location.pathname, navigate]);
+      previousSettingsPathRef.current &&
+      !previousSettingsPathRef.current.startsWith(SETTINGS_BASE_PATH)
+        ? previousSettingsPathRef.current
+        : "/";
+    navigate(target, {
+      replace: true,
+    });
+  }, [navigate]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -12415,6 +12856,7 @@ const loginRedirectState = useMemo(
     void refreshOverviewSummary();
     void refreshOverviewMetrics();
     void refreshItems();
+    void refreshTemplates();
     void refreshSchedules();
     void refreshRoles();
     void refreshUsers();
@@ -12425,6 +12867,7 @@ const loginRedirectState = useMemo(
     refreshOverviewSummary,
     refreshOverviewMetrics,
     refreshItems,
+    refreshTemplates,
     refreshSchedules,
     refreshRoles,
     refreshUsers,
@@ -12777,15 +13220,13 @@ const hasManualKubeconfig = useMemo(
     kubeconfigFile,
   ]);
 
-  const setSelectedItemIds = useCallback(
-    (updater: (prev: number[]) => number[]) => {
-      setSelectedItemIdsState((prev) => updater(prev));
-    },
-    []
-  );
-
   const handleStartInspection = useCallback(
-    async (clusterId: number, prometheusVersion: string) => {
+    async (
+      clusterId: number,
+      prometheusVersion: string,
+      itemIds: number[],
+      operatorName?: string
+    ) => {
       if (!canCreateHistory) {
         setInspectionError("当前账号无历史巡检创建权限。");
         return;
@@ -12796,8 +13237,8 @@ const hasManualKubeconfig = useMemo(
         );
         return;
       }
-      if (selectedItemIds.length === 0) {
-        setInspectionError("请至少选择一个巡检项");
+      if (itemIds.length === 0) {
+        setInspectionError("请至少选择一个巡检模板");
         return;
       }
 
@@ -12806,21 +13247,19 @@ const hasManualKubeconfig = useMemo(
       setInspectionNotice(null);
 
       try {
-        const operatorName = operator.trim();
         logWithTimestamp(
           "info",
           "创建巡检: cluster=%s items=%s",
           clusterId,
-          selectedItemIds.join(",")
+          itemIds.join(",")
         );
         const run = await createInspectionRun(
-          selectedItemIds,
+          itemIds,
           clusterId,
-          operatorName || undefined,
+          operatorName?.trim() || undefined,
           prometheusVersion
         );
         setInspectionNotice("巡检任务已启动，状态会自动更新。");
-        setSelectedItemIdsState([]);
         await refreshRuns();
         await refreshClusters();
         if (run?.id) {
@@ -12832,18 +13271,16 @@ const hasManualKubeconfig = useMemo(
         logWithTimestamp("error", "创建巡检失败: %s", message);
         setInspectionError(message);
       } finally {
-      setInspectionLoading(false);
-    }
-  },
-  [
-    selectedItemIds,
-    operator,
-    refreshRuns,
-    refreshClusters,
-    licenseCapabilities,
-    canCreateHistory,
-  ]
-);
+        setInspectionLoading(false);
+      }
+    },
+    [
+      refreshRuns,
+      refreshClusters,
+      licenseCapabilities,
+      canCreateHistory,
+    ]
+  );
 
   const handleDeleteClustersBulk = useCallback(
     (clusterIds: number[]): Promise<void> => {
@@ -13815,6 +14252,119 @@ const hasManualKubeconfig = useMemo(
     [items, deleteInspectionItemsBatch, licenseCapabilities, canManageInspectionItems]
   );
 
+  const handleSaveInspectionTemplate = useCallback(
+    async (payload: {
+      id?: number;
+      name: string;
+      itemIds: number[];
+    }) => {
+      if (!canManageInspectionItems) {
+        setTemplateError("当前账号无巡检项模板管理权限。");
+        setTemplateNotice(null);
+        return;
+      }
+      if (!licenseCapabilities.canRunInspections) {
+        setTemplateError(
+          licenseCapabilities.reason ?? "当前 License 不支持巡检项模板管理。"
+        );
+        setTemplateNotice(null);
+        return;
+      }
+      const trimmedName = payload.name.trim();
+      if (!trimmedName) {
+        setTemplateError("模板名称不能为空。");
+        setTemplateNotice(null);
+        return;
+      }
+      if (payload.itemIds.length === 0) {
+        setTemplateError("请至少选择一个巡检项。");
+        setTemplateNotice(null);
+        return;
+      }
+      setTemplateSubmitting(true);
+      try {
+        if (payload.id) {
+          logWithTimestamp("info", "更新巡检项模板: %s", payload.id);
+          await apiUpdateInspectionItemTemplate(payload.id, {
+            name: trimmedName,
+            item_ids: payload.itemIds,
+          });
+          setTemplateNotice("巡检项模板已更新");
+        } else {
+          logWithTimestamp("info", "创建巡检项模板: %s", trimmedName);
+          await apiCreateInspectionItemTemplate({
+            name: trimmedName,
+            item_ids: payload.itemIds,
+          });
+          setTemplateNotice("巡检项模板已创建");
+        }
+        await refreshTemplates();
+        setTemplateError(null);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "保存巡检项模板失败";
+        logWithTimestamp("error", "保存巡检项模板失败: %s", message);
+        setTemplateError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setTemplateSubmitting(false);
+      }
+    },
+    [refreshTemplates, licenseCapabilities, canManageInspectionItems]
+  );
+
+  const performDeleteInspectionTemplate = useCallback(
+    async (template: InspectionItemTemplate) => {
+      setTemplateSubmitting(true);
+      try {
+        logWithTimestamp("info", "删除巡检项模板: %s", template.id);
+        await apiDeleteInspectionItemTemplate(template.id);
+        await refreshTemplates();
+        setTemplateNotice("巡检项模板已删除");
+        setTemplateError(null);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "删除巡检项模板失败";
+        logWithTimestamp("error", "删除巡检项模板失败: %s", message);
+        setTemplateError(message);
+        throw err instanceof Error ? err : new Error(message);
+      } finally {
+        setTemplateSubmitting(false);
+      }
+    },
+    [refreshTemplates]
+  );
+
+  const handleDeleteInspectionTemplate = useCallback(
+    (template: InspectionItemTemplate) => {
+      if (!canManageInspectionItems) {
+        setTemplateError("当前账号无巡检项模板管理权限。");
+        setTemplateNotice(null);
+        return;
+      }
+      if (!licenseCapabilities.canRunInspections) {
+        setTemplateError(
+          licenseCapabilities.reason ?? "当前 License 不支持巡检项模板管理。"
+        );
+        setTemplateNotice(null);
+        return;
+      }
+      setConfirmState({
+        title: "删除巡检项模板",
+        message: `确认删除模板(${template.name})？该操作不可恢复。`,
+        confirmLabel: "删除",
+        variant: "danger",
+        scope: "settings",
+        onConfirm: () => performDeleteInspectionTemplate(template),
+      });
+    },
+    [
+      performDeleteInspectionTemplate,
+      licenseCapabilities,
+      canManageInspectionItems,
+    ]
+  );
+
   const handleExportInspectionItems = useCallback(async (format: "json" | "yaml") => {
     if (!canViewInspectionItems) {
       setSettingsError("当前账号无巡检项查看权限。");
@@ -13944,7 +14494,9 @@ const hasManualKubeconfig = useMemo(
       name?: string;
       cron: string;
       clusterIds: number[];
+      templateIds: number[];
       itemIds: number[];
+      reportRetentionCount: number;
       isEnabled: boolean;
     }) => {
       if (payload.id ? !canUpdateSchedule : !canCreateSchedule) {
@@ -13969,7 +14521,9 @@ const hasManualKubeconfig = useMemo(
             name: trimmedName ? trimmedName : null,
             cron: payload.cron,
             cluster_ids: payload.clusterIds,
+            template_ids: payload.templateIds,
             item_ids: payload.itemIds,
+            report_retention_count: payload.reportRetentionCount,
             is_enabled: payload.isEnabled,
           });
           setScheduleNotice("定时巡检已更新");
@@ -13979,7 +14533,9 @@ const hasManualKubeconfig = useMemo(
             name: trimmedName || undefined,
             cron: payload.cron,
             cluster_ids: payload.clusterIds,
+            template_ids: payload.templateIds,
             item_ids: payload.itemIds,
+            report_retention_count: payload.reportRetentionCount,
             is_enabled: payload.isEnabled,
           });
           setScheduleNotice("定时巡检已创建");
@@ -14158,21 +14714,22 @@ const hasManualKubeconfig = useMemo(
     () => {
       const tabs: SettingsModalTab[] = [
         {
-          id: "overview",
-          label: "设置总览",
-          render: ({ selectTab }) => (
-          <SettingsOverviewPanel
-            onOpenInspection={() => selectTab("inspection")}
-            onOpenLicense={() => selectTab("license")}
-            license={licenseCapabilities}
-            canOpenInspection={canViewInspectionItems}
-            canOpenLicense={canViewLicense}
-          />
+          id: "general",
+          label: "通用设置",
+          render: () => (
+            <GeneralSettingsPanel
+              status={licenseCapabilities}
+              uploading={licenseUploading}
+              textUploading={licenseTextUploading}
+              canUpload={canManageLicense}
+              onUpload={handleUploadLicenseFile}
+              onUploadText={handleUploadLicenseText}
+            />
           ),
         },
         {
           id: "inspection",
-          label: "巡检项设置",
+          label: "巡检项",
           render: ({ close }) => (
             <InspectionSettingsPanel
               items={sortedItems}
@@ -14188,6 +14745,24 @@ const hasManualKubeconfig = useMemo(
               onDeleteMany={handleDeleteInspectionItemsBulk}
               onExport={handleExportInspectionItems}
               onImport={handleImportInspectionItems}
+            />
+          ),
+        },
+        {
+          id: "inspection-templates",
+          label: "巡检项模板",
+          render: () => (
+            <InspectionTemplateSettingsPanel
+              templates={inspectionTemplates}
+              items={sortedItems}
+              prometheusVersionOptions={prometheusVersionOptions}
+              submitting={templateSubmitting}
+              notice={templateNotice}
+              error={templateError}
+              license={licenseCapabilities}
+              canManage={canManageInspectionItems}
+              onSave={handleSaveInspectionTemplate}
+              onDelete={handleDeleteInspectionTemplate}
             />
           ),
         },
@@ -14228,24 +14803,12 @@ const hasManualKubeconfig = useMemo(
             />
           ),
         },
-        {
-          id: "license",
-          label: "License 管理",
-          render: () => (
-            <LicenseSettingsPanel
-              status={licenseCapabilities}
-              uploading={licenseUploading}
-              textUploading={licenseTextUploading}
-              canUpload={canManageLicense}
-              onUpload={handleUploadLicenseFile}
-              onUploadText={handleUploadLicenseText}
-              onRefresh={refreshLicenseStatus}
-            />
-          ),
-        },
       ];
       return tabs.filter((tab) => {
         if (tab.id === "inspection") {
+          return canViewInspectionItems;
+        }
+        if (tab.id === "inspection-templates") {
           return canViewInspectionItems;
         }
         if (tab.id === "prometheus-version") {
@@ -14253,9 +14816,6 @@ const hasManualKubeconfig = useMemo(
         }
         if (tab.id === "users") {
           return canViewUsers;
-        }
-        if (tab.id === "license") {
-          return canViewLicense;
         }
         return true;
       });
@@ -14270,6 +14830,12 @@ const hasManualKubeconfig = useMemo(
       handleDeleteInspectionItemsBulk,
       handleExportInspectionItems,
       handleImportInspectionItems,
+      inspectionTemplates,
+      templateSubmitting,
+      templateNotice,
+      templateError,
+      handleSaveInspectionTemplate,
+      handleDeleteInspectionTemplate,
       prometheusVersionOptions,
       handleAddPrometheusVersion,
       handleDeletePrometheusVersion,
@@ -14302,12 +14868,10 @@ const hasManualKubeconfig = useMemo(
       licenseTextUploading,
       handleUploadLicenseFile,
       handleUploadLicenseText,
-      refreshLicenseStatus,
       canViewInspectionItems,
       canViewPrometheusVersions,
       canViewRoles,
       canViewUsers,
-      canViewLicense,
       canManageInspectionItems,
       canManagePrometheusVersions,
       canManageLicense,
@@ -14317,30 +14881,23 @@ const hasManualKubeconfig = useMemo(
   const handleSelectSettingsTab = useCallback(
     (tabId: string) => {
       const normalized = tabId.toLowerCase();
+      const resolved =
+        normalized === "license" || normalized === "overview"
+          ? "general"
+          : normalized;
       const validTabIds = settingsTabs.map((tab) => tab.id);
-      const nextTab = validTabIds.includes(normalized) ? normalized : "overview";
+      const nextTab = validTabIds.includes(resolved) ? resolved : "general";
       if (nextTab !== settingsTabId) {
         setSettingsTabId(nextTab);
       }
-      const targetPath =
-        nextTab === "overview"
-          ? SETTINGS_BASE_PATH
-          : `${SETTINGS_BASE_PATH}/${nextTab}`;
+      const targetPath = `${SETTINGS_BASE_PATH}/${nextTab}`;
       if (location.pathname !== targetPath) {
-        const baseBackground = backgroundLocation ?? backgroundLocationRef.current;
         navigate(targetPath, {
           replace: location.pathname.startsWith(SETTINGS_BASE_PATH),
-          state: baseBackground ? { backgroundLocation: baseBackground } : undefined,
         });
       }
     },
-    [
-      settingsTabs,
-      settingsTabId,
-      navigate,
-      location.pathname,
-      backgroundLocation,
-    ]
+    [settingsTabs, settingsTabId, navigate, location.pathname]
   );
 
   useEffect(() => {
@@ -14348,17 +14905,21 @@ const hasManualKubeconfig = useMemo(
       return;
     }
     if (location.pathname.startsWith(SETTINGS_BASE_PATH)) {
-      setSettingsOpen(true);
+      setSettingsError(null);
+      setSettingsNotice(null);
       const segments = location.pathname.split("/").filter(Boolean);
-      const requestedTab = (segments[1] ?? "overview").toLowerCase();
+      const rawTab = (segments[1] ?? "").toLowerCase();
+      const isAlias =
+        !rawTab || rawTab === "license" || rawTab === "overview";
+      const requestedTab = isAlias ? "general" : rawTab;
       const validTabIds = settingsTabs.map((tab) => tab.id);
       const nextTab = validTabIds.includes(requestedTab)
         ? requestedTab
-        : "overview";
+        : "general";
       if (nextTab !== settingsTabId) {
         setSettingsTabId(nextTab);
       }
-      if (!validTabIds.includes(requestedTab)) {
+      if (!validTabIds.includes(requestedTab) || isAlias) {
         if (
           !authChecked &&
           SETTINGS_TAB_IDS.includes(
@@ -14367,29 +14928,19 @@ const hasManualKubeconfig = useMemo(
         ) {
           return;
         }
-        const fallbackPath =
-          nextTab === "overview"
-            ? SETTINGS_BASE_PATH
-            : `${SETTINGS_BASE_PATH}/${nextTab}`;
+        const fallbackPath = `${SETTINGS_BASE_PATH}/${nextTab}`;
         if (location.pathname !== fallbackPath) {
-          const baseBackground =
-            backgroundLocation ?? backgroundLocationRef.current;
           navigate(fallbackPath, {
             replace: true,
-            state: baseBackground ? { backgroundLocation: baseBackground } : undefined,
           });
         }
       }
-    } else {
-      setSettingsOpen(false);
-      backgroundLocationRef.current = null;
     }
   }, [
     location.pathname,
     settingsTabs,
     settingsTabId,
     navigate,
-    backgroundLocation,
     authChecked,
   ]);
 
@@ -14584,7 +15135,11 @@ const hasManualKubeconfig = useMemo(
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
       </Helmet>
       <TopNavigation
+        user={authUser}
+        roleLabel={userRoleLabel}
         onOpenSettings={handleOpenSettings}
+        onChangePassword={handleOpenPasswordModal}
+        onLogout={handleLogout}
         showClusters={canViewClusterAgents}
         showAudit={canViewAudit}
         showSchedule={canViewSchedule}
@@ -14600,7 +15155,7 @@ const hasManualKubeconfig = useMemo(
         </div>
       )}
       <main className="app-shell">
-        <Routes location={routesLocation}>
+        <Routes>
           <Route path="/" element={overviewRouteElement} />
           <Route
             path="/clusters"
@@ -14613,7 +15168,29 @@ const hasManualKubeconfig = useMemo(
             }
           />
           <Route path="/login" element={<Navigate to="/" replace />} />
-          <Route path="/setting/*" element={overviewRouteElement} />
+          <Route
+            path="/setting/*"
+            element={
+              <Suspense fallback={<div className="page-loading">加载中...</div>}>
+                <LazySettingsPage
+                  tabs={settingsTabs}
+                  initialTabId="general"
+                  activeTabId={settingsTabId}
+                  onTabChange={handleSelectSettingsTab}
+                  onLeave={handleLeaveSettings}
+                  user={authUser}
+                  onLogout={handleLogout}
+                  onChangePassword={handleOpenPasswordModal}
+                  confirmState={
+                    confirmState && confirmState.scope === "settings"
+                      ? confirmState
+                      : null
+                  }
+                  onConfirmClose={() => setConfirmState(null)}
+                />
+              </Suspense>
+            }
+          />
           <Route
             path="/audit"
             element={
@@ -14657,6 +15234,7 @@ const hasManualKubeconfig = useMemo(
                   clusters={clusters}
                   clusterDisplayIds={clusterDisplayIds}
                   items={sortedItems}
+                  templates={inspectionTemplates}
                   prometheusVersionOptions={prometheusVersionOptions}
                   submitting={scheduleSubmitting}
                   notice={scheduleNotice}
@@ -14679,12 +15257,9 @@ const hasManualKubeconfig = useMemo(
               <ClusterDetailView
                 clusters={clusters}
                 items={sortedItems}
+                templates={inspectionTemplates}
                 runs={runs}
                 prometheusVersionOptions={prometheusVersionOptions}
-                selectedIds={selectedItemIds}
-                setSelectedIds={setSelectedItemIds}
-                operator={operator}
-                setOperator={setOperator}
                 inspectionLoading={inspectionLoading}
                 onStartInspection={handleStartInspection}
                 onDeleteRun={handleDeleteRun}
@@ -14758,24 +15333,6 @@ const hasManualKubeconfig = useMemo(
       <ConfirmationModal
         state={confirmState && confirmState.scope !== "settings" ? confirmState : null}
         onClose={() => setConfirmState(null)}
-      />
-
-      <SettingsModal
-        open={settingsOpen}
-        tabs={settingsTabs}
-        initialTabId="overview"
-        onClose={handleCloseSettings}
-        user={authUser}
-        onLogout={handleLogout}
-        onChangePassword={handleOpenPasswordModal}
-        confirmState={
-          confirmState && confirmState.scope === "settings"
-            ? confirmState
-            : null
-        }
-        onConfirmClose={() => setConfirmState(null)}
-        activeTabId={settingsTabId}
-        onTabChange={handleSelectSettingsTab}
       />
 
       <PasswordModal

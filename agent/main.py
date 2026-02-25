@@ -48,6 +48,7 @@ DEFAULT_TIMEOUT = 15
 DEFAULT_NODE_REPORT_INTERVAL = 60
 DEFAULT_METRICS_REPORT_INTERVAL = 60
 DEFAULT_STATUS_REPORT_INTERVAL = 60
+DEFAULT_RKE_PROM_URL = "http://prometheus-operated.cattle-prometheus:9090"
 
 
 def _as_bool(value: Any) -> bool:
@@ -88,6 +89,35 @@ def _format_request_error(exc: Exception, base_url: str) -> str:
         snippet = f" 响应片段：{body[:200]}" if body else ""
         return f"Server 返回 HTTP {status}{snippet}"
     return str(exc)
+
+
+def _fetch_rke_prometheus_token(kubeconfig_path: Optional[str]) -> Optional[str]:
+    if shutil.which("kubectl") is None:
+        return None
+    command = (
+        "kubectl -n cattle-prometheus get secret "
+        "$(kubectl -n cattle-prometheus get sa cluster-monitoring -o jsonpath='{.secrets[0].name}') "
+        "-o jsonpath='{.data.token}' | base64 -d"
+    )
+    env = os.environ.copy()
+    if kubeconfig_path:
+        env["KUBECONFIG"] = kubeconfig_path
+    try:
+        completed = subprocess.run(
+            command,
+            shell=True,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            env=env,
+        )
+    except Exception:
+        return None
+    if completed.returncode != 0:
+        return None
+    token = completed.stdout.strip()
+    return token or None
 
 
 def _extract_rancher_task_meta(task: Dict[str, Any]) -> tuple[bool, str, str]:
@@ -817,10 +847,20 @@ class AgentRunner:
             return
         self._active_prom_url = normalized
         self.config.prometheus_url = normalized
+        bearer_token = None
+        if normalized == DEFAULT_RKE_PROM_URL:
+            bearer_token = _fetch_rke_prometheus_token(
+                str(self.config.kubeconfig_path)
+                if self.config.kubeconfig_path
+                else None
+            )
+            if not bearer_token:
+                LOG.warning("未能获取 RKE Prometheus Token，PromQL 请求可能返回 401。")
         self.prom_client = PrometheusClient(
             normalized,
             timeout=float(self.config.request_timeout),
             verify_ssl=self.config.verify_ssl,
+            bearer_token=bearer_token,
         )
         LOG.info("Prometheus URL 已同步为 %s", normalized)
 
@@ -1000,11 +1040,11 @@ class AgentRunner:
 
     def _collect_cluster_utilization(self) -> Tuple[Optional[float], Optional[float]]:
         cpu_query = (
-            "(1 - (avg(irate({__name__=~\"node_cpu_seconds_total|windows_cpu_time_total\",mode=\"idle\"}[1m])))) * 100"
+            "(1 - (avg(rate({__name__=~\"node_cpu_seconds_total|windows_cpu_time_total\",mode=\"idle\"}[3m])))) * 100"
         )
         memory_query = (
-            "(1 - sum({__name__=~\"node_memory_MemAvailable_bytes|windows_os_physical_memory_free_bytes\"}) "
-            "/ sum({__name__=~\"node_memory_MemTotal_bytes|windows_cs_physical_memory_bytes\"})) * 100"
+            "(1 - sum(avg_over_time({__name__=~\"node_memory_MemAvailable_bytes|windows_os_physical_memory_free_bytes\"}[3m])) "
+            "/ sum(avg_over_time({__name__=~\"node_memory_MemTotal_bytes|windows_cs_physical_memory_bytes\"}[3m]))) * 100"
         )
         cpu_value = self._query_prometheus_value(cpu_query)
         memory_value = self._query_prometheus_value(memory_query)

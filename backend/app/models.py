@@ -104,6 +104,56 @@ class InspectionItem(Base):
     results = relationship("InspectionResult", back_populates="item")
 
 
+class InspectionItemTemplate(Base):
+    __tablename__ = "inspection_item_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    item_ids_json = Column(Text, nullable=False, default="[]")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    @property
+    def item_ids(self) -> list[int]:
+        if not self.item_ids_json:
+            return []
+        try:
+            import json
+
+            raw = json.loads(self.item_ids_json)
+        except Exception:
+            return []
+        if not isinstance(raw, list):
+            return []
+        result: list[int] = []
+        for value in raw:
+            try:
+                parsed = int(value)
+            except Exception:
+                continue
+            if parsed > 0:
+                result.append(parsed)
+        return result
+
+    def set_item_ids(self, value: Iterable[int]) -> None:
+        import json
+
+        cleaned: list[int] = []
+        seen: set[int] = set()
+        for item_id in value:
+            try:
+                parsed = int(item_id)
+            except Exception:
+                continue
+            if parsed <= 0 or parsed in seen:
+                continue
+            seen.add(parsed)
+            cleaned.append(parsed)
+        self.item_ids_json = json.dumps(cleaned, ensure_ascii=True)
+
+
 class InspectionRun(Base):
     __tablename__ = "inspection_runs"
 
@@ -124,6 +174,7 @@ class InspectionRun(Base):
     pod_count = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     completed_at = Column(DateTime, nullable=True)
+    last_progress_at = Column(DateTime, nullable=True)
     plan_json = Column(Text, nullable=True)
     prometheus_version = Column(String(20), nullable=False, default="3.2")
     executor = Column(String(20), nullable=False, default="server")
@@ -131,6 +182,11 @@ class InspectionRun(Base):
     agent_id = Column(
         Integer,
         ForeignKey("inspection_agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    schedule_id = Column(
+        Integer,
+        ForeignKey("inspection_schedules.id", ondelete="SET NULL"),
         nullable=True,
     )
 
@@ -149,7 +205,9 @@ class InspectionSchedule(Base):
     cron = Column(String(50), nullable=False)
     cluster_ids_json = Column(Text, nullable=False)
     cluster_names_json = Column(Text, nullable=True)
+    template_ids_json = Column(Text, nullable=False, default="[]")
     item_ids_json = Column(Text, nullable=False)
+    report_retention_count = Column(Integer, nullable=False, default=10)
     is_enabled = Column(Boolean, nullable=False, default=True)
     last_run_at = Column(DateTime, nullable=True)
     created_by_user_id = Column(Integer, nullable=True)
@@ -166,6 +224,10 @@ class InspectionSchedule(Base):
     @property
     def item_ids(self) -> list[int]:
         return self._load_ids(self.item_ids_json)
+
+    @property
+    def template_ids(self) -> list[int]:
+        return self._load_ids(self.template_ids_json)
 
     @property
     def cluster_name_map(self) -> dict[int, str]:
@@ -204,6 +266,9 @@ class InspectionSchedule(Base):
 
     def set_item_ids(self, value: Iterable[int]) -> None:
         self.item_ids_json = self._dump_ids(value)
+
+    def set_template_ids(self, value: Iterable[int]) -> None:
+        self.template_ids_json = self._dump_ids(value)
 
     @staticmethod
     def _normalize_ids(values: Iterable[int]) -> list[int]:
@@ -391,3 +456,18 @@ class AuthSession(Base):
     expires_at = Column(DateTime, nullable=False)
 
     user = relationship("AuthUser", back_populates="sessions")
+
+
+class SystemSettings(Base):
+    __tablename__ = "system_settings"
+    __table_args__ = {
+        "mysql_charset": "utf8mb4",
+        "mysql_collate": "utf8mb4_unicode_ci",
+    }
+
+    id = Column(Integer, primary_key=True, index=True)
+    base_url = Column(String(255), nullable=True)
+    report_retention_days = Column(Integer, nullable=False, default=10)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )

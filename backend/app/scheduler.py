@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import threading
+from datetime import date as date_type
 from datetime import datetime, timedelta
 from typing import Iterable, Optional
 
@@ -19,6 +20,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_METRICS_RETENTION_DAYS = int(os.getenv("METRICS_RETENTION_DAYS", "30"))
 DEFAULT_METRICS_CLEANUP_INTERVAL_HOURS = int(
     os.getenv("METRICS_CLEANUP_INTERVAL_HOURS", "12")
+)
+DEFAULT_REPORT_CLEANUP_INTERVAL_HOURS = int(
+    os.getenv("REPORT_CLEANUP_INTERVAL_HOURS", "12")
 )
 
 DEFAULT_PROMETHEUS_VERSION = "3.2"
@@ -182,6 +186,7 @@ def _dispatch_schedule_runs(
             executor="agent",
             agent_status="queued",
             agent_id=agent.id,
+            schedule_id=schedule.id,
             created_by_user_id=created_by_user_id,
             created_by_username=created_by_username,
         )
@@ -198,6 +203,7 @@ class InspectionScheduler:
         multi_version_label: str = MULTI_PROMETHEUS_VERSION_LABEL,
         metrics_retention_days: int = DEFAULT_METRICS_RETENTION_DAYS,
         metrics_cleanup_interval_hours: int = DEFAULT_METRICS_CLEANUP_INTERVAL_HOURS,
+        report_cleanup_interval_hours: int = DEFAULT_REPORT_CLEANUP_INTERVAL_HOURS,
     ) -> None:
         self._interval_seconds = max(5, int(interval_seconds))
         self._operator_label = operator_label
@@ -207,6 +213,11 @@ class InspectionScheduler:
             1, int(metrics_cleanup_interval_hours)
         )
         self._last_metrics_cleanup_at: Optional[datetime] = None
+        self._report_cleanup_interval_hours = max(
+            1, int(report_cleanup_interval_hours)
+        )
+        self._last_report_cleanup_at: Optional[datetime] = None
+        self._last_report_cleanup_date: Optional[date_type] = None
         self._stop_event = threading.Event()
         self._thread = threading.Thread(
             target=self._run_loop,
@@ -242,7 +253,15 @@ class InspectionScheduler:
             logger.info("Skip inspection schedules due to license: %s", exc)
             return
         with SessionLocal() as db:
+            # 先清理超时的巡检任务，防止占用队列
+            try:
+                from .main import _expire_stuck_runs
+
+                _expire_stuck_runs(db)
+            except Exception:
+                logger.exception("清理超时巡检任务失败。")
             self._cleanup_metrics(db, now)
+            self._cleanup_reports(db, now)
             schedules = crud.list_inspection_schedules(db)
             for schedule in schedules:
                 if not schedule.is_enabled:
@@ -287,3 +306,28 @@ class InspectionScheduler:
                 deleted,
                 cutoff.isoformat(),
             )
+
+    def _cleanup_reports(self, db: Session, now: datetime) -> None:
+        if now.hour != 1:
+            return
+        if self._last_report_cleanup_date == now.date():
+            return
+        settings = crud.get_system_settings(db)
+        retention_count = int(settings.report_retention_days or 0)
+        if retention_count <= 0:
+            self._last_report_cleanup_date = now.date()
+            return
+        try:
+            from .main import _cleanup_report_runs_by_count
+
+            deleted = _cleanup_report_runs_by_count(
+                db,
+                manual_retention_count=retention_count,
+            )
+        except Exception:
+            logger.exception("Failed to clean inspection reports.")
+            return
+        self._last_report_cleanup_at = now
+        self._last_report_cleanup_date = now.date()
+        if deleted:
+            logger.info("Cleaned %s inspection report records.", deleted)

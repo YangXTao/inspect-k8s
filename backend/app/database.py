@@ -67,6 +67,7 @@ def init_db() -> None:
     _ensure_auth_schema()
     _ensure_cluster_schema()
     _ensure_inspection_schema()
+    _ensure_inspection_item_templates_schema()
     _ensure_inspection_runs_schema()
     _ensure_inspection_results_schema()
     _ensure_inspection_schedules_schema()
@@ -383,6 +384,56 @@ def _ensure_inspection_schema() -> None:
         return
 
 
+def _ensure_inspection_item_templates_schema() -> None:
+    inspector = inspect(engine)
+    if "inspection_item_templates" not in inspector.get_table_names():
+        return
+
+    existing_columns = {
+        column["name"]
+        for column in inspector.get_columns("inspection_item_templates")
+    }
+    dialect = engine.dialect.name
+    statements: list[str] = []
+
+    if "name" not in existing_columns:
+        column_type = "TEXT" if dialect == "sqlite" else "VARCHAR(100)"
+        statements.append(
+            f"ALTER TABLE inspection_item_templates ADD COLUMN name {column_type} NOT NULL"
+        )
+    if "item_ids_json" not in existing_columns:
+        column_type = "TEXT"
+        statements.append(
+            f"ALTER TABLE inspection_item_templates ADD COLUMN item_ids_json {column_type} NOT NULL DEFAULT '[]'"
+        )
+    if "created_at" not in existing_columns:
+        column_type = "TEXT" if dialect == "sqlite" else "DATETIME"
+        statements.append(
+            f"ALTER TABLE inspection_item_templates ADD COLUMN created_at {column_type} NOT NULL"
+        )
+    if "updated_at" not in existing_columns:
+        column_type = "TEXT" if dialect == "sqlite" else "DATETIME"
+        statements.append(
+            f"ALTER TABLE inspection_item_templates ADD COLUMN updated_at {column_type} NOT NULL"
+        )
+
+    if dialect != "sqlite":
+        statements.extend(
+            [
+                "ALTER TABLE inspection_item_templates CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+                "ALTER TABLE inspection_item_templates MODIFY name VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+                "ALTER TABLE inspection_item_templates MODIFY item_ids_json TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
+            ]
+        )
+
+    if not statements:
+        return
+
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+
+
 def _ensure_inspection_runs_schema() -> None:
     inspector = inspect(engine)
     if "inspection_runs" not in inspector.get_table_names():
@@ -441,6 +492,16 @@ def _ensure_inspection_runs_schema() -> None:
         column_type = "INTEGER" if dialect == "sqlite" else "INT"
         statements.append(
             f"ALTER TABLE inspection_runs ADD COLUMN agent_id {column_type} NULL"
+        )
+    if "schedule_id" not in existing_columns:
+        column_type = "INTEGER" if dialect == "sqlite" else "INT"
+        statements.append(
+            f"ALTER TABLE inspection_runs ADD COLUMN schedule_id {column_type} NULL"
+        )
+    if "last_progress_at" not in existing_columns:
+        column_type = "DATETIME" if dialect != "sqlite" else "DATETIME"
+        statements.append(
+            f"ALTER TABLE inspection_runs ADD COLUMN last_progress_at {column_type} NULL"
         )
     if "created_by_user_id" not in existing_columns:
         column_type = "INTEGER" if dialect == "sqlite" else "INT"
@@ -693,10 +754,29 @@ def _ensure_inspection_schedules_schema() -> None:
             statements.append(
                 f"ALTER TABLE inspection_schedules ADD COLUMN cluster_names_json {column_type} NULL"
             )
+    if "template_ids_json" not in existing_columns:
+        column_type = "TEXT"
+        if dialect == "sqlite":
+            statements.append(
+                f"ALTER TABLE inspection_schedules ADD COLUMN template_ids_json {column_type} NOT NULL DEFAULT '[]'"
+            )
+        else:
+            # MySQL 不允许为 TEXT 列设置默认值，先允许 NULL，再回填数据，最后在下方统一 MODIFY 为 NOT NULL。
+            statements.append(
+                f"ALTER TABLE inspection_schedules ADD COLUMN template_ids_json {column_type} NULL"
+            )
+            statements.append(
+                "UPDATE inspection_schedules SET template_ids_json = '[]' WHERE template_ids_json IS NULL"
+            )
     if "item_ids_json" not in existing_columns:
         column_type = "TEXT"
         statements.append(
             f"ALTER TABLE inspection_schedules ADD COLUMN item_ids_json {column_type} NOT NULL DEFAULT '[]'"
+        )
+    if "report_retention_count" not in existing_columns:
+        column_type = "INTEGER" if dialect == "sqlite" else "INT"
+        statements.append(
+            f"ALTER TABLE inspection_schedules ADD COLUMN report_retention_count {column_type} NOT NULL DEFAULT 10"
         )
     if "is_enabled" not in existing_columns:
         if dialect == "sqlite":
@@ -743,6 +823,7 @@ def _ensure_inspection_schedules_schema() -> None:
                 "ALTER TABLE inspection_schedules MODIFY cron VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
                 "ALTER TABLE inspection_schedules MODIFY cluster_ids_json TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
                 "ALTER TABLE inspection_schedules MODIFY cluster_names_json TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
+                "ALTER TABLE inspection_schedules MODIFY template_ids_json TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
                 "ALTER TABLE inspection_schedules MODIFY item_ids_json TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL",
                 "ALTER TABLE inspection_schedules MODIFY created_by_username VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL",
             ]
