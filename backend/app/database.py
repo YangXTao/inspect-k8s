@@ -756,9 +756,18 @@ def _ensure_inspection_schedules_schema() -> None:
             )
     if "template_ids_json" not in existing_columns:
         column_type = "TEXT"
-        statements.append(
-            f"ALTER TABLE inspection_schedules ADD COLUMN template_ids_json {column_type} NOT NULL DEFAULT '[]'"
-        )
+        if dialect == "sqlite":
+            statements.append(
+                f"ALTER TABLE inspection_schedules ADD COLUMN template_ids_json {column_type} NOT NULL DEFAULT '[]'"
+            )
+        else:
+            # MySQL 不允许为 TEXT 列设置默认值，先允许 NULL，再回填数据，最后在下方统一 MODIFY 为 NOT NULL。
+            statements.append(
+                f"ALTER TABLE inspection_schedules ADD COLUMN template_ids_json {column_type} NULL"
+            )
+            statements.append(
+                "UPDATE inspection_schedules SET template_ids_json = '[]' WHERE template_ids_json IS NULL"
+            )
     if "item_ids_json" not in existing_columns:
         column_type = "TEXT"
         statements.append(

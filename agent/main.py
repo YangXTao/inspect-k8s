@@ -1040,11 +1040,11 @@ class AgentRunner:
 
     def _collect_cluster_utilization(self) -> Tuple[Optional[float], Optional[float]]:
         cpu_query = (
-            "(1 - (avg(irate({__name__=~\"node_cpu_seconds_total|windows_cpu_time_total\",mode=\"idle\"}[1m])))) * 100"
+            "(1 - (avg(rate({__name__=~\"node_cpu_seconds_total|windows_cpu_time_total\",mode=\"idle\"}[3m])))) * 100"
         )
         memory_query = (
-            "(1 - sum({__name__=~\"node_memory_MemAvailable_bytes|windows_os_physical_memory_free_bytes\"}) "
-            "/ sum({__name__=~\"node_memory_MemTotal_bytes|windows_cs_physical_memory_bytes\"})) * 100"
+            "(1 - sum(avg_over_time({__name__=~\"node_memory_MemAvailable_bytes|windows_os_physical_memory_free_bytes\"}[3m])) "
+            "/ sum(avg_over_time({__name__=~\"node_memory_MemTotal_bytes|windows_cs_physical_memory_bytes\"}[3m]))) * 100"
         )
         cpu_value = self._query_prometheus_value(cpu_query)
         memory_value = self._query_prometheus_value(memory_query)
