@@ -477,6 +477,20 @@ const resolveDefaultBaseUrl = () => {
   return resolved || window.location.origin;
 };
 
+const CRON_WEEK_LABELS: Record<string, string> = {
+  "0": "周日",
+  "1": "周一",
+  "2": "周二",
+  "3": "周三",
+  "4": "周四",
+  "5": "周五",
+  "6": "周六",
+  "7": "周日",
+};
+
+const formatTwoDigits = (value: number, max: number) =>
+  String(Math.max(0, Math.min(value, max))).padStart(2, "0");
+
 const describeScheduleCron = (
   minute: string,
   hour: string,
@@ -495,16 +509,63 @@ const describeScheduleCron = (
   const allDay = d === "*" && mo === "*" && w === "*";
   const minuteNum = /^\d+$/.test(m) ? Number(m) : null;
   const hourNum = /^\d+$/.test(h) ? Number(h) : null;
+  const dayNum = /^\d+$/.test(d) ? Number(d) : null;
+  const monthNum = /^\d+$/.test(mo) ? Number(mo) : null;
+  const weekLabel = CRON_WEEK_LABELS[w];
   if (allDay && minuteNum !== null && hourNum !== null) {
-    const hh = String(Math.max(0, Math.min(hourNum, 23))).padStart(2, "0");
-    const mm = String(Math.max(0, Math.min(minuteNum, 59))).padStart(2, "0");
+    const hh = formatTwoDigits(hourNum, 23);
+    const mm = formatTwoDigits(minuteNum, 59);
     return `运行时间：每天 ${hh}:${mm}`;
   }
   if (allDay && minuteNum !== null && h === "*") {
-    const mm = String(Math.max(0, Math.min(minuteNum, 59))).padStart(2, "0");
+    const mm = formatTwoDigits(minuteNum, 59);
     return `运行时间：每小时的第 ${mm} 分钟`;
   }
+  if (
+    minuteNum !== null &&
+    hourNum !== null &&
+    dayNum !== null &&
+    mo === "*" &&
+    w === "*"
+  ) {
+    return `运行时间：每月 ${Math.max(1, Math.min(dayNum, 31))} 日 ${formatTwoDigits(
+      hourNum,
+      23
+    )}:${formatTwoDigits(minuteNum, 59)}`;
+  }
+  if (
+    minuteNum !== null &&
+    hourNum !== null &&
+    d === "*" &&
+    mo === "*" &&
+    weekLabel
+  ) {
+    return `运行时间：${weekLabel} ${formatTwoDigits(hourNum, 23)}:${formatTwoDigits(
+      minuteNum,
+      59
+    )}`;
+  }
+  if (
+    minuteNum !== null &&
+    hourNum !== null &&
+    dayNum !== null &&
+    monthNum !== null &&
+    w === "*"
+  ) {
+    return `运行时间：每年 ${Math.max(1, Math.min(monthNum, 12))} 月 ${Math.max(
+      1,
+      Math.min(dayNum, 31)
+    )} 日 ${formatTwoDigits(hourNum, 23)}:${formatTwoDigits(minuteNum, 59)}`;
+  }
   return `运行时间：Cron ${m} ${h} ${d} ${mo} ${w}`;
+};
+
+const describeCronExpression = (expression: string) => {
+  const parts = (expression || "").trim().split(/\s+/);
+  if (parts.length !== 5) {
+    return `运行时间：${expression || "-"}`;
+  }
+  return describeScheduleCron(parts[0], parts[1], parts[2], parts[3], parts[4]);
 };
 
 const BEIJING_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
@@ -7249,6 +7310,21 @@ const ScheduleSettingsPanel = ({
       setFormError("请选择一个集群");
       return;
     }
+    const normalizedCron = parts.join(" ");
+    const selectedClusterId = selectedAvailableClusterIds[0];
+    const duplicatedSchedule = schedules.find((schedule) => {
+      if (editingSchedule?.id && schedule.id === editingSchedule.id) {
+        return false;
+      }
+      if ((schedule.cron || "").trim() !== normalizedCron) {
+        return false;
+      }
+      return (schedule.cluster_ids || []).includes(selectedClusterId);
+    });
+    if (duplicatedSchedule) {
+      setFormError("同一集群不能创建两个相同运行时间的定时任务");
+      return;
+    }
     const resolvedItemIds =
       selectedTemplateItemIds.length > 0 ? selectedTemplateItemIds : selectedItemIds;
     if (resolvedItemIds.length === 0) {
@@ -7278,7 +7354,7 @@ const ScheduleSettingsPanel = ({
       await onSave({
         id: editingSchedule?.id,
         name: finalScheduleName,
-        cron: parts.join(" "),
+        cron: normalizedCron,
         clusterIds: selectedAvailableClusterIds,
         itemIds: resolvedItemIds,
         reportRetentionCount: Math.floor(parsedRetentionCount),
@@ -7689,6 +7765,29 @@ const ScheduleSettingsPanel = ({
     [scheduleItemMap, prometheusVersionOptions]
   );
 
+  const getScheduleTemplateSummary = useCallback(
+    (schedule: InspectionSchedule) => {
+      const itemIdSet = new Set(schedule.item_ids ?? []);
+      const matchedTemplates = templates.filter((template) => {
+        if (!template.item_ids?.length) {
+          return false;
+        }
+        return template.item_ids.every((itemId) => itemIdSet.has(itemId));
+      });
+      if (matchedTemplates.length === 0) {
+        return {
+          title: `${schedule.item_ids.length} 项`,
+          detail: `PromQL 版本：${getPrometheusSummary(schedule)}`,
+        };
+      }
+      return {
+        title: summarizeNames(matchedTemplates.map((template) => template.name)),
+        detail: `${matchedTemplates.length} 个模板 · ${schedule.item_ids.length} 项`,
+      };
+    },
+    [templates, summarizeNames, getPrometheusSummary]
+  );
+
   const cronPreviewText = useMemo(
     () => describeScheduleCron(cronMinute, cronHour, cronDay, cronMonth, cronWeek),
     [cronMinute, cronHour, cronDay, cronMonth, cronWeek]
@@ -7780,7 +7879,7 @@ const ScheduleSettingsPanel = ({
                     type="text"
                     value={scheduleKeyword}
                     onChange={(event) => setScheduleKeyword(event.target.value)}
-                    placeholder="按名称 / Cron / 集群 / 巡检项搜索"
+                    placeholder="按集群 / 运行时间 / 巡检模板搜索"
                   />
                   {scheduleKeyword && (
                     <button
@@ -7803,10 +7902,9 @@ const ScheduleSettingsPanel = ({
                   <thead>
                     <tr>
                       <th></th>
-                      <th>名称</th>
-                      <th>Cron</th>
                       <th>集群</th>
-                      <th>巡检项</th>
+                      <th>运行时间</th>
+                      <th>巡检模板</th>
                       <th>状态</th>
                       <th>最近执行</th>
                       <th>操作</th>
@@ -7814,15 +7912,15 @@ const ScheduleSettingsPanel = ({
                   </thead>
                   <tbody>
                     {pagedSchedules.map((schedule) => {
-                      const label =
-                        schedule.name?.trim() ||
-                        `定时巡检 #${schedule.id}`;
                       const clusterSummary = summarizeNames(
                         schedule.cluster_ids.map((id) =>
                           getScheduleClusterLabel(schedule, id)
                         )
                       );
-                      const versionSummary = getPrometheusSummary(schedule);
+                      const scheduleTimeSummary = describeCronExpression(
+                        schedule.cron
+                      );
+                      const templateSummary = getScheduleTemplateSummary(schedule);
                       return (
                         <tr key={schedule.id}>
                           <td>
@@ -7836,8 +7934,6 @@ const ScheduleSettingsPanel = ({
                               </label>
                             )}
                           </td>
-                          <td>{label}</td>
-                          <td className="th-nowrap">{schedule.cron}</td>
                           <td>
                             <div className="schedule-cell">
                               <span>{clusterSummary}</span>
@@ -7848,11 +7944,17 @@ const ScheduleSettingsPanel = ({
                           </td>
                           <td>
                             <div className="schedule-cell">
-                              <span>
-                                {schedule.item_ids.length} 项
-                              </span>
+                              <span>{scheduleTimeSummary.replace(/^运行时间：/, "")}</span>
                               <span className="schedule-muted">
-                                PromQL 版本：{versionSummary}
+                                Cron：{schedule.cron}
+                              </span>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="schedule-cell">
+                              <span>{templateSummary.title}</span>
+                              <span className="schedule-muted">
+                                {templateSummary.detail}
                               </span>
                             </div>
                           </td>
@@ -7985,7 +8087,6 @@ const ScheduleSettingsPanel = ({
             <div className="settings-header">
               <div>
                 <h3>{editingSchedule ? "编辑定时任务" : "新增定时任务"}</h3>
-                <p>时间格式为 分 时 日 月 周，按服务器时间执行</p>
               </div>
               <div className="settings-actions">
                 <button
@@ -8008,7 +8109,7 @@ const ScheduleSettingsPanel = ({
             <form className="settings-form schedule-task-form" onSubmit={handleSubmit}>
               <div className="schedule-form-grid">
                 <div className="schedule-form-row schedule-form-row-top">
-                  <div className="schedule-form-field">
+                  <div className="schedule-form-field schedule-form-cluster-field">
                     <div className="schedule-form-label">集群</div>
                     <div
                       className="template-picker schedule-form-picker"
@@ -8067,7 +8168,6 @@ const ScheduleSettingsPanel = ({
                   <div className="schedule-form-field schedule-form-enable">
                     <div className="schedule-form-label">启用</div>
                     <label className="switch-row">
-                      <span>启用</span>
                       <input
                         className="switch-input"
                         type="checkbox"
@@ -8081,7 +8181,7 @@ const ScheduleSettingsPanel = ({
                 </div>
 
                 <div className="schedule-form-field">
-                  <div className="schedule-form-label">时间（分 / 时 / 日 / 月 / 周）</div>
+                  <div className="schedule-form-label">时间</div>
                   <div className="schedule-cron-row schedule-cron-row-compact">
                     <div className="schedule-cron-grid">
                       <label>
@@ -8144,7 +8244,7 @@ const ScheduleSettingsPanel = ({
                   <div className="schedule-cron-preview">{cronPreviewText}</div>
                 </div>
 
-                <div className="schedule-form-field">
+                <div className="schedule-form-field schedule-form-template-field">
                   <div className="schedule-form-label">巡检模板</div>
                   <div
                     className="template-picker schedule-form-picker"

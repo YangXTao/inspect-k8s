@@ -4725,7 +4725,7 @@ th {
 }
 
 .schedule-modal .schedule-form-row-top {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(320px, 420px) auto;
   align-items: end;
 }
 
@@ -4752,6 +4752,11 @@ th {
   max-width: none;
 }
 
+.schedule-modal .schedule-form-cluster-field,
+.schedule-modal .schedule-form-template-field {
+  max-width: 420px;
+}
+
 .schedule-modal .schedule-form-picker .template-picker-input {
   width: 100%;
 }
@@ -4764,6 +4769,28 @@ th {
   max-height: 220px;
 }
 
+.schedule-modal .template-picker-dropdown .template-option {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+}
+
+.schedule-modal .template-picker-dropdown .template-option input {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.schedule-modal .template-picker-dropdown .template-option span {
+  display: block;
+  flex: 1 1 auto;
+  text-align: left;
+  line-height: 1.35;
+}
+
 .schedule-modal .schedule-form-enable {
   min-width: 140px;
 }
@@ -4774,20 +4801,34 @@ th {
   margin: 0;
 }
 
+.schedule-modal .schedule-form-enable .switch-row .switch-slider {
+  margin-top: 0;
+}
+
 .schedule-modal .schedule-cron-row-compact {
   padding: 8px 10px;
   gap: 10px;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .schedule-modal .schedule-cron-row-compact .schedule-cron-grid {
-  width: 100%;
-  grid-template-columns: repeat(5, minmax(62px, 1fr));
+  width: auto;
+  grid-template-columns: repeat(5, 62px);
 }
 
 .schedule-modal .schedule-cron-preview {
   font-size: 13px;
   color: #64748b;
   margin-top: 2px;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .schedule-modal .schedule-template-chip-list {
@@ -4820,6 +4861,11 @@ th {
     align-items: stretch;
   }
 
+  .schedule-modal .schedule-form-cluster-field,
+  .schedule-modal .schedule-form-template-field {
+    max-width: none;
+  }
+
   .schedule-modal .schedule-form-enable {
     min-width: 0;
   }
@@ -4839,7 +4885,7 @@ th {
   }
 
   .schedule-modal .schedule-cron-row-compact .schedule-cron-grid {
-    grid-template-columns: repeat(2, minmax(72px, 1fr));
+    grid-template-columns: repeat(2, 72px);
   }
 }
 

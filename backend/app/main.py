@@ -1389,6 +1389,40 @@ def _ensure_unique_schedule_name(
         raise HTTPException(status_code=400, detail="定时巡检名称已存在，请更换名称。")
 
 
+def _ensure_unique_schedule_cluster_cron(
+    db: Session,
+    *,
+    cluster_ids: list[int],
+    cron: str,
+    schedule_id: Optional[int] = None,
+) -> None:
+    normalized_cron = (cron or "").strip()
+    if not normalized_cron or not cluster_ids:
+        return
+    cluster_id_set = {int(value) for value in cluster_ids if int(value) > 0}
+    if not cluster_id_set:
+        return
+    existing_schedules = crud.list_inspection_schedules(db)
+    for schedule in existing_schedules:
+        if schedule_id is not None and schedule.id == schedule_id:
+            continue
+        if (schedule.cron or "").strip() != normalized_cron:
+            continue
+        existed_cluster_ids = {
+            int(value) for value in (schedule.cluster_ids or []) if int(value) > 0
+        }
+        duplicated_cluster_ids = cluster_id_set & existed_cluster_ids
+        if not duplicated_cluster_ids:
+            continue
+        duplicated_cluster_id = next(iter(duplicated_cluster_ids))
+        cluster = crud.get_cluster(db, duplicated_cluster_id)
+        cluster_name = getattr(cluster, "name", None) or f"集群{duplicated_cluster_id}"
+        raise HTTPException(
+            status_code=400,
+            detail=f"集群“{cluster_name}”已存在相同运行时间（{normalized_cron}）的定时任务。",
+        )
+
+
 def _resolve_schedule_last_run_at(
     db: Session,
     schedule: models.InspectionSchedule,
@@ -3837,6 +3871,11 @@ def create_inspection_schedule(
     item_ids = _normalize_id_list(payload.item_ids)
     _validate_schedule_clusters(db, cluster_ids)
     _validate_schedule_items(db, item_ids)
+    _ensure_unique_schedule_cluster_cron(
+        db,
+        cluster_ids=cluster_ids,
+        cron=cron,
+    )
     sanitized = schemas.InspectionScheduleCreate(
         name=normalized_name,
         cron=cron,
@@ -3899,6 +3938,14 @@ def update_inspection_schedule(
         update_payload["report_retention_count"] = int(
             update_payload["report_retention_count"]
         )
+    target_cluster_ids = update_payload.get("cluster_ids", schedule.cluster_ids or [])
+    target_cron = update_payload.get("cron", schedule.cron)
+    _ensure_unique_schedule_cluster_cron(
+        db,
+        cluster_ids=list(target_cluster_ids),
+        cron=str(target_cron or ""),
+        schedule_id=schedule.id,
+    )
     sanitized = schemas.InspectionScheduleUpdate.model_validate(update_payload)
     updated = crud.update_inspection_schedule(db, schedule, sanitized)
     return schemas.InspectionScheduleOut.model_validate(updated)
