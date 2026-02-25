@@ -491,6 +491,22 @@ const CRON_WEEK_LABELS: Record<string, string> = {
 const formatTwoDigits = (value: number, max: number) =>
   String(Math.max(0, Math.min(value, max))).padStart(2, "0");
 
+const parseCronStepValue = (token: string) => {
+  const normalized = token.trim();
+  const direct = normalized.match(/^\*\/(\d+)$/);
+  if (direct) {
+    const step = Number(direct[1]);
+    return Number.isFinite(step) && step > 0 ? step : null;
+  }
+  // 兼容用户常见输入“30/*”的预览显示（保存时仍由后端校验 Cron 合法性）
+  const reversed = normalized.match(/^(\d+)\/\*$/);
+  if (reversed) {
+    const step = Number(reversed[1]);
+    return Number.isFinite(step) && step > 0 ? step : null;
+  }
+  return null;
+};
+
 const describeScheduleCron = (
   minute: string,
   hour: string,
@@ -511,6 +527,10 @@ const describeScheduleCron = (
   const hourNum = /^\d+$/.test(h) ? Number(h) : null;
   const dayNum = /^\d+$/.test(d) ? Number(d) : null;
   const monthNum = /^\d+$/.test(mo) ? Number(mo) : null;
+  const minuteStep = parseCronStepValue(m);
+  const hourStep = parseCronStepValue(h);
+  const dayStep = parseCronStepValue(d);
+  const monthStep = parseCronStepValue(mo);
   const weekLabel = CRON_WEEK_LABELS[w];
   if (allDay && minuteNum !== null && hourNum !== null) {
     const hh = formatTwoDigits(hourNum, 23);
@@ -520,6 +540,13 @@ const describeScheduleCron = (
   if (allDay && minuteNum !== null && h === "*") {
     const mm = formatTwoDigits(minuteNum, 59);
     return `运行时间：每小时的第 ${mm} 分钟`;
+  }
+  if (allDay && minuteStep !== null && h === "*") {
+    return `运行时间：每 ${minuteStep} 分钟执行一次`;
+  }
+  if (allDay && minuteNum !== null && hourStep !== null) {
+    const mm = formatTwoDigits(minuteNum, 59);
+    return `运行时间：每 ${hourStep} 小时的 ${mm} 分钟`;
   }
   if (
     minuteNum !== null &&
@@ -556,6 +583,30 @@ const describeScheduleCron = (
       1,
       Math.min(dayNum, 31)
     )} 日 ${formatTwoDigits(hourNum, 23)}:${formatTwoDigits(minuteNum, 59)}`;
+  }
+  if (
+    minuteNum !== null &&
+    hourNum !== null &&
+    dayStep !== null &&
+    mo === "*" &&
+    w === "*"
+  ) {
+    return `运行时间：每 ${dayStep} 天 ${formatTwoDigits(hourNum, 23)}:${formatTwoDigits(
+      minuteNum,
+      59
+    )}`;
+  }
+  if (
+    minuteNum !== null &&
+    hourNum !== null &&
+    d === "*" &&
+    monthStep !== null &&
+    w === "*"
+  ) {
+    return `运行时间：每 ${monthStep} 个月 ${formatTwoDigits(hourNum, 23)}:${formatTwoDigits(
+      minuteNum,
+      59
+    )}`;
   }
   return `运行时间：Cron ${m} ${h} ${d} ${mo} ${w}`;
 };
@@ -7163,14 +7214,36 @@ const ScheduleSettingsPanel = ({
     );
     setSelectedItemIds(editingSchedule.item_ids ?? []);
     const scheduleItemIdSet = new Set(editingSchedule.item_ids ?? []);
-    const matchedTemplateIds = templates
-      .filter((template) => {
-        if (!template.item_ids?.length) {
-          return false;
-        }
-        return template.item_ids.every((itemId) => scheduleItemIdSet.has(itemId));
+    const templateCandidates = templates
+      .map((template) => {
+        const normalizedItemIds = Array.from(
+          new Set(
+            (template.item_ids ?? []).filter((itemId) => scheduleItemIdSet.has(itemId))
+          )
+        );
+        return {
+          id: template.id,
+          itemIds: normalizedItemIds,
+        };
       })
-      .map((template) => template.id);
+      .filter((template) => template.itemIds.length > 0)
+      .filter((template) => template.itemIds.every((itemId) => scheduleItemIdSet.has(itemId)))
+      .sort((a, b) => {
+        if (b.itemIds.length !== a.itemIds.length) {
+          return b.itemIds.length - a.itemIds.length;
+        }
+        return a.id - b.id;
+      });
+    const coveredItemIds = new Set<number>();
+    const matchedTemplateIds: number[] = [];
+    templateCandidates.forEach((candidate) => {
+      const addsNewItem = candidate.itemIds.some((itemId) => !coveredItemIds.has(itemId));
+      if (!addsNewItem) {
+        return;
+      }
+      matchedTemplateIds.push(candidate.id);
+      candidate.itemIds.forEach((itemId) => coveredItemIds.add(itemId));
+    });
     setSelectedTemplateIds(matchedTemplateIds);
     setTemplateKeyword("");
     setClusterKeyword("");
@@ -7348,7 +7421,7 @@ const ScheduleSettingsPanel = ({
       0,
       100
     );
-    const finalScheduleName = (formName.trim() || derivedName).slice(0, 100);
+    const finalScheduleName = derivedName;
     setFormError(null);
     try {
       await onSave({
