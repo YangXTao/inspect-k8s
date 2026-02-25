@@ -4225,6 +4225,13 @@ th {
 .schedule-page .settings-list .table-wrapper {
   background: transparent;
   max-height: none;
+  overflow: visible;
+}
+
+.schedule-page .schedule-pagination {
+  justify-content: flex-start;
+  align-items: center;
+  margin-top: 12px;
 }
 
 .history-page .history-filter-row,
