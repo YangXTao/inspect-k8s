@@ -4213,6 +4213,13 @@ th {
   overflow: visible;
 }
 
+.schedule-page .inspection-section.inspection-section-list {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
 .schedule-page .settings-list table {
   font-size: 14px;
 }
