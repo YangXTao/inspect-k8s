@@ -4725,7 +4725,7 @@ th {
 }
 
 .schedule-modal .schedule-form-row-top {
-  grid-template-columns: minmax(320px, 420px) auto;
+  grid-template-columns: minmax(220px, 280px) auto;
   align-items: end;
 }
 
@@ -4754,7 +4754,7 @@ th {
 
 .schedule-modal .schedule-form-cluster-field,
 .schedule-modal .schedule-form-template-field {
-  max-width: 420px;
+  max-width: 280px;
 }
 
 .schedule-modal .schedule-form-picker .template-picker-input {
@@ -4763,6 +4763,7 @@ th {
 
 .schedule-modal .schedule-form-picker .template-picker-input input {
   width: 100%;
+  color: #0f172a;
 }
 
 .schedule-modal .schedule-form-picker .template-picker-dropdown {
@@ -4777,6 +4778,7 @@ th {
   gap: 8px;
   width: 100%;
   padding: 7px 8px;
+  text-align: left;
 }
 
 .schedule-modal .template-picker-dropdown .template-option input {
@@ -4789,6 +4791,7 @@ th {
   flex: 1 1 auto;
   text-align: left;
   line-height: 1.35;
+  color: #0f172a;
 }
 
 .schedule-modal .schedule-form-enable {

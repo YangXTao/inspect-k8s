@@ -7257,7 +7257,11 @@ const ScheduleSettingsPanel = ({
       setSelectedTemplateIds(matchedTemplateIds);
     }
     setTemplateKeyword("");
-    setClusterKeyword("");
+    const editingClusterId = editingSchedule.cluster_ids?.[0];
+    const editingCluster = editingClusterId
+      ? scheduleClusterMap.get(editingClusterId)
+      : null;
+    setClusterKeyword(editingCluster?.name ?? "");
     setScheduleRetentionCount(
       String(editingSchedule.report_retention_count || DEFAULT_SCHEDULE_REPORT_RETENTION_COUNT)
     );
@@ -7265,7 +7269,7 @@ const ScheduleSettingsPanel = ({
     setTemplatePickerOpen(false);
     setSelectedTemplateId("");
     setFormError(null);
-  }, [editingSchedule, resetForm, templates]);
+  }, [editingSchedule, resetForm, scheduleClusterMap, templates]);
 
   useEffect(() => {
     setSelectedClusterIds((prev) =>
@@ -7524,11 +7528,18 @@ const ScheduleSettingsPanel = ({
     filteredClusters.length > 0 &&
     selectedFilteredClusterCount === filteredClusters.length;
 
-  const toggleCluster = useCallback((clusterId: number) => {
-    setSelectedClusterIds((prev) =>
-      prev[0] === clusterId ? [] : [clusterId]
-    );
-  }, []);
+  const toggleCluster = useCallback(
+    (clusterId: number) => {
+      setSelectedClusterIds((prev) => {
+        const next = prev[0] === clusterId ? [] : [clusterId];
+        const nextCluster =
+          next.length > 0 ? scheduleClusterMap.get(next[0]) ?? null : null;
+        setClusterKeyword(nextCluster?.name ?? "");
+        return next;
+      });
+    },
+    [scheduleClusterMap]
+  );
 
   const toggleAllClusters = useCallback(() => {
     setSelectedClusterIds((prev) => {
@@ -8216,11 +8227,7 @@ const ScheduleSettingsPanel = ({
                           value={clusterKeyword}
                           onChange={(event) => setClusterKeyword(event.target.value)}
                           onFocus={() => setClusterPickerOpen(true)}
-                          placeholder={
-                            selectedScheduleCluster
-                              ? `已选择：${selectedScheduleCluster.name}`
-                              : "输入集群名称搜索或下拉选择"
-                          }
+                          placeholder="输入集群名称搜索或下拉选择"
                           disabled={submitting || readOnly}
                         />
                       </div>
