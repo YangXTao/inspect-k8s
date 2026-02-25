@@ -4224,6 +4224,11 @@ th {
   font-size: 14px;
 }
 
+.schedule-page .settings-list {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .schedule-page .settings-list th,
 .schedule-page .settings-list td {
   padding: 10px 12px;
@@ -4232,7 +4237,10 @@ th {
 .schedule-page .settings-list .table-wrapper {
   background: transparent;
   max-height: none;
-  overflow: visible;
+  flex: 0 0 auto;
+  min-height: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .schedule-page .schedule-list-filter-row {
