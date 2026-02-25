@@ -4228,10 +4228,15 @@ th {
   overflow: visible;
 }
 
+.schedule-page .schedule-list-filter-row {
+  margin-bottom: 12px;
+}
+
 .schedule-page .schedule-pagination {
-  justify-content: flex-start;
+  justify-content: flex-end;
   align-items: center;
-  margin-top: 12px;
+  margin-left: auto;
+  margin-top: 0;
 }
 
 .history-page .history-filter-row,

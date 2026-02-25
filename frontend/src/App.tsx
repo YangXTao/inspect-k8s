@@ -7939,6 +7939,42 @@ const ScheduleSettingsPanel = ({
             </span>
           </div>
           <div className="settings-list">
+            <div className="history-filter-row schedule-list-filter-row">
+              <div className="history-chip history-chip-select">
+                <span className="history-chip-label">状态筛选</span>
+                <select
+                  value={scheduleStatusFilter}
+                  onChange={(event) =>
+                    setScheduleStatusFilter(
+                      event.target.value as "all" | "enabled" | "disabled"
+                    )
+                  }
+                >
+                  <option value="all">全部</option>
+                  <option value="enabled">启用</option>
+                  <option value="disabled">停用</option>
+                </select>
+              </div>
+              <div className="history-chip history-chip-search">
+                <span className="history-chip-label">关键字</span>
+                <input
+                  type="text"
+                  value={scheduleKeyword}
+                  onChange={(event) => setScheduleKeyword(event.target.value)}
+                  placeholder="按集群 / 运行时间 / 巡检模板搜索"
+                />
+                {scheduleKeyword && (
+                  <button
+                    type="button"
+                    className="history-search-clear"
+                    onClick={() => setScheduleKeyword("")}
+                    aria-label="清空关键字"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            </div>
             <div className="history-toolbar">
               {!readOnly && (
                 <div className="history-selection">
@@ -7963,42 +7999,71 @@ const ScheduleSettingsPanel = ({
                   </button>
                 </div>
               )}
-              <div className="history-filter-row">
-                <div className="history-chip history-chip-select">
-                  <span className="history-chip-label">状态筛选</span>
-                  <select
-                    value={scheduleStatusFilter}
-                    onChange={(event) =>
-                      setScheduleStatusFilter(
-                        event.target.value as "all" | "enabled" | "disabled"
-                      )
-                    }
-                  >
-                    <option value="all">全部</option>
-                    <option value="enabled">启用</option>
-                    <option value="disabled">停用</option>
-                  </select>
-                </div>
-                <div className="history-chip history-chip-search">
-                  <span className="history-chip-label">关键字</span>
-                  <input
-                    type="text"
-                    value={scheduleKeyword}
-                    onChange={(event) => setScheduleKeyword(event.target.value)}
-                    placeholder="按集群 / 运行时间 / 巡检模板搜索"
-                  />
-                  {scheduleKeyword && (
+              {filteredSchedules.length > 0 && (
+                <div className="history-pagination-controls schedule-pagination">
+                  <label className="page-size-control">
+                    每页
+                    <select
+                      value={schedulePageSize}
+                      onChange={(event) =>
+                        setSchedulePageSize(Number(event.target.value))
+                      }
+                      className="page-size-select"
+                    >
+                      {[10, 20, 50].map((size) => (
+                        <option key={size} value={size}>
+                          {size}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="history-pagination-buttons">
                     <button
                       type="button"
-                      className="history-search-clear"
-                      onClick={() => setScheduleKeyword("")}
-                      aria-label="清空关键字"
+                      className="secondary"
+                      onClick={() => handleSchedulePageChange(-1)}
+                      disabled={schedulePage <= 1}
                     >
-                      ×
+                      上一页
                     </button>
-                  )}
+                    <span>
+                      第 {schedulePage} / {scheduleTotalPages} 页
+                    </span>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => handleSchedulePageChange(1)}
+                      disabled={schedulePage >= scheduleTotalPages}
+                    >
+                      下一页
+                    </button>
+                  </div>
+                  <label className="history-page-jump">
+                    跳转
+                    <input
+                      type="number"
+                      min={1}
+                      value={schedulePageInput}
+                      onChange={(event) =>
+                        setSchedulePageInput(event.target.value)
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          handleSchedulePageJump();
+                        }
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={handleSchedulePageJump}
+                  >
+                    确定
+                  </button>
                 </div>
-              </div>
+              )}
             </div>
             <div className="table-wrapper">
               {filteredSchedules.length === 0 ? (
@@ -8119,71 +8184,6 @@ const ScheduleSettingsPanel = ({
                 </table>
               )}
             </div>
-            {filteredSchedules.length > 0 && (
-              <div className="history-pagination-controls schedule-pagination">
-                <label className="page-size-control">
-                  每页
-                  <select
-                    value={schedulePageSize}
-                    onChange={(event) =>
-                      setSchedulePageSize(Number(event.target.value))
-                    }
-                    className="page-size-select"
-                  >
-                    {[10, 20, 50].map((size) => (
-                      <option key={size} value={size}>
-                        {size}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="history-pagination-buttons">
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => handleSchedulePageChange(-1)}
-                    disabled={schedulePage <= 1}
-                  >
-                    上一页
-                  </button>
-                  <span>
-                    第 {schedulePage} / {scheduleTotalPages} 页
-                  </span>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => handleSchedulePageChange(1)}
-                    disabled={schedulePage >= scheduleTotalPages}
-                  >
-                    下一页
-                  </button>
-                </div>
-                <label className="history-page-jump">
-                  跳转
-                  <input
-                    type="number"
-                    min={1}
-                    value={schedulePageInput}
-                    onChange={(event) =>
-                      setSchedulePageInput(event.target.value)
-                    }
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        handleSchedulePageJump();
-                      }
-                    }}
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={handleSchedulePageJump}
-                >
-                  确定
-                </button>
-              </div>
-            )}
           </div>
         </section>
       </div>
