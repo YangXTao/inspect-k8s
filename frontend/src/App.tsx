@@ -463,6 +463,25 @@ const resolveTemplateLabel = (operator?: string | null) => {
   return trimmed;
 };
 
+const resolveTemplateLabelForDetail = (operator?: string | null) => {
+  const trimmed = (operator ?? "").trim();
+  if (!trimmed) {
+    return "-";
+  }
+  if (trimmed === CONNECTION_TEST_OPERATOR) {
+    return "系统校验";
+  }
+  if (trimmed.endsWith(SCHEDULE_OPERATOR_SUFFIX)) {
+    const base = trimmed.slice(0, -SCHEDULE_OPERATOR_SUFFIX.length).trim();
+    const parts = base.split(" | ").map((part) => part.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      return parts[1];
+    }
+    return base || "-";
+  }
+  return trimmed;
+};
+
 const resolveDefaultBaseUrl = () => {
   if (typeof window === "undefined") {
     return appConfig.apiBaseUrl;
@@ -9718,6 +9737,12 @@ const RunDetailView = ({
   const canDownloadReports = license.canDownloadReports;
   const canManageHistoryActions = canUpdateHistory;
   const canRemoveHistory = canDeleteHistory;
+  const handleStatusFilterClick = useCallback(
+    (nextStatus: InspectionResultStatus) => {
+      setStatusFilter((prev) => (prev === nextStatus ? "all" : nextStatus));
+    },
+    []
+  );
 
   useAutoClearError(error, setError);
 
@@ -10298,7 +10323,7 @@ const RunDetailView = ({
           </div>
           <div>
             <strong>巡检模板：</strong>
-            {resolveTemplateLabel(summaryRun?.operator)}
+            {resolveTemplateLabelForDetail(summaryRun?.operator)}
           </div>
           <div>
             <strong>巡检类型：</strong>
@@ -10343,23 +10368,6 @@ const RunDetailView = ({
           <div className="inspection-results-toolbar">
             <div className="inspection-results-filters">
               <label>
-                状态筛选
-                <select
-                  value={statusFilter}
-                  onChange={(event) =>
-                    setStatusFilter(event.target.value as
-                      | InspectionResultStatus
-                      | "all")
-                  }
-                >
-                  <option value="all">全部</option>
-                  <option value="passed">通过</option>
-                  <option value="warning">警告</option>
-                  <option value="critical">严重</option>
-                  <option value="failed">失败</option>
-                </select>
-              </label>
-              <label>
                 关键字
                 <input
                   type="search"
@@ -10372,16 +10380,46 @@ const RunDetailView = ({
           </div>
         </div>
         <div className="inspection-result-stats">
-          <span className="status-pill success">
+          <button
+            type="button"
+            className={`status-pill success status-pill-filter${
+              statusFilter === "passed" ? " active" : ""
+            }`}
+            onClick={() => handleStatusFilterClick("passed")}
+            aria-pressed={statusFilter === "passed"}
+          >
             通过 {resultStats.passed}
-          </span>
-          <span className="status-pill warning">
+          </button>
+          <button
+            type="button"
+            className={`status-pill warning status-pill-filter${
+              statusFilter === "warning" ? " active" : ""
+            }`}
+            onClick={() => handleStatusFilterClick("warning")}
+            aria-pressed={statusFilter === "warning"}
+          >
             警告 {resultStats.warning}
-          </span>
-          <span className="status-pill critical">
+          </button>
+          <button
+            type="button"
+            className={`status-pill critical status-pill-filter${
+              statusFilter === "critical" ? " active" : ""
+            }`}
+            onClick={() => handleStatusFilterClick("critical")}
+            aria-pressed={statusFilter === "critical"}
+          >
             严重 {resultStats.critical}
-          </span>
-          <span className="status-pill danger">失败 {resultStats.failed}</span>
+          </button>
+          <button
+            type="button"
+            className={`status-pill danger status-pill-filter${
+              statusFilter === "failed" ? " active" : ""
+            }`}
+            onClick={() => handleStatusFilterClick("failed")}
+            aria-pressed={statusFilter === "failed"}
+          >
+            失败 {resultStats.failed}
+          </button>
         </div>
 
         <div className="table-wrapper">
