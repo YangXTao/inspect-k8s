@@ -1757,6 +1757,12 @@ th {
   background: #fff;
 }
 
+.inspection-result-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .status-pill.paused {
   background: #e2e8f0;
   color: #1f2937;
