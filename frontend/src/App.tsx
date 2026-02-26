@@ -8143,9 +8143,6 @@ const ScheduleSettingsPanel = ({
                           <td>
                             <div className="schedule-cell">
                               <span>{scheduleTimeSummary.replace(/^运行时间：/, "")}</span>
-                              <span className="schedule-muted">
-                                Cron：{schedule.cron}
-                              </span>
                             </div>
                           </td>
                           <td>
