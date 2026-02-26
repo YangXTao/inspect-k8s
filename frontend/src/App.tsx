@@ -1827,13 +1827,21 @@ const DashboardOverviewView = ({
                 name: entry.name,
                 value: `${value.toFixed(2)}%`,
                 color: entry.color,
+                rawValue: value,
               };
             })
-            .filter(Boolean) as Array<{
-            name: string;
-            value: string;
-            color: string;
-          }>;
+            .filter(
+              (
+                line
+              ): line is {
+                name: string;
+                value: string;
+                color: string;
+                rawValue: number;
+              } => line !== null
+            )
+            .sort((a, b) => b.rawValue - a.rawValue)
+            .map(({ rawValue: _rawValue, ...line }) => line);
     const highlightPoints =
       currentHover.index === null
         ? []
