@@ -5,7 +5,7 @@ import logging
 import os
 import threading
 from datetime import date as date_type
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional
 
 from sqlalchemy.orm import Session
@@ -16,6 +16,16 @@ from .database import SessionLocal
 from .license import LicenseError, license_manager
 
 logger = logging.getLogger(__name__)
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:  # pragma: no cover - fallback for environments without zoneinfo
+    ZoneInfo = None
+
+try:
+    BEIJING_TZ = ZoneInfo("Asia/Shanghai") if ZoneInfo else timezone(timedelta(hours=8))
+except Exception:  # pragma: no cover - fallback for missing tz data
+    BEIJING_TZ = timezone(timedelta(hours=8))
 
 DEFAULT_METRICS_RETENTION_DAYS = int(os.getenv("METRICS_RETENTION_DAYS", "30"))
 DEFAULT_METRICS_CLEANUP_INTERVAL_HOURS = int(
@@ -246,7 +256,8 @@ class InspectionScheduler:
         logger.info("Inspection scheduler stopped.")
 
     def _tick(self) -> None:
-        now = datetime.now()
+        now_utc = datetime.utcnow()
+        now_local = now_utc.replace(tzinfo=timezone.utc).astimezone(BEIJING_TZ)
         try:
             license_manager.require(["inspections"])
         except LicenseError as exc:
@@ -260,16 +271,16 @@ class InspectionScheduler:
                 _expire_stuck_runs(db)
             except Exception:
                 logger.exception("清理超时巡检任务失败。")
-            self._cleanup_metrics(db, now)
-            self._cleanup_reports(db, now)
+            self._cleanup_metrics(db, now_utc)
+            self._cleanup_reports(db, now_utc)
             schedules = crud.list_inspection_schedules(db)
             for schedule in schedules:
                 if not schedule.is_enabled:
                     continue
-                if _should_skip_by_minute(schedule, now):
+                if _should_skip_by_minute(schedule, now_utc):
                     continue
                 try:
-                    if not cron_matches(schedule.cron, now):
+                    if not cron_matches(schedule.cron, now_local):
                         continue
                 except CronValidationError:
                     logger.warning(
@@ -285,8 +296,8 @@ class InspectionScheduler:
                     multi_version_label=self._multi_version_label,
                 )
                 if created > 0:
-                    schedule.last_run_at = now
-                    schedule.updated_at = now
+                    schedule.last_run_at = now_utc
+                    schedule.updated_at = now_utc
                     db.add(schedule)
                     db.commit()
 
