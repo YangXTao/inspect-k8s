@@ -841,14 +841,14 @@ const renderTimeSortHeader = (
           active && direction === "desc" ? "active" : ""
         }`}
       >
-        &gt;
+        ˄
       </span>
       <span
         className={`time-sort-arrow ${
           active && direction === "asc" ? "active" : ""
         }`}
       >
-        &lt;
+        ˅
       </span>
     </button>
   </span>
