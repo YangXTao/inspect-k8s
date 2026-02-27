@@ -803,6 +803,57 @@ const formatDate = (value?: string | null) => {
   return BEIJING_TIME_FORMATTER.format(parsed);
 };
 
+const toTimestamp = (value?: string | null) => {
+  if (!value) {
+    return 0;
+  }
+
+  let normalised = value.trim();
+  const hasTimezoneSuffix = /([+-]\d\d:\d\d|[zZ])$/.test(normalised);
+  if (!hasTimezoneSuffix) {
+    normalised = normalised.replace(" ", "T");
+    normalised = `${normalised}Z`;
+  }
+
+  const parsed = new Date(normalised);
+  if (Number.isNaN(parsed.getTime())) {
+    return 0;
+  }
+  return parsed.getTime();
+};
+
+const renderTimeSortHeader = (
+  label: string,
+  active: boolean,
+  direction: "asc" | "desc",
+  onClick: () => void
+) => (
+  <span className="time-sort-header">
+    {label}
+    <button
+      type="button"
+      className="time-sort"
+      onClick={onClick}
+      aria-label={`${label}排序`}
+    >
+      <span
+        className={`time-sort-arrow ${
+          active && direction === "desc" ? "active" : ""
+        }`}
+      >
+        &gt;
+      </span>
+      <span
+        className={`time-sort-arrow ${
+          active && direction === "asc" ? "active" : ""
+        }`}
+      >
+        &lt;
+      </span>
+    </button>
+  </span>
+);
+
 const resolveAuditActionLabel = (action?: string | null) => {
   const normalized = (action ?? "").trim();
   if (!normalized) {
@@ -3672,6 +3723,10 @@ const HistoryView = ({
     InspectionRunStatus | "all"
   >("all");
   const [historyKeyword, setHistoryKeyword] = useState("");
+  const [historyTimeSort, setHistoryTimeSort] = useState<{
+    key: "created_at" | "completed_at" | null;
+    direction: "asc" | "desc";
+  }>({ key: null, direction: "desc" });
 
   const [pageSize, setPageSize] = useState<number>(RUN_PAGE_SIZE_OPTIONS[0]);
   const [page, setPage] = useState(1);
@@ -3713,6 +3768,40 @@ const HistoryView = ({
     runDisplayIds,
   ]);
 
+  const sortedRuns = useMemo(() => {
+    if (!historyTimeSort.key) {
+      return filteredRuns;
+    }
+    const next = filteredRuns.slice();
+    next.sort((a, b) => {
+      const timeA = toTimestamp(
+        historyTimeSort.key === "created_at" ? a.created_at : a.completed_at
+      );
+      const timeB = toTimestamp(
+        historyTimeSort.key === "created_at" ? b.created_at : b.completed_at
+      );
+      if (timeA === timeB) {
+        return a.id - b.id;
+      }
+      return historyTimeSort.direction === "asc"
+        ? timeA - timeB
+        : timeB - timeA;
+    });
+    return next;
+  }, [filteredRuns, historyTimeSort]);
+
+  const toggleHistoryTimeSort = (key: "created_at" | "completed_at") => {
+    setHistoryTimeSort((prev) => {
+      if (prev.key !== key) {
+        return { key, direction: "desc" };
+      }
+      return {
+        key,
+        direction: prev.direction === "desc" ? "asc" : "desc",
+      };
+    });
+  };
+
   useEffect(() => {
     setPage(1);
     setPageInput("");
@@ -3723,9 +3812,14 @@ const HistoryView = ({
     setPageInput("");
   }, [historyStatusFilter, historyKeyword]);
 
+  useEffect(() => {
+    setPage(1);
+    setPageInput("");
+  }, [historyTimeSort.key, historyTimeSort.direction]);
+
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(filteredRuns.length / Math.max(pageSize, 1))),
-    [filteredRuns.length, pageSize]
+    () => Math.max(1, Math.ceil(sortedRuns.length / Math.max(pageSize, 1))),
+    [sortedRuns.length, pageSize]
   );
 
   useEffect(() => {
@@ -3747,8 +3841,8 @@ const HistoryView = ({
 
   const pagedRuns = useMemo(() => {
     const start = (page - 1) * pageSize;
-    return filteredRuns.slice(start, start + pageSize);
-  }, [filteredRuns, page, pageSize]);
+    return sortedRuns.slice(start, start + pageSize);
+  }, [sortedRuns, page, pageSize]);
 
   const visibleSelectedCount = useMemo(
     () =>
@@ -3988,8 +4082,26 @@ const HistoryView = ({
                 <th>巡检类型</th>
                 <th>状态</th>
                 <th>Agent 状态</th>
-                <th>开始时间</th>
-                <th>结束时间</th>
+                <th>
+                  {renderTimeSortHeader(
+                    "开始时间",
+                    historyTimeSort.key === "created_at",
+                    historyTimeSort.key === "created_at"
+                      ? historyTimeSort.direction
+                      : "desc",
+                    () => toggleHistoryTimeSort("created_at")
+                  )}
+                </th>
+                <th>
+                  {renderTimeSortHeader(
+                    "结束时间",
+                    historyTimeSort.key === "completed_at",
+                    historyTimeSort.key === "completed_at"
+                      ? historyTimeSort.direction
+                      : "desc",
+                    () => toggleHistoryTimeSort("completed_at")
+                  )}
+                </th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -4126,6 +4238,9 @@ const AuditView = () => {
   const [keyword, setKeyword] = useState("");
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
+  const [auditTimeSort, setAuditTimeSort] = useState<"asc" | "desc" | null>(
+    null
+  );
   const [pageSize, setPageSize] = useState<number>(
     AUDIT_PAGE_SIZE_OPTIONS[0]
   );
@@ -4148,6 +4263,26 @@ const AuditView = () => {
     setPage(1);
     setPageInput("");
   }, [actionFilter, entityFilter, keyword, startTime, endTime, pageSize]);
+
+  const sortedLogs = useMemo(() => {
+    if (!auditTimeSort) {
+      return logs;
+    }
+    const next = logs.slice();
+    next.sort((a, b) => {
+      const timeA = toTimestamp(a.created_at);
+      const timeB = toTimestamp(b.created_at);
+      if (timeA === timeB) {
+        return a.id - b.id;
+      }
+      return auditTimeSort === "asc" ? timeA - timeB : timeB - timeA;
+    });
+    return next;
+  }, [logs, auditTimeSort]);
+
+  const toggleAuditTimeSort = () => {
+    setAuditTimeSort((prev) => (prev === "desc" ? "asc" : "desc"));
+  };
 
   const toIsoString = (value: string) => {
     const trimmed = value.trim();
@@ -4409,7 +4544,14 @@ const AuditView = () => {
           <table>
             <thead>
               <tr>
-                <th>时间</th>
+                <th>
+                  {renderTimeSortHeader(
+                    "时间",
+                    auditTimeSort !== null,
+                    auditTimeSort ?? "desc",
+                    toggleAuditTimeSort
+                  )}
+                </th>
                 <th>用户</th>
                 <th>操作类型</th>
                 <th>对象</th>
@@ -4418,7 +4560,7 @@ const AuditView = () => {
               </tr>
             </thead>
             <tbody>
-              {logs.map((entry) => (
+              {sortedLogs.map((entry) => (
                 <tr key={entry.id}>
                   <td>{formatDate(entry.created_at)}</td>
                   <td>{entry.username || "-"}</td>
@@ -4535,6 +4677,10 @@ const ClusterDetailView = ({
   );
   const [clusterRunPage, setClusterRunPage] = useState(1);
   const [clusterRunPageInput, setClusterRunPageInput] = useState("");
+  const [clusterRunTimeSort, setClusterRunTimeSort] = useState<{
+    key: "created_at" | "completed_at" | null;
+    direction: "asc" | "desc";
+  }>({ key: null, direction: "desc" });
   const [templateKeyword, setTemplateKeyword] = useState("");
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [selectedTemplateIds, setSelectedTemplateIds] = useState<number[]>([]);
@@ -4580,18 +4726,37 @@ const ClusterDetailView = ({
     if (!cluster) {
       return [];
     }
-    return runs
-      .filter((run) => run.cluster_id === cluster.id)
-      .slice()
-      .sort((a, b) => {
-        const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
-        if (timeA === timeB) {
-          return b.id - a.id;
-        }
-        return timeB - timeA;
-      });
-  }, [cluster, runs]);
+    const next = runs.filter((run) => run.cluster_id === cluster.id).slice();
+    const sortKey = clusterRunTimeSort.key ?? "created_at";
+    const direction = clusterRunTimeSort.key
+      ? clusterRunTimeSort.direction
+      : "desc";
+    next.sort((a, b) => {
+      const timeA = toTimestamp(
+        sortKey === "created_at" ? a.created_at : a.completed_at
+      );
+      const timeB = toTimestamp(
+        sortKey === "created_at" ? b.created_at : b.completed_at
+      );
+      if (timeA === timeB) {
+        return direction === "asc" ? a.id - b.id : b.id - a.id;
+      }
+      return direction === "asc" ? timeA - timeB : timeB - timeA;
+    });
+    return next;
+  }, [cluster, runs, clusterRunTimeSort]);
+
+  const toggleClusterRunTimeSort = (key: "created_at" | "completed_at") => {
+    setClusterRunTimeSort((prev) => {
+      if (prev.key !== key) {
+        return { key, direction: "desc" };
+      }
+      return {
+        key,
+        direction: prev.direction === "desc" ? "asc" : "desc",
+      };
+    });
+  };
 
   const sortedTemplates = useMemo(
     () => templates.slice().sort((a, b) => (a.name || "").localeCompare(b.name || "")),
@@ -4701,6 +4866,11 @@ const ClusterDetailView = ({
     setClusterRunPage(1);
     setClusterRunPageInput("");
   }, [clusterRunPageSize, resolvedClusterId]);
+
+  useEffect(() => {
+    setClusterRunPage(1);
+    setClusterRunPageInput("");
+  }, [clusterRunTimeSort.key, clusterRunTimeSort.direction]);
 
   useEffect(() => {
     setClusterRunPage((prev) =>
@@ -5168,8 +5338,26 @@ const ClusterDetailView = ({
                   <th>巡检类型</th>
                   <th>状态</th>
                   <th>Agent 状态</th>
-                  <th>开始时间</th>
-                  <th>结束时间</th>
+                  <th>
+                    {renderTimeSortHeader(
+                      "开始时间",
+                      clusterRunTimeSort.key === "created_at",
+                      clusterRunTimeSort.key === "created_at"
+                        ? clusterRunTimeSort.direction
+                        : "desc",
+                      () => toggleClusterRunTimeSort("created_at")
+                    )}
+                  </th>
+                  <th>
+                    {renderTimeSortHeader(
+                      "结束时间",
+                      clusterRunTimeSort.key === "completed_at",
+                      clusterRunTimeSort.key === "completed_at"
+                        ? clusterRunTimeSort.direction
+                        : "desc",
+                      () => toggleClusterRunTimeSort("completed_at")
+                    )}
+                  </th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -5601,6 +5789,9 @@ const InspectionSettingsPanel = ({
     "all" | "command" | "promql"
   >("all");
   const [itemFilterVersion, setItemFilterVersion] = useState<string>("all");
+  const [itemTimeSort, setItemTimeSort] = useState<"asc" | "desc" | null>(
+    null
+  );
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
   const [pageInput, setPageInput] = useState("");
@@ -5871,6 +6062,22 @@ const InspectionSettingsPanel = ({
     );
   }, [itemFilterType, itemFilterVersion, sortedItems]);
 
+  const timeSortedItems = useMemo(() => {
+    if (!itemTimeSort) {
+      return filteredItems;
+    }
+    const next = filteredItems.slice();
+    next.sort((a, b) => {
+      const timeA = toTimestamp(a.updated_at);
+      const timeB = toTimestamp(b.updated_at);
+      if (timeA === timeB) {
+        return a.id - b.id;
+      }
+      return itemTimeSort === "asc" ? timeA - timeB : timeB - timeA;
+    });
+    return next;
+  }, [filteredItems, itemTimeSort]);
+
   const filteredItemIdSet = useMemo(
     () => new Set(filteredItems.map((item) => item.id)),
     [filteredItems]
@@ -5921,6 +6128,10 @@ const InspectionSettingsPanel = ({
     await onImport(file);
   };
 
+  const toggleItemTimeSort = () => {
+    setItemTimeSort((prev) => (prev === "desc" ? "asc" : "desc"));
+  };
+
   useEffect(() => {
     setSelectedIds((prev) =>
       prev.filter((id) => items.some((item) => item.id === id))
@@ -5933,13 +6144,18 @@ const InspectionSettingsPanel = ({
   );
   const pagedItems = useMemo(() => {
     const start = (page - 1) * pageSize;
-    return filteredItems.slice(start, start + pageSize);
-  }, [filteredItems, page, pageSize]);
+    return timeSortedItems.slice(start, start + pageSize);
+  }, [timeSortedItems, page, pageSize]);
 
   useEffect(() => {
     setPage(1);
     setPageInput("");
   }, [pageSize, totalItems]);
+
+  useEffect(() => {
+    setPage(1);
+    setPageInput("");
+  }, [itemTimeSort]);
 
   useEffect(() => {
     setPage(1);
@@ -6187,7 +6403,14 @@ const InspectionSettingsPanel = ({
                         <th className="th-nowrap">Prometheus 版本</th>
                       )}
                       <th>类型</th>
-                      <th>更新时间</th>
+                      <th>
+                        {renderTimeSortHeader(
+                          "更新时间",
+                          itemTimeSort !== null,
+                          itemTimeSort ?? "desc",
+                          toggleItemTimeSort
+                        )}
+                      </th>
                       <th>操作</th>
                     </tr>
                   </thead>
@@ -7160,6 +7383,9 @@ const ScheduleSettingsPanel = ({
   const [scheduleStatusFilter, setScheduleStatusFilter] = useState<
     "all" | "enabled" | "disabled"
   >("all");
+  const [scheduleTimeSort, setScheduleTimeSort] = useState<
+    "asc" | "desc" | null
+  >(null);
   const [schedulePageSize, setSchedulePageSize] = useState(10);
   const [schedulePage, setSchedulePage] = useState(1);
   const [schedulePageInput, setSchedulePageInput] = useState("");
@@ -7329,7 +7555,7 @@ const ScheduleSettingsPanel = ({
   useEffect(() => {
     setSchedulePage(1);
     setSchedulePageInput("");
-  }, [schedulePageSize, scheduleKeyword, scheduleStatusFilter]);
+  }, [schedulePageSize, scheduleKeyword, scheduleStatusFilter, scheduleTimeSort]);
 
   useEffect(() => {
     if (formError && scheduleFormErrorRef.current) {
@@ -7750,13 +7976,29 @@ const ScheduleSettingsPanel = ({
     getScheduleClusterName,
   ]);
 
+  const timeSortedSchedules = useMemo(() => {
+    if (!scheduleTimeSort) {
+      return filteredSchedules;
+    }
+    const next = filteredSchedules.slice();
+    next.sort((a, b) => {
+      const timeA = toTimestamp(a.last_run_at);
+      const timeB = toTimestamp(b.last_run_at);
+      if (timeA === timeB) {
+        return a.id - b.id;
+      }
+      return scheduleTimeSort === "asc" ? timeA - timeB : timeB - timeA;
+    });
+    return next;
+  }, [filteredSchedules, scheduleTimeSort]);
+
   const scheduleTotalPages = useMemo(
     () =>
       Math.max(
         1,
-        Math.ceil(filteredSchedules.length / Math.max(schedulePageSize, 1))
+        Math.ceil(timeSortedSchedules.length / Math.max(schedulePageSize, 1))
       ),
-    [filteredSchedules.length, schedulePageSize]
+    [timeSortedSchedules.length, schedulePageSize]
   );
 
   useEffect(() => {
@@ -7767,8 +8009,8 @@ const ScheduleSettingsPanel = ({
 
   const pagedSchedules = useMemo(() => {
     const start = (schedulePage - 1) * schedulePageSize;
-    return filteredSchedules.slice(start, start + schedulePageSize);
-  }, [filteredSchedules, schedulePage, schedulePageSize]);
+    return timeSortedSchedules.slice(start, start + schedulePageSize);
+  }, [timeSortedSchedules, schedulePage, schedulePageSize]);
 
   const visibleSelectedScheduleCount = useMemo(
     () =>
@@ -7854,6 +8096,10 @@ const ScheduleSettingsPanel = ({
     }
     setSchedulePageInput("");
   }, [schedulePageInput, scheduleTotalPages]);
+
+  const toggleScheduleTimeSort = () => {
+    setScheduleTimeSort((prev) => (prev === "desc" ? "asc" : "desc"));
+  };
 
   const summarizeNames = useCallback((names: string[]) => {
       if (names.length === 0) {
@@ -8104,7 +8350,14 @@ const ScheduleSettingsPanel = ({
                       <th>运行时间</th>
                       <th>巡检模板</th>
                       <th>状态</th>
-                      <th>最近执行</th>
+                      <th>
+                        {renderTimeSortHeader(
+                          "最近执行",
+                          scheduleTimeSort !== null,
+                          scheduleTimeSort ?? "desc",
+                          toggleScheduleTimeSort
+                        )}
+                      </th>
                       <th>操作</th>
                     </tr>
                   </thead>
@@ -8293,8 +8546,9 @@ const ScheduleSettingsPanel = ({
                   </div>
                   <div className="schedule-form-field schedule-form-enable">
                     <div className="schedule-form-label">启用</div>
-                    <label className="switch-row">
+                    <div className="switch-row switch-row-knob">
                       <input
+                        id="schedule-enable-toggle"
                         className="switch-input"
                         type="checkbox"
                         checked={formEnabled}
@@ -8302,7 +8556,21 @@ const ScheduleSettingsPanel = ({
                         disabled={submitting || readOnly}
                       />
                       <span className="switch-slider" aria-hidden />
-                    </label>
+                      <button
+                        type="button"
+                        className="switch-knob"
+                        onClick={() => {
+                          if (submitting || readOnly) {
+                            return;
+                          }
+                          setFormEnabled((prev) => !prev);
+                        }}
+                        disabled={submitting || readOnly}
+                        role="switch"
+                        aria-checked={formEnabled}
+                        aria-label="启用开关"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -14645,7 +14913,14 @@ const hasManualKubeconfig = useMemo(
         setScheduleNotice(null);
         return;
       }
-      const label = schedule.name?.trim() || `定时巡检 #${schedule.id}`;
+      const rawName = schedule.name?.trim() || `定时巡检 #${schedule.id}`;
+      const timeLabel = describeCronExpression(schedule.cron).replace(
+        /^运行时间：/,
+        ""
+      );
+      const label = rawName.includes(" | ")
+        ? `${rawName.split(" | ").slice(0, 2).join(" | ")} | ${timeLabel}`
+        : `${rawName} | ${timeLabel}`;
       setConfirmState({
         title: "删除定时巡检",
         message: `确认删除定时任务(${label})？该操作不可恢复。`,
