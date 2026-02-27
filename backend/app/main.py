@@ -1427,6 +1427,14 @@ def _resolve_schedule_last_run_at(
     db: Session,
     schedule: models.InspectionSchedule,
 ) -> Optional[datetime]:
+    if getattr(schedule, "id", None):
+        latest_by_id = (
+            db.query(func.max(models.InspectionRun.created_at))
+            .filter(models.InspectionRun.schedule_id == schedule.id)
+            .scalar()
+        )
+        if latest_by_id:
+            return latest_by_id
     name = (schedule.name or "").strip()
     if not name:
         return None
@@ -3848,20 +3856,16 @@ def list_inspection_schedules(
 ):
     _require_permission(db, current_user, "schedule.read", "定时巡检查看")
     schedules = crud.list_inspection_schedules(db)
-    needs_commit = False
+    results: list[schemas.InspectionScheduleOut] = []
     for schedule in schedules:
         latest_run_at = _resolve_schedule_last_run_at(db, schedule)
-        if not latest_run_at:
-            continue
-        if schedule.last_run_at is None or latest_run_at > schedule.last_run_at:
-            schedule.last_run_at = latest_run_at
-            needs_commit = True
-    if needs_commit:
-        db.commit()
-    return [
-        schemas.InspectionScheduleOut.model_validate(schedule)
-        for schedule in schedules
-    ]
+        response = schemas.InspectionScheduleOut.model_validate(schedule)
+        if latest_run_at and (
+            response.last_run_at is None or latest_run_at > response.last_run_at
+        ):
+            response.last_run_at = latest_run_at
+        results.append(response)
+    return results
 
 
 @app.post(
@@ -3947,10 +3951,6 @@ def update_inspection_schedule(
                 status_code=400,
                 detail=f"Cron 表达式无效：{exc}",
             )
-    cron_changed = (
-        "cron" in update_payload
-        and str(update_payload.get("cron") or "").strip() != str(schedule.cron or "").strip()
-    )
     if "cluster_ids" in update_payload:
         cluster_ids = _normalize_id_list(update_payload["cluster_ids"] or [])
         _validate_schedule_clusters(db, cluster_ids)
@@ -3976,8 +3976,6 @@ def update_inspection_schedule(
         schedule_id=schedule.id,
     )
     sanitized = schemas.InspectionScheduleUpdate.model_validate(update_payload)
-    if cron_changed:
-        schedule.last_run_at = None
     updated = crud.update_inspection_schedule(db, schedule, sanitized)
     return schemas.InspectionScheduleOut.model_validate(updated)
 
