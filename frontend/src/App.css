@@ -4125,6 +4125,73 @@ th {
   color: #0f172a;
 }
 
+.user-editor-modal .user-password-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.user-editor-modal .password-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.user-editor-modal .password-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #cbd5f5;
+  border-radius: 12px;
+  padding: 0 10px;
+  background: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(248, 250, 252, 0.8);
+}
+
+.user-editor-modal .password-input input {
+  border: none;
+  box-shadow: none;
+  padding: 8px 0;
+  background: transparent;
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.user-editor-modal .password-input input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.user-editor-modal .password-input:focus-within {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+}
+
+.user-editor-modal .password-toggle {
+  border: none;
+  background: transparent;
+  color: #2563eb;
+  font-size: 12px;
+  padding: 0 4px 0 12px;
+  cursor: pointer;
+  border-left: 1px solid #e2e8f0;
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+}
+
+.user-editor-modal .password-toggle:disabled {
+  cursor: not-allowed;
+  color: #94a3b8;
+}
+
+@media (max-width: 720px) {
+  .user-editor-modal .user-password-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .user-role-block {
   display: flex;
   flex-direction: column;

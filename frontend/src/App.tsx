@@ -9274,6 +9274,9 @@ const UserSettingsPanel = ({
   const [formUsername, setFormUsername] = useState("");
   const [formDisplayName, setFormDisplayName] = useState("");
   const [formPassword, setFormPassword] = useState("");
+  const [formPasswordConfirm, setFormPasswordConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [localError, setLocalError] = useState<string | null>(null);
   const readOnly = !license.valid;
@@ -9301,6 +9304,9 @@ const UserSettingsPanel = ({
     setFormUsername("");
     setFormDisplayName("");
     setFormPassword("");
+    setFormPasswordConfirm("");
+    setShowPassword(false);
+    setShowPasswordConfirm(false);
     setSelectedRoles([]);
     setLocalError(null);
     setEditorOpen(true);
@@ -9317,6 +9323,9 @@ const UserSettingsPanel = ({
     setFormUsername(user.username);
     setFormDisplayName(user.display_name || "");
     setFormPassword("");
+    setFormPasswordConfirm("");
+    setShowPassword(false);
+    setShowPasswordConfirm(false);
     setSelectedRoles(roleNames);
     setLocalError(null);
     setEditorOpen(true);
@@ -9340,6 +9349,9 @@ const UserSettingsPanel = ({
     event.preventDefault();
     const trimmedUsername = formUsername.trim();
     const trimmedPassword = formPassword.trim();
+    const trimmedConfirm = formPasswordConfirm.trim();
+    const hasPasswordInput =
+      trimmedPassword.length > 0 || trimmedConfirm.length > 0;
     const editingAdmin = isAdminUser(editingUser);
     if (readOnly) {
       setLocalError(readOnlyMessage);
@@ -9351,6 +9363,10 @@ const UserSettingsPanel = ({
     }
     if (!editingUser && !trimmedPassword) {
       setLocalError("密码不能为空");
+      return;
+    }
+    if (hasPasswordInput && trimmedPassword !== trimmedConfirm) {
+      setLocalError("前后两次输入的密码不匹配");
       return;
     }
     if (!editingAdmin && selectedRoles.length === 0) {
@@ -9543,16 +9559,58 @@ const UserSettingsPanel = ({
                   disabled={submitting || readOnly}
                 />
               </label>
-              <label>
-                登录密码
-                <input
-                  type="password"
-                  value={formPassword}
-                  onChange={(event) => setFormPassword(event.target.value)}
-                  placeholder={editingUser ? "留空则不修改" : "至少 6 位"}
-                  disabled={submitting || readOnly}
-                />
-              </label>
+              <div className="user-password-row">
+                  <label className="password-field">
+                    设置密码
+                    <div className="password-input">
+                      <input
+                        type={showPassword ? "text" : "password"}
+                        value={formPassword}
+                        onChange={(event) => setFormPassword(event.target.value)}
+                        placeholder={editingUser ? "留空则不修改" : "至少 6 位"}
+                        disabled={submitting || readOnly}
+                      />
+                      <button
+                        type="button"
+                        className="password-toggle"
+                        onClick={() => setShowPassword((prev) => !prev)}
+                        aria-pressed={showPassword}
+                        aria-label={showPassword ? "隐藏密码" : "显示密码"}
+                        disabled={submitting || readOnly}
+                      >
+                        {showPassword ? "隐藏" : "显示"}
+                      </button>
+                    </div>
+                  </label>
+                  <label className="password-field">
+                    确认密码
+                    <div className="password-input">
+                      <input
+                        type={showPasswordConfirm ? "text" : "password"}
+                        value={formPasswordConfirm}
+                        onChange={(event) =>
+                          setFormPasswordConfirm(event.target.value)
+                        }
+                        placeholder={
+                          editingUser ? "再次输入密码" : "请再次输入密码"
+                        }
+                        disabled={submitting || readOnly}
+                      />
+                      <button
+                        type="button"
+                        className="password-toggle"
+                        onClick={() =>
+                          setShowPasswordConfirm((prev) => !prev)
+                        }
+                        aria-pressed={showPasswordConfirm}
+                        aria-label={showPasswordConfirm ? "隐藏密码" : "显示密码"}
+                        disabled={submitting || readOnly}
+                      >
+                        {showPasswordConfirm ? "隐藏" : "显示"}
+                      </button>
+                    </div>
+                  </label>
+              </div>
               <div className="user-role-block">
                 <div className="user-role-title">
                   角色授权
