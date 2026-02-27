@@ -837,19 +837,17 @@ const renderTimeSortHeader = (
       aria-label={`${label}排序`}
     >
       <span
-        className={`time-sort-arrow ${
+        className={`time-sort-arrow up ${
           active && direction === "desc" ? "active" : ""
         }`}
-      >
-        ˄
-      </span>
+        aria-hidden="true"
+      />
       <span
-        className={`time-sort-arrow ${
+        className={`time-sort-arrow down ${
           active && direction === "asc" ? "active" : ""
         }`}
-      >
-        ˅
-      </span>
+        aria-hidden="true"
+      />
     </button>
   </span>
 );
